@@ -41,6 +41,9 @@ def generate_launch_description():
     perception_topic = PythonExpression([
         "'car/debug_perception' if '", use_debug_perception, "' == 'true' else 'perception/entities'"
     ])
+    consensus_topic = PythonExpression([
+        "'car/debug_state' if '", use_debug_perception, "' == 'true' else 'consensus/car_state'"
+    ])
 
     # --- 3. NODE DEFINITIONS ---
 
@@ -61,6 +64,14 @@ def generate_launch_description():
     )
 
     # Runtime Nodes
+    #consensus_node = Node(
+    #    condition=UnlessCondition(use_debug_perception),
+    #    package='mirena_consensus', 
+    #    executable='mirena_consensus', 
+    #    name='mirena_consensus',
+    #    parameters=common_params,
+    #)
+
     perception_node = Node(
         condition=UnlessCondition(use_debug_perception),
         package='mirena_perception', 
@@ -74,7 +85,7 @@ def generate_launch_description():
         executable='mirena_slam', 
         name='mirena_slam',
         parameters=common_params,
-        remappings=[('perception/entities', perception_topic)]
+        remappings=[('perception/entities', perception_topic), ('consensus/car_state', consensus_topic)]
     )
 
     planning_node = LifecycleNode(
@@ -89,7 +100,8 @@ def generate_launch_description():
         package='mirena_control', 
         executable='control_node', 
         name='mirena_control',
-        parameters=common_params
+        parameters=common_params,
+        remappings=[('consensus/car_state', consensus_topic)]
     )
 
     rviz_node = Node(
@@ -106,6 +118,7 @@ def generate_launch_description():
         sim_node,
         supervisor_node,
         perception_node,
+        #consensus_node,
         slam_node,
         planning_node,
         control_node
