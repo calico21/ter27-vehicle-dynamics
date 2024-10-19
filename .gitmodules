@@ -1,6 +1,6 @@
 [submodule "src/mirena_msg"]
 	path = src/mirena_msg
-	url = https://github.com/Ozuba/mirena_msg
+	url = https://github.com/Tecnun-eRacing/mirena_msg
 [submodule "src/mirena_sim"]
 	path = src/mirena_sim
-	url = https://github.com/Ozuba/mirena_sim
+	url = https://github.com/Tecnun-eRacing/mirena_sim
