@@ -1,6 +1,7 @@
 devel/
 log/
 build/
+install/
 bin/
 lib/
 msg_gen/
@@ -25,9 +26,12 @@ devel_isolated/
 *.dox
 *.wikidoc
 
-# eclipse stuff
+# IDE stuff
+# Eclipse
 .project
 .cproject
+# Vscode
+.vscode
 
 # qcreator stuff
 CMakeLists.txt.user
