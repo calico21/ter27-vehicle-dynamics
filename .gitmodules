@@ -4,3 +4,6 @@
 [submodule "src/mirena_sim"]
 	path = src/mirena_sim
 	url = https://github.com/Tecnun-eRacing/mirena_sim
+[submodule "src/mirena_examples"]
+	path = src/mirena_examples
+	url = https://github.com/Tecnun-eRacing/mirena_examples
