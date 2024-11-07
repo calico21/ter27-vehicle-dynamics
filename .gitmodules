@@ -7,3 +7,6 @@
 [submodule "src/mirena_examples"]
 	path = src/mirena_examples
 	url = https://github.com/Tecnun-eRacing/mirena_examples
+[submodule "src/mirena_utilities"]
+	path = src/mirena_utilities
+	url = https://github.com/Tecnun-eRacing/mirena_utilities
