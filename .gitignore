@@ -26,6 +26,9 @@ devel_isolated/
 *.dox
 *.wikidoc
 
+# Ignore virtual enviroment
+.venv/**
+
 # IDE stuff
 # Eclipse
 .project
