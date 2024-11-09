@@ -26,6 +26,9 @@ devel_isolated/
 *.dox
 *.wikidoc
 
+# Ignore virtual enviroment
+.venv/**
+
 # IDE stuff
 # Eclipse
 .project
@@ -53,3 +56,5 @@ qtcreator-*
 
 # Catkin custom files
 CATKIN_IGNORE
+
+/remocon_snapshots/**
