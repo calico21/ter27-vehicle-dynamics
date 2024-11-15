@@ -8,10 +8,11 @@ Before anything ensure you have godot and ros2-desktop installed and sourced, yo
 able to run the `ros2` and `godot` commands in shell.
 To start with simulator development just init and clone all submodules recursivelly and build with colcon.
 ```shell
-git submodule update --init --remote --recursive
-colcon build
+git submodule update --init --remote --recursive # Inicializa recursivamente los submodulos
+rosdep install --from-paths src --ignore-src -r  # Instala las dependencias
+colcon build # Compila todos los paquetes del workspace
 source /install/local_setup.sh # Change for your own shell
-ros2 launch mirena_sim mirena_sim_launch.py
+ros2 launch mirena_sim mirena_sim_launch.py # Lanza el simulador
 ```
 
 > [!TIP]
