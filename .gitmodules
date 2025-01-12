@@ -10,3 +10,6 @@
 [submodule "src/mirena_utilities"]
 	path = src/mirena_utilities
 	url = https://github.com/Tecnun-eRacing/mirena_utilities
+[submodule "src/mirena_vision"]
+	path = src/mirena_vision
+	url = https://github.com/Tecnun-eRacing/mirena_vision
