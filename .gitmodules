@@ -16,3 +16,6 @@
 [submodule "src/mirena_lidar"]
 	path = src/mirena_lidar
 	url = https://github.com/Tecnun-eRacing/mirena_lidar
+[submodule "src/mirena_mapping"]
+	path = src/mirena_mapping
+	url = https://github.com/Tecnun-eRacing/mirena_mapping
