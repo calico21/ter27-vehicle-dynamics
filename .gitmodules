@@ -1,5 +1,5 @@
 [submodule "src/mirena_msg"]
-	path = src/mirena_msg
+	path = src/mirena_common
 	url = https://github.com/Tecnun-eRacing/mirena_msg
 [submodule "src/mirena_sim"]
 	path = src/mirena_sim
