@@ -1,6 +1,6 @@
-[submodule "src/mirena_msg"]
+[submodule "src/mirena_common"]
 	path = src/mirena_common
-	url = https://github.com/Tecnun-eRacing/mirena_msg
+	url = https://github.com/Tecnun-eRacing/mirena_common
 [submodule "src/mirena_sim"]
 	path = src/mirena_sim
 	url = https://github.com/Tecnun-eRacing/mirena_sim
@@ -10,9 +10,12 @@
 [submodule "src/mirena_utilities"]
 	path = src/mirena_utilities
 	url = https://github.com/Tecnun-eRacing/mirena_utilities
-[submodule "src/mirena_vision/mirena_image"]
+[submodule "src/mirena_vision"]
 	path = src/mirena_vision
 	url = https://github.com/Tecnun-eRacing/mirena_vision
 [submodule "src/mirena_lidar"]
 	path = src/mirena_lidar
 	url = https://github.com/Tecnun-eRacing/mirena_lidar
+[submodule "src/mirena_slam"]
+	path = src/mirena_slam
+	url = https://github.com/Tecnun-eRacing/mirena_slam
