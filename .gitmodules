@@ -19,3 +19,6 @@
 [submodule "src/mirena_slam"]
 	path = src/mirena_slam
 	url = https://github.com/Tecnun-eRacing/mirena_slam
+[submodule "mirena_rviz2_plugins"]
+	path = src/mirena_rviz2_plugins
+	url = https://github.com/Tecnun-eRacing/mirena_rviz2_plugins
