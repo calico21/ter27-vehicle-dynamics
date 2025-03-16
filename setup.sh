@@ -1,15 +1,8 @@
 #!/bin/bash
 
 # Color definitions
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-MAGENTA='\033[0;35m'
-CYAN='\033[0;36m'
-WHITE='\033[1;37m'
-BOLD='\033[1m'
-RESET='\033[0m'
+source utils/colors.sh
+
 
 # Banner function
 print_banner(){
@@ -43,67 +36,95 @@ print_banner(){
 
 }
 
-# Function to install dependencies
-install_dependencies() {
-    echo -e "${YELLOW}${BOLD}Installing dependencies...${RESET}"
-    echo -e "${CYAN}>> Installing ROS2 Jazzy Desktop...${RESET}"
-    sudo apt update
-    sudo apt install -y ros-jazzy-desktop
-    echo -e "${CYAN}>> Installing Git LFS...${RESET}"
-    sudo apt install -y git-lfs
-    git lfs install
-    echo -e "${GREEN}${BOLD}✓ Dependencies installed successfully!${RESET}"
-    sleep 2
+
+
+# Function to extract description from a script file
+get_description() {
+    local script_file="$1"
+    local description=""
+    
+    # Look for a description line in the format "# Description: text"
+    description=$(grep -m 1 "^# Description:" "$script_file" | sed 's/# Description: //')
+    
+    # If no description found, try to find any comment line
+    if [ -z "$description" ]; then
+        description=$(grep -m 1 "^#[^!]" "$script_file" | sed 's/^# //')
+    fi
+    
+    # If still no description, use a default one
+    if [ -z "$description" ]; then
+        script_name=$(basename "$script_file" .sh)
+        display_name=$(echo "$script_name" | sed -r 's/(^|_)([a-z])/\U\2/g' | tr '_' ' ')
+        description="Run $display_name operation"
+    fi
+    
+    echo "$description"
 }
 
-# Function to clone modules
-clone_modules() {
-    echo -e "${YELLOW}${BOLD}Cloning all submodules...${RESET}"
-    git submodule init
-    git submodule update --recursive
-    echo -e "${GREEN}${BOLD}✓ All submodules cloned successfully!${RESET}"
-    sleep 2
-}
 
-# Function to update submodules
-update_submodules() {
-    echo -e "${YELLOW}${BOLD}Updating all submodules to latest commit...${RESET}"
-    git submodule update --remote --merge
-    echo -e "${GREEN}${BOLD}✓ All submodules updated successfully!${RESET}"
-    sleep 2
-}
-
-# Function to build
-build_project() {
-    echo -e "${YELLOW}${BOLD}Building project...${RESET}"
-    source /opt/ros/jazzy/setup.bash
-    colcon build
-    echo -e "${GREEN}${BOLD}✓ Build completed!${RESET}"
-    sleep 2
-}
-
-# Main menu
+# Function to show dynamic menu based on available scripts
 show_menu() {
     print_banner
-    echo -e "${WHITE}${BOLD}Please select an option:${RESET}"
-    echo -e "${MAGENTA}1)${RESET} ${GREEN}Install dependencies${RESET} - Install ROS2 Jazzy Desktop and Git LFS"
-    echo -e "${MAGENTA}2)${RESET} ${GREEN}Clone modules${RESET}      - Clone all repository submodules"
-    echo -e "${MAGENTA}3)${RESET} ${GREEN}Update submodules${RESET}  - Update all submodules to latest commit"
-    echo -e "${MAGENTA}4)${RESET} ${GREEN}Build project${RESET}      - Run colcon build"
-    echo -e "${MAGENTA}5)${RESET} ${RED}Exit${RESET}"
+    
+    echo -e "${WHITE}${BOLD}Available operations:${RESET}"
+    
+    # Find all executable scripts in utils directory
+    utils_scripts=()
+    script_names=()
+    descriptions=()
+    counter=1
+    
+    # Collect scripts, excluding colors.sh which is a utility
+    for script in utils/*.sh; do
+        if [ "$(basename "$script")" != "colors.sh" ]; then
+            utils_scripts+=("$script")
+            
+            # Format the script name for display by removing .sh and converting to title case
+            script_name=$(basename "$script" .sh)
+            display_name=$(echo "$script_name" | sed -r 's/(^)([a-z])/\U\2/g' | tr '_' ' ')
+            
+            script_names+=("$display_name")
+            
+            # Get the description from the script file
+            description=$(get_description "$script")
+            descriptions+=("$description")
+            
+            echo -e "${MAGENTA}$counter)${RESET} ${GREEN}${display_name}${RESET} - ${description}"
+            ((counter++))
+        fi
+    done
+    
+    # Add exit option
+    echo -e "${MAGENTA}$counter)${RESET} ${RED}Exit${RESET}"
     echo
-    echo -e "${WHITE}${BOLD}Enter your choice [1-5]:${RESET} "
+    echo -e "${WHITE}${BOLD}Enter your choice [1-$counter]:${RESET} "
     read -r choice
-
-    case $choice in
-        1) install_dependencies; show_menu ;;
-        2) clone_modules; show_menu ;;
-        3) update_submodules; show_menu ;;
-        4) build_project; show_menu ;;
-        5) echo -e "${RED}Exiting...${RESET}"; exit 0 ;;
-        *) echo -e "${RED}Invalid option. Please try again.${RESET}"; sleep 2; show_menu ;;
-    esac
+    
+    # Validate choice
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$counter" ]; then
+        if [ "$choice" -eq "$counter" ]; then
+            echo -e "${RED}Exiting...${RESET}"
+            exit 0
+        else
+            # Execute the selected script
+            source "${utils_scripts[$choice-1]}"
+            # Execute the main function from the script (assuming it has the same name as the file without extension)
+            script_base=$(basename "${utils_scripts[$choice-1]}" .sh)
+            $script_base
+            
+            # Return to menu after execution
+            echo
+            echo -e "${CYAN}Press any key to return to the menu...${RESET}"
+            read -n 1
+            show_menu
+        fi
+    else
+        echo -e "${RED}Invalid option. Please try again.${RESET}"
+        sleep 2
+        show_menu
+    fi
 }
 
-# Start the script
+
+# Start the menu
 show_menu
