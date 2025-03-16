@@ -58,4 +58,4 @@ qtcreator-*
 CATKIN_IGNORE
 
 /remocon_snapshots/**
-lmu/**
+lmu
