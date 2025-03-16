@@ -2,7 +2,7 @@
 
 # Description: Run colcon build for the ROS2 project workspace
 
-build() {
+build_workspace() {
     echo -e "${YELLOW}${BOLD}Building project...${RESET}"
     source /opt/ros/jazzy/setup.bash
     colcon build

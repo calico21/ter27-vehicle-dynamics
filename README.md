@@ -4,16 +4,25 @@ the autopilot system for Tecnun-eRacing TeR Vehicle, you just have to clone the 
 all its submodules, there you can build them and launch them using colcon.
 
 # Getting started
-Before anything ensure you have godot and ros2-desktop installed and sourced, you can check this by being 
-able to run the `ros2` and `godot` commands in shell.
-To start with simulator development just init and clone all submodules recursivelly and build with colcon.
-```shell
-git submodule update --init --remote --recursive # Inicializa recursivamente los submodulos
-rosdep install --from-paths src --ignore-src -r  # Instala las dependencias
-colcon build # Compila todos los paquetes del workspace
-source /install/local_setup.sh # Change for your own shell
-ros2 launch mirena_sim mirena_sim_launch.py # Lanza el simulador
+mirena_ws comes bundled with a helper script manager, to get a fully working enviroment just type:
+
+```{bash}
+./ws_tool.sh
 ```
+and follow the instructions in order.
+
+## Installing dependencies
+Choose the **Install Dependencies**, this will install ros2, git-lfs and other required tools
+
+## Cloning submodules
+Choose the **Clone Submodules**, this will properly download all submodules recursively including the ones
+with Git LFS
+
+## Building the workspace
+Choose the **Build Workspace**, this will properly download all submodules recursively including the ones
+with Git LFS
+
+
 
 > [!TIP]
 > Si fuera fácil, lo haría cualquiera, hazlo.  
