@@ -11,6 +11,8 @@ mirena_ws comes bundled with a helper script manager, to get a fully working env
 ```
 and follow the instructions in order.
 
+> [!TIP]
+> You can instead `source ws_tool.sh` to be able to access it from anywhere using `mwst` 
 ## Installing dependencies
 Choose the **Install Dependencies**, this will install ros2, git-lfs and other required tools
 

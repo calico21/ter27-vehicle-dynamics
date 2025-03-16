@@ -1,5 +1,22 @@
 #!/bin/bash
 
+# Detect wether is being sourced or executed
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    # Script is being executed
+    echo "Adding mwst tool as alias"
+    mwst_path=$(realpath "$(dirname "${BASH_SOURCE[0]}")")/ws_tool.sh
+    echo $mwst_path
+    mwst() {
+        "$mwst_path" "$@"
+    }
+    return 0
+fi
+
+
+
+# All commands always run from the mirena_ws root
+cd "$(dirname "$0")" || exit 1
+
 # Color definitions
 source utils/colors.sh
 
