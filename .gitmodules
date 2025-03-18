@@ -22,3 +22,6 @@
 [submodule "mirena_rviz2_plugins"]
 	path = src/mirena_rviz2_plugins
 	url = https://github.com/Tecnun-eRacing/mirena_rviz2_plugins
+[submodule "mirena_measure"]
+	path = src/mirena_measure
+	url = https://github.com/Tecnun-eRacing/mirena_measure
