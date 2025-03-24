@@ -25,3 +25,6 @@
 [submodule "mirena_measure"]
 	path = src/mirena_consensus
 	url = https://github.com/Tecnun-eRacing/mirena_measure
+[submodule "src/mirena_control"]
+	path = src/mirena_control
+	url = https://github.com/Tecnun-eRacing/mirena_control
