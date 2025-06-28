@@ -4,9 +4,15 @@ the autopilot system for Tecnun-eRacing TeR Vehicle, you just have to clone the 
 all its submodules, there you can build them and launch them using colcon.
 
 # Getting started
-mirena_ws comes bundled with a helper script manager, to get a fully working enviroment just type:
+As always, start by cloning the repository and its submodules:
 
 ```{bash}
+git clone https://github.com/Tecnun-eRacing/mirena_ws --recurse-submodules
+```
+
+mirena_ws comes bundled with a helper script manager, to get a fully working enviroment just type:
+```{bash}
+cd mirena_ws
 ./ws_tool.sh
 ```
 and follow the instructions in order.
