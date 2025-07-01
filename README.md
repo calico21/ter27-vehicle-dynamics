@@ -35,9 +35,7 @@ Finally, you can build the full pipeline with:
 ```{bash}
 cd mirena_ws # Also, make sure ros2's setup file is sourced.
 
-colcon build --packages-select mirena_common
-source ./install/local_setup.zsh
-colcon build --packages-skip mirena_common
+colcon build 
 source ./install/local_setup.zsh
 ```
 
