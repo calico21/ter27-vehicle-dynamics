@@ -25,3 +25,6 @@
 [submodule "src/mirena_control"]
 	path = src/mirena_control
 	url = https://github.com/Tecnun-eRacing/mirena_control
+[submodule "src/mirena_sim"]
+	path = src/mirena_sim
+	url = https://github.com/Tecnun-eRacing/mirena_sim
