@@ -13,7 +13,7 @@ RUN apt update && apt install -y \
 # Use systemwide pip
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
 # Set workspace
-WORKDIR /mirena_ws
+WORKDIR /root/mirena_ws
 
 # Install Oh My Zsh (non-interactively)
 RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
