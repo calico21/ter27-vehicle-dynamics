@@ -19,9 +19,9 @@
 [submodule "mirena_rviz2_plugins"]
 	path = src/mirena_rviz2_plugins
 	url = https://git.eracing.es/Driverless/mirena_rviz2_plugins
-[submodule "mirena_measure"]
+[submodule "mirena_consensus"]
 	path = src/mirena_consensus
-	url = https://git.eracing.es/Driverless/mirena_measure
+	url = https://git.eracing.es/Driverless/mirena_consensus
 [submodule "src/mirena_control"]
 	path = src/mirena_control
 	url = https://git.eracing.es/Driverless/mirena_control
