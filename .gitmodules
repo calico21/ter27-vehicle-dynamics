@@ -1,33 +1,33 @@
 [submodule "src/mirena_common"]
 	path = src/mirena_common
-	url = https://github.com/Tecnun-eRacing/mirena_common
+	url = https://git.eracing.es/Driverless/mirena_common
 [submodule "src/mirena_examples"]
 	path = src/mirena_examples
-	url = https://github.com/Tecnun-eRacing/mirena_examples
+	url = https://git.eracing.es/Driverless/mirena_examples
 [submodule "src/mirena_utilities"]
 	path = src/mirena_utilities
-	url = https://github.com/Tecnun-eRacing/mirena_utilities
+	url = https://git.eracing.es/Driverless/mirena_utilities
 [submodule "src/mirena_vision"]
 	path = src/mirena_vision
-	url = https://github.com/Tecnun-eRacing/mirena_vision
+	url = https://git.eracing.es/Driverless/mirena_vision
 [submodule "src/mirena_lidar"]
 	path = src/mirena_lidar
-	url = https://github.com/Tecnun-eRacing/mirena_lidar
+	url = https://git.eracing.es/Driverless/mirena_lidar
 [submodule "src/mirena_slam"]
 	path = src/mirena_slam
-	url = https://github.com/Tecnun-eRacing/mirena_slam
+	url = https://git.eracing.es/Driverless/mirena_slam
 [submodule "mirena_rviz2_plugins"]
 	path = src/mirena_rviz2_plugins
-	url = https://github.com/Tecnun-eRacing/mirena_rviz2_plugins
+	url = https://git.eracing.es/Driverless/mirena_rviz2_plugins
 [submodule "mirena_measure"]
 	path = src/mirena_consensus
-	url = https://github.com/Tecnun-eRacing/mirena_measure
+	url = https://git.eracing.es/Driverless/mirena_measure
 [submodule "src/mirena_control"]
 	path = src/mirena_control
-	url = https://github.com/Tecnun-eRacing/mirena_control
+	url = https://git.eracing.es/Driverless/mirena_control
 [submodule "src/mirena_sim"]
 	path = src/mirena_sim
-	url = https://github.com/Tecnun-eRacing/mirena_sim
+	url = https://git.eracing.es/Driverless/mirena_sim
 [submodule "src/mirena_tests"]
 	path = src/mirena_tests
-	url = https://github.com/Tecnun-eRacing/mirena_tests.git
+	url = https://git.eracing.es/Driverless/mirena_tests.git
