@@ -1,0 +1,36 @@
+{
+  "name": "mirena_ws",
+  "build": {
+    "dockerfile": "../docker/Dockerfile",
+    "context": "../docker/"
+  },
+  "runArgs": [
+    "--net=host",
+    "--device=/dev/dri:/dev/dri",
+    "-e",
+    "DISPLAY=${localEnv:DISPLAY}",
+    "-e",
+    "QT_X11_NO_MITSHM=1",
+    "-v",
+    "/tmp/.X11-unix:/tmp/.X11-unix:rw"
+  ],
+  "mounts": [
+    "source=${localWorkspaceFolder},target=/root/mirena_ws,type=bind"
+  ],
+  "workspaceFolder": "/root/mirena_ws",
+  "remoteUser": "root",
+  "initializeCommand": "xhost +local:docker && xhost +local:root",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "Ranch-Hand-Robotics.rde-ros-2",
+        "ms-vscode.cmake-tools",
+        "ms-python.python",
+        "ms-vscode.cpptools-extension-pack"
+      ]
+    },
+    "settings": {
+      "terminal.integrated.shell.linux": "/bin/zsh"
+    }
+  }
+}

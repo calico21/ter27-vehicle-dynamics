@@ -19,7 +19,7 @@ WORKDIR /root/mirena_ws
 RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
 
 # Copy ZSHRC
-COPY docker/.zshrc /root/.zshrc
+COPY .zshrc /root/.zshrc
 
 # Prepara el shell de uso
 USER root
