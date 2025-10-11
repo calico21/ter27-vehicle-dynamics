@@ -30,7 +30,7 @@
 	url = https://git.eracing.es/Driverless/mirena_sim
 [submodule "src/mirena_tests"]
 	path = src/mirena_tests
-	url = https://git.eracing.es/Driverless/mirena_tests.git
+	url = https://git.eracing.es/Driverless/mirena_tests
 [submodule "src/mirena_planning"]
 	path = src/mirena_planning
 	url = https://git.eracing.es/Driverless/mirena_planning
