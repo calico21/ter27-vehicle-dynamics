@@ -16,7 +16,7 @@ RUN groupadd --gid $USER_GID $USERNAME \
     && echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME \
     && chmod 0440 /etc/sudoers.d/$USERNAME
 
-# Install deps
+    # Install deps
 RUN apt update && apt install -y \
     python3-pip \
     python3-colcon-common-extensions \
@@ -35,6 +35,8 @@ WORKDIR /home/$USERNAME
 
 # Install Oh My Zsh (non-interactively)
 RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+# Copy Zshell config
+COPY .zshrc /home/$USERNAME/
 
 #SET default Shell for user
 ENV SHELL /bin/zsh
