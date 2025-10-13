@@ -15,10 +15,10 @@
     "/tmp/.X11-unix:/tmp/.X11-unix:rw"
   ],
   "mounts": [
-    "source=${localWorkspaceFolder},target=/root/mirena_ws,type=bind"
+    "source=${localWorkspaceFolder},target=/home/ubuntu/mirena_ws,type=bind"
   ],
-  "workspaceFolder": "/root/mirena_ws",
-  "remoteUser": "root",
+  "workspaceFolder": "/home/ubuntu/mirena_ws",
+  "remoteUser": "ubuntu",
   "initializeCommand": "xhost +local:docker && xhost +local:root",
   "customizations": {
     "vscode": {
