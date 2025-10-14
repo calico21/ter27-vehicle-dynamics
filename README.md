@@ -9,26 +9,9 @@ As always, start by cloning the repository and its submodules:
 ```{bash}
 git clone https://github.com/Tecnun-eRacing/mirena_ws --recurse-submodules
 ```
-
-mirena_ws comes bundled with a helper script manager, to get a fully working enviroment just type:
-```{bash}
-cd mirena_ws
-./ws_tool.sh
-```
-and follow the instructions in order.
-
-> [!TIP]
-> You can instead `source ws_tool.sh` to be able to access it from anywhere using `mwst` 
-## Installing dependencies
-Choose the **Install Dependencies**, this will install ros2, git-lfs and other required tools
-
-## Cloning submodules
-Choose the **Clone Submodules**, this will properly download all submodules recursively including the ones
-with Git LFS
-
-## Building the workspace
-Choose the **Build Workspace**, this will properly download all submodules recursively including the ones
-with Git LFS
+## DevContainer
+The recommended way of developing mirena_sim is using the bundled devcontainer configuration,
+download VSCode and install the devcontainer plugin. Use it to create a working dev environment.
 
 ## Building ros modules
 Finally, you can build the full pipeline with:

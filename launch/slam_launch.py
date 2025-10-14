@@ -7,7 +7,7 @@ def generate_launch_description():
         # Launch the mirena_sim node with the --track argument
         Node(
             package='mirena_sim',
-            executable='MirenaSim',
+            executable='sim',
             name='mirena_sim',
             output='screen',
             arguments=['--track=TrackFiles/track.json']
@@ -20,15 +20,7 @@ def generate_launch_description():
             name='mirena_lidar',
             output='screen'
         ),
-        
-        # Launch another instance of mirena_lidar
-        Node(
-            package='mirena_lidar',
-            executable='mirena_lidar',
-            name='mirena_lidar_2',
-            output='screen'
-        ),
-        
+
         # Launch RViz2 for visualization
         Node(
             package='rviz2',
