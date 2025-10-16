@@ -24,7 +24,6 @@
     "vscode": {
       "extensions": [
         "Ranch-Hand-Robotics.rde-ros-2",
-        "ms-vscode.cmake-tools",
         "ms-python.python",
         "ms-vscode.cpptools-extension-pack"
       ]

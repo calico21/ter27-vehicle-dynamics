@@ -29,9 +29,24 @@ RUN apt update && apt install -y \
 # Use systemwide pip
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
 
+
+# Setup Acados (MPC SOLVER GENERATOR)
+WORKDIR /opt
+RUN git clone https://github.com/acados/acados.git
+WORKDIR /opt/acados
+RUN git checkout v0.5.1
+RUN git submodule update --recursive --init
+RUN mkdir -p build 
+WORKDIR /opt/acados/build
+RUN cmake -DACADOS_WITH_QPOASES=ON ..
+RUN make install -j4
+#Install python interface for acados
+RUN pip install -e /opt/acados/interfaces/acados_template
+
 # Set workspace
 USER $USERNAME
 WORKDIR /home/$USERNAME
+
 
 # Install Oh My Zsh (non-interactively)
 RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
