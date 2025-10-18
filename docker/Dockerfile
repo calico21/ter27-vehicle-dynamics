@@ -31,20 +31,30 @@ ENV PIP_BREAK_SYSTEM_PACKAGES=1
 
 
 # Setup Acados (MPC SOLVER GENERATOR)
-WORKDIR /opt
+WORKDIR /home/mirena
 RUN git clone https://github.com/acados/acados.git
-WORKDIR /opt/acados
+WORKDIR /home/mirena/acados
 RUN git checkout v0.5.1
 RUN git submodule update --recursive --init
 RUN mkdir -p build 
-WORKDIR /opt/acados/build
+WORKDIR /home/mirena/acados/build
 RUN cmake -DACADOS_WITH_QPOASES=ON ..
 RUN make install -j4
 #Install python interface for acados
-RUN pip install -e /opt/acados/interfaces/acados_template
+RUN pip install -e /home/mirena/acados/interfaces/acados_template
 #Set neccesary env vars for acados
-ENV ACADOS_SOURCE_DIR=/opt/acados
-ENV LD_LIBRARY_PATH=/opt/acados/lib:$LD_LIBRARY_PATH
+ENV ACADOS_SOURCE_DIR=/home/mirena/acados
+ENV LD_LIBRARY_PATH=/home/mirena/acados/lib:$LD_LIBRARY_PATH
+
+
+# Setup Ipopt (Internal Point Solver Runtime)
+WORKDIR /home/mirena
+RUN git clone https://github.com/coin-or/Ipopt.git
+WORKDIR /home/mirena/Ipopt
+RUN mkdir -p build
+WORKDIR /home/mirena/Ipopt/build
+RUN ../configure && make -j4
+RUN make install
 
 # Set workspace
 USER $USERNAME
