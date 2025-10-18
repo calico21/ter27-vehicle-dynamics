@@ -42,6 +42,9 @@ RUN cmake -DACADOS_WITH_QPOASES=ON ..
 RUN make install -j4
 #Install python interface for acados
 RUN pip install -e /opt/acados/interfaces/acados_template
+#Set neccesary env vars for acados
+ENV ACADOS_SOURCE_DIR=/opt/acados
+ENV LD_LIBRARY_PATH=/opt/acados/lib:$LD_LIBRARY_PATH
 
 # Set workspace
 USER $USERNAME
@@ -59,4 +62,3 @@ SHELL ["/bin/zsh", "-c"]
 
 # Default launch command
 ENTRYPOINT ["/bin/zsh"]
-
