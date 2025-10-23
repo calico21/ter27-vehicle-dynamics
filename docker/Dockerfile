@@ -29,12 +29,15 @@ RUN apt update && apt install -y \
 # Use systemwide pip
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
 
+# Set workspace
+USER $USERNAME
+WORKDIR /home/$USERNAME
 
 # Setup Acados (MPC SOLVER GENERATOR)
 WORKDIR /home/mirena
 RUN git clone https://github.com/acados/acados.git
 WORKDIR /home/mirena/acados
-RUN git checkout v0.5.1
+RUN git checkout 5847c74fe774137a5fb31c9791bf39aa980b8b05
 RUN git submodule update --recursive --init
 RUN mkdir -p build 
 WORKDIR /home/mirena/acados/build
@@ -48,17 +51,14 @@ ENV LD_LIBRARY_PATH=/home/mirena/acados/lib:$LD_LIBRARY_PATH
 
 
 # Setup Ipopt (Internal Point Solver Runtime)
-WORKDIR /home/mirena
-RUN git clone https://github.com/coin-or/Ipopt.git
-WORKDIR /home/mirena/Ipopt
-RUN mkdir -p build
-WORKDIR /home/mirena/Ipopt/build
-RUN ../configure && make -j4
-RUN make install
+#WORKDIR /home/mirena
+#RUN git clone https://github.com/coin-or/Ipopt.git
+#WORKDIR /home/mirena/Ipopt
+#RUN mkdir -p build
+#WORKDIR /home/mirena/Ipopt/build
+#RUN ../configure && make -j4
+#RUN make install
 
-# Set workspace
-USER $USERNAME
-WORKDIR /home/$USERNAME
 
 
 # Install Oh My Zsh (non-interactively)
