@@ -48,7 +48,8 @@ RUN pip install -e /home/mirena/acados/interfaces/acados_template
 #Set neccesary env vars for acados
 ENV ACADOS_SOURCE_DIR=/home/mirena/acados
 ENV LD_LIBRARY_PATH=/home/mirena/acados/lib:$LD_LIBRARY_PATH
-
+# Force install Tera for headless setup
+RUN python3 -c "from acados_template.utils import get_tera; get_tera(force_download=True)"
 
 # Setup Ipopt (Internal Point Solver Runtime)
 #WORKDIR /home/mirena
