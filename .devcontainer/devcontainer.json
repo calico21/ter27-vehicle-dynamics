@@ -5,6 +5,7 @@
     "context": "../docker/"
   },
   "runArgs": [
+    "--privileged",
     "--net=host",
     "--device=/dev/dri:/dev/dri",
     "-e",

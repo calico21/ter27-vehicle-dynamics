@@ -41,7 +41,7 @@ RUN git checkout 5847c74fe774137a5fb31c9791bf39aa980b8b05
 RUN git submodule update --recursive --init
 RUN mkdir -p build 
 WORKDIR /home/mirena/acados/build
-RUN cmake -DACADOS_WITH_QPOASES=ON ..
+RUN cmake -DACADOS_WITH_QPOASES=ON -DACADOS_WITH_OPENMP=ON ..
 RUN make install -j4
 #Install python interface for acados
 RUN pip install -e /home/mirena/acados/interfaces/acados_template
