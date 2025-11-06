@@ -63,7 +63,7 @@ def generate_launch_description():
             name='mirena_control',
             output='screen',
             remappings=[
-                #("/debug/sim/car_state", "/consensus/car_state"),
+                ("/debug/sim/car_state", "/consensus/car_state"),
                 ("/debug/sim/full_centerline_path", "/planning/centerline_path")
             ]
         )
