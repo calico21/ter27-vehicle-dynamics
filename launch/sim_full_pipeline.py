@@ -14,21 +14,6 @@ def generate_launch_description():
         #    arguments=['--track=TrackFiles/track.json']
         #),
         
-        # Launch the mirena_lidar node
-
-        # Launch RViz2 & rqt for visualization
-        Node(
-            package='rviz2',
-            executable='rviz2',
-            name='rviz2',
-            output='screen'
-        ),
-
-        ExecuteProcess(
-            cmd=['rqt'],
-            output='screen'
-        ),
-
         Node(
             package='mirena_lidar',
             executable='mirena_lidar',

@@ -39,7 +39,7 @@ def generate_launch_description():
             name='mirena_planning',
             output='screen',
             remappings=[
-                #("/debug/sim/car_state", "/consensus/car_state"),
+                ("/debug/sim/car_state", "/consensus/car_state"),
                 ("/debug/sim/slam_entities", "/slam/full_map")
             ]
         )
