@@ -39,11 +39,11 @@ def generate_launch_description():
             name='mirena_planning',
             output='screen',
             remappings=[
-                ("/debug/sim/car_state", "/consensus/car_state"),
+                # ("/debug/sim/car_state", "/consensus/car_state"),
                 ("/debug/sim/slam_entities", "/slam/full_map")
             ]
         )
-    ])
+    ]
 
 def main():
     # Create a launch description for the ROS 2 launch system
