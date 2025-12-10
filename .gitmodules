@@ -31,3 +31,7 @@
 [submodule "src/mirena_planning"]
 	path = src/mirena_planning
 	url = https://git.eracing.es/Driverless/mirena_planning
+[submodule "mirena_hardware"]
+	path = src/mirena_hardware
+	url = https://git.eracing.es/Driverless/mirena_hardware
+	branch = main
