@@ -1,29 +1,20 @@
 # Deployment image of mirena_ws for nvidia jetson
-FROM nvcr.io/nvidia/l4t-base:r36.2.0
+FROM nvcr.io/nvidia/l4t-jetpack:r36.4.0
 
-# User
+# ARGUMENTS FOR BUILDING
 ARG USERNAME=mirena
 ARG USER_UID=1000
 ARG USER_GID=1000
 
-# System User Setup
-
-# Delete user if it exists in container (e.g Ubuntu Noble: ubuntu)
-RUN if id -u $USER_UID ; then userdel `id -un $USER_UID` ; fi
-# Create the user
-RUN groupadd --gid $USER_GID $USERNAME \
-    && useradd --uid $USER_UID --gid $USER_GID -m $USERNAME \
-    # [Optional] Add sudo support. Omit if you don't need to install software after connecting.
-    && apt-get update \
-    && apt-get install -y sudo \
-    && echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME \
-    && chmod 0440 /etc/sudoers.d/$USERNAME
+# Place to download sources
+ENV BUILD_DIR=/tmp
 
 
-# ROS2 Installation 
-# Change the locale from POSIX to UTF-8
-RUN locale-gen en_US en_US.UTF-8 && update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
-ENV LANG=en_US.UTF-8
+# Variables de Sistema
+ENV DEBIAN_FRONTEND=noninteractive 
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
+
+# ROS2 INSTALLATION
 
 # Install basic tools, set locale, and enable required repositories
 RUN apt update \
@@ -31,6 +22,7 @@ RUN apt update \
         sudo \
         curl \
         wget \
+        zsh \
         build-essential \
         software-properties-common \
         locales \
@@ -44,13 +36,14 @@ RUN apt update \
     \
     # Install the ROS 2 apt source configuration package
     && export ROS_APT_SOURCE_VERSION=$(curl -s https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest | grep -F "tag_name" | awk -F\" '{print $4}') \
-    && curl -L -o /tmp/ros2-apt-source.deb "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ROS_APT_SOURCE_VERSION}/ros2-apt-source_${ROS_APT_SOURCE_VERSION}.noble_all.deb" \
+    && curl -L -o /tmp/ros2-apt-source.deb "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ROS_APT_SOURCE_VERSION}/ros2-apt-source_${ROS_APT_SOURCE_VERSION}.jammy_all.deb" \
     && dpkg -i /tmp/ros2-apt-source.deb \
-    \
-    && apt update
+    && rm -rf /var/lib/apt/lists/*
+
 
 # Install development tools and ros-dev-tools
-RUN apt install -y \
+RUN apt update \
+    && apt install -y \
     python3-flake8-blind-except \
     python3-flake8-class-newline \
     python3-flake8-deprecated \
@@ -65,23 +58,76 @@ RUN apt install -y \
     python3-pytest-timeout \
     ros-dev-tools \
     # Install version control system (vcs) needed for cloning
-    python3-vcstool
+    python3-vcstool \
+    && rm -rf /var/lib/apt/lists/*
 
+    
 # Create the workspace and clone the repositories
-RUN mkdir -p ${ROS2_WS}/src \
-    && cd ${ROS2_WS} \
-    # Clone the repositories for Jazzy
-    && vcs import --input https://raw.githubusercontent.com/ros2/ros2/jazzy/ros2.repos src
+RUN mkdir -p ${BUILD_DIR}/ros2/src 
+# Clone the repositories for Jazzy + custom dependencies
+WORKDIR ${BUILD_DIR}/ros2 
+RUN vcs import --input https://raw.githubusercontent.com/ros2/ros2/jazzy/ros2.repos src
+RUN vcs import --input ./mirena_ws.repos src
 
 # Install dependencies using rosdep
 # This step may take some time as it installs many Debian packages
-RUN apt upgrade -y \
+RUN apt update \
+    && apt upgrade -y \
     && rosdep init \
     && rosdep update \
     # Install dependencies, ignoring packages that are built from source
-    && rosdep install --from-paths ${ROS2_WS}/src --ignore-src -y --skip-keys "fastcdr rti-connext-dds-6.0.1 urdfdom_headers"
+    && rosdep install --from-paths ${BUILD_DIR}/ros2/src --ignore-src -y --skip-keys "fastcdr rti-connext-dds-6.0.1 urdfdom_headers libopencv-dev libopencv-contrib-dev libopencv-imgproc-dev python-opencv python3-opencv python3-matplotlib python3-scipy"
 
 # Build ROS 2 from source using colcon
 # This is the longest step and is executed in a single layer to leverage Docker caching
-RUN cd ${ROS2_WS} \
-    && colcon build --symlink-install --install-base /opt/ros/jazzy
+RUN colcon build --merge-install --install-base /opt/ros/jazzy
+
+
+# ACADOS INSTALLATION
+WORKDIR /opt
+RUN git clone https://github.com/acados/acados.git
+WORKDIR /opt/acados
+RUN git checkout 5847c74fe774137a5fb31c9791bf39aa980b8b05
+RUN git submodule update --recursive --init
+RUN mkdir -p build 
+WORKDIR /opt/acados/build
+RUN cmake -DACADOS_WITH_QPOASES=ON -DACADOS_WITH_OPENMP=ON ..
+RUN make install -j4
+#Install python interface for acados
+RUN pip install -e /opt/acados/interfaces/acados_template
+#Set neccesary env vars for acados
+ENV ACADOS_SOURCE_DIR=/opt/acados
+ENV LD_LIBRARY_PATH=/opt/acados/lib:$LD_LIBRARY_PATH
+# Force install Tera for headless setup
+RUN python3 -c "from acados_template.utils import get_tera; get_tera(force_download=True)"
+
+# Userspace
+
+# System User Setup
+
+# Delete user if it exists in container (e.g Ubuntu Noble: ubuntu)
+RUN if id -u $USER_UID ; then userdel `id -un $USER_UID` ; fi
+# Create the user
+RUN groupadd --gid $USER_GID $USERNAME \
+    && useradd --uid $USER_UID --gid $USER_GID -m $USERNAME \
+    # [Optional] Add sudo support. Omit if you don't need to install software after connecting.
+    && apt-get update \
+    && apt-get install -y sudo \
+    && echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME \
+    && chmod 0440 /etc/sudoers.d/$USERNAME
+
+# Set workspace
+USER $USERNAME
+WORKDIR /home/mirena
+
+# Install Oh My Zsh (non-interactively)
+RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+# Copy Zshell config
+COPY .zshrc /home/$USERNAME/
+
+#SET default Shell for user
+ENV SHELL=/bin/zsh
+SHELL ["/bin/zsh", "-c"]
+
+# Default launch command
+ENTRYPOINT ["/bin/zsh"]
