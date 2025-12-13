@@ -67,7 +67,8 @@ RUN mkdir -p ${BUILD_DIR}/ros2/src
 # Clone the repositories for Jazzy + custom dependencies
 WORKDIR ${BUILD_DIR}/ros2 
 RUN vcs import --input https://raw.githubusercontent.com/ros2/ros2/jazzy/ros2.repos src
-RUN vcs import --input ./mirena_ws.repos src
+COPY mirena_ws.repos .
+RUN vcs import --input mirena_ws.repos src
 
 # Install dependencies using rosdep
 # This step may take some time as it installs many Debian packages
