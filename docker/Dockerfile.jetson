@@ -14,10 +14,11 @@ ENV BUILD_DIR=/tmp
 ENV DEBIAN_FRONTEND=noninteractive 
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
 
-# ROS2 INSTALLATION
+# ROS2 CORE INSTALLATION
 
-# Install basic tools, set locale, and enable required repositories
+# Upgrade, Install basic tools, set locale, and enable required repositories
 RUN apt update \
+    && apt upgrade -y \
     && apt install -y \
         sudo \
         curl \
@@ -63,24 +64,34 @@ RUN apt update \
 
     
 # Create the workspace and clone the repositories
-RUN mkdir -p ${BUILD_DIR}/ros2/src 
+RUN mkdir -p ${BUILD_DIR}/ros/src 
 # Clone the repositories for Jazzy + custom dependencies
-WORKDIR ${BUILD_DIR}/ros2 
+WORKDIR ${BUILD_DIR}/ros
 RUN vcs import --input https://raw.githubusercontent.com/ros2/ros2/jazzy/ros2.repos src
-COPY mirena_ws.repos .
-RUN vcs import --input mirena_ws.repos src
 
 # Install dependencies using rosdep
 # This step may take some time as it installs many Debian packages
-RUN apt update \
-    && apt upgrade -y \
+RUN apt update  \
     && rosdep init \
     && rosdep update \
     # Install dependencies, ignoring packages that are built from source
-    && rosdep install --from-paths ${BUILD_DIR}/ros2/src --ignore-src -y --skip-keys "fastcdr rti-connext-dds-6.0.1 urdfdom_headers libopencv-dev libopencv-contrib-dev libopencv-imgproc-dev python-opencv python3-opencv python3-matplotlib python3-scipy"
+    && rosdep install --from-paths ${BUILD_DIR}/ros/src --ignore-src -y --skip-keys "fastcdr rti-connext-dds-6.0.1 urdfdom_headers libopencv-dev libopencv-contrib-dev libopencv-imgproc-dev python-opencv python3-opencv"
 
 # Build ROS 2 from source using colcon
 # This is the longest step and is executed in a single layer to leverage Docker caching
+RUN colcon build --continue-on-error --merge-install --install-base /opt/ros/jazzy
+
+
+# ROS2 MIRENA_WS DEPS 
+# Separated from core build to minimize rebuild times of container 
+# CHANGE SHELL to be sourced inside the new ros2 installation
+SHELL ["/bin/bash", "-c", "source /opt/ros/jazzy/setup.bash && exec \"$@\""]
+RUN mkdir -p ${BUILD_DIR}/mirena_overlay/src
+WORKDIR ${BUILD_DIR}/mirena_overlay
+COPY mirena_ws.repos .
+RUN vcs import --input mirena_ws.repos src
+RUN apt update && rosdep update \
+    && rosdep install --from-paths ${BUILD_DIR}/mirena_overlay/src --ignore-src -y --rosdistro jazzy 
 RUN colcon build --merge-install --install-base /opt/ros/jazzy
 
 
