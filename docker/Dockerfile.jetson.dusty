@@ -1,0 +1,97 @@
+# Deployment image of mirena_ws for nvidia jetson
+# Base image includes ROS 2 Jazzy, CUDA 12.8, and Ubuntu 24.04 (Noble)
+FROM dustynv/ros:jazzy-desktop-r36.4.0-cu128-24.04
+
+# --- User Configuration ---
+ARG USERNAME=mirena
+ARG USER_UID=1000
+ARG USER_GID=1000
+
+
+
+# This is the most resilient UNATTENDED way to update an expired key in a Dockerfile.
+RUN set -eux; \
+    apt-get install -y --no-install-recommends curl gnupg; \
+    rm -f /usr/share/keyrings/ros-archive-keyring.gpg; \
+    curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc -o /tmp/ros.asc; \
+    gpg --dearmor --no-tty --batch </tmp/ros.asc -o /usr/share/keyrings/ros-archive-keyring.gpg; \
+    rm -f /tmp/ros.asc; \
+    apt-get purge -y curl gnupg; \
+    apt-get autoremove -y; \
+    rm -rf /var/lib/apt/lists/*
+
+# Delete existing user (e.g. 'ubuntu' user in some images) and create the new user
+# Grouped for single-layer efficiency
+RUN set -eux; \
+    if id -u $USER_UID ; then userdel -r $(id -un $USER_UID) || true; fi; \
+    groupadd --gid $USER_GID $USERNAME; \
+    useradd --uid $USER_UID --gid $USER_GID -m $USERNAME; \
+    # Install sudo, essential tools, and Acados dependencies
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        sudo \
+        git \
+        cmake \
+        build-essential \
+        libopenblas-dev \
+        liblapack-dev \
+        gfortran \
+        unzip \
+        zsh \
+        neovim \
+        neofetch \
+        curl \
+        # Dependencies for acados/Ipopt/ROS development
+        python3-pip \
+        python3-colcon-common-extensions \
+        python3-rosdep \
+        # Install Ipopt development package via APT (much faster than source build)
+        coinor-libipopt-dev; \
+    # Configure sudo
+    echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME; \
+    chmod 0440 /etc/sudoers.d/$USERNAME; \
+    # Final cleanup to reduce image size
+    apt-get autoremove -y; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/*
+
+# Use systemwide pip (Standard practice in containers)
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
+
+# --- Acados Setup (MPC SOLVER GENERATOR) ---
+USER $USERNAME
+WORKDIR /home/$USERNAME
+
+# Set Acados Environment Variables (set now, used later)
+ENV ACADOS_SOURCE_DIR=/home/$USERNAME/acados
+ENV LD_LIBRARY_PATH=$ACADOS_SOURCE_DIR/lib:$LD_LIBRARY_PATH
+
+# Clone and Compile Acados (use a single RUN block for the heavy compilation)
+RUN set -eux; \
+    git clone https://github.com/acados/acados.git $ACADOS_SOURCE_DIR; \
+    cd $ACADOS_SOURCE_DIR; \
+    git checkout 5847c74fe774137a5fb31c9791bf39aa980b8b05; \
+    git submodule update --recursive --init; \
+    mkdir -p build; \
+    cd build; \
+    # CMake configuration - using ACADOS_WITH_QPOASES and ACADOS_WITH_OPENMP as requested
+    cmake -DACADOS_WITH_QPOASES=ON -DACADOS_WITH_OPENMP=ON ..; \
+    # Compile and install (using -jN for parallel compilation)
+    make install -j$(nproc); \
+    # Install python interface for acados
+    pip install -e $ACADOS_SOURCE_DIR/interfaces/acados_template; \
+    # Force install Tera for headless setup
+    python3 -c "from acados_template.utils import get_tera; get_tera(force_download=True)"
+
+# --- Shell Setup ---
+# Install Oh My Zsh (non-interactively)
+RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+# Copy Zshell config
+COPY .zshrc /home/$USERNAME/
+
+# SET default Shell for user
+ENV SHELL=/bin/zsh
+SHELL ["/bin/zsh", "-c"]
+
+# Default launch command
+ENTRYPOINT ["/bin/zsh"]

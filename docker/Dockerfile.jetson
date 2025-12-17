@@ -1,0 +1,145 @@
+# Deployment image of mirena_ws for nvidia jetson
+FROM nvcr.io/nvidia/l4t-jetpack:r36.4.0
+
+# ARGUMENTS FOR BUILDING
+ARG USERNAME=mirena
+ARG USER_UID=1000
+ARG USER_GID=1000
+
+# Place to download sources
+ENV BUILD_DIR=/tmp
+
+
+# Variables de Sistema
+ENV DEBIAN_FRONTEND=noninteractive 
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
+
+# ROS2 CORE INSTALLATION
+
+# Upgrade, Install basic tools, set locale, and enable required repositories
+RUN apt update \
+    && apt upgrade -y \
+    && apt install -y \
+        sudo \
+        curl \
+        wget \
+        zsh \
+        build-essential \
+        software-properties-common \
+        locales \
+    \
+    # Set the locale
+    && locale-gen en_US en_US.UTF-8 \
+    && update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 \
+    \
+    # Enable the Ubuntu Universe repository
+    && add-apt-repository universe -y \
+    \
+    # Install the ROS 2 apt source configuration package
+    && export ROS_APT_SOURCE_VERSION=$(curl -s https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest | grep -F "tag_name" | awk -F\" '{print $4}') \
+    && curl -L -o /tmp/ros2-apt-source.deb "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ROS_APT_SOURCE_VERSION}/ros2-apt-source_${ROS_APT_SOURCE_VERSION}.jammy_all.deb" \
+    && dpkg -i /tmp/ros2-apt-source.deb \
+    && rm -rf /var/lib/apt/lists/*
+
+
+# Install development tools and ros-dev-tools
+RUN apt update \
+    && apt install -y \
+    python3-flake8-blind-except \
+    python3-flake8-class-newline \
+    python3-flake8-deprecated \
+    python3-mypy \
+    python3-pip \
+    python3-pytest \
+    python3-pytest-cov \
+    python3-pytest-mock \
+    python3-pytest-repeat \
+    python3-pytest-rerunfailures \
+    python3-pytest-runner \
+    python3-pytest-timeout \
+    ros-dev-tools \
+    # Install version control system (vcs) needed for cloning
+    python3-vcstool \
+    && rm -rf /var/lib/apt/lists/*
+
+    
+# Create the workspace and clone the repositories
+RUN mkdir -p ${BUILD_DIR}/ros/src 
+# Clone the repositories for Jazzy + custom dependencies
+WORKDIR ${BUILD_DIR}/ros
+RUN vcs import --input https://raw.githubusercontent.com/ros2/ros2/jazzy/ros2.repos src
+
+# Install dependencies using rosdep
+# This step may take some time as it installs many Debian packages
+RUN apt update  \
+    && rosdep init \
+    && rosdep update \
+    # Install dependencies, ignoring packages that are built from source
+    && rosdep install --from-paths ${BUILD_DIR}/ros/src --ignore-src -y --skip-keys "fastcdr rti-connext-dds-6.0.1 urdfdom_headers libopencv-dev libopencv-contrib-dev libopencv-imgproc-dev python-opencv python3-opencv"
+
+# Build ROS 2 from source using colcon
+# This is the longest step and is executed in a single layer to leverage Docker caching
+RUN colcon build --continue-on-error --merge-install --install-base /opt/ros/jazzy
+
+
+# ROS2 MIRENA_WS DEPS 
+# Separated from core build to minimize rebuild times of container 
+# CHANGE SHELL to be sourced inside the new ros2 installation
+SHELL ["/bin/bash", "-c", "source /opt/ros/jazzy/setup.bash && exec \"$@\""]
+RUN mkdir -p ${BUILD_DIR}/mirena_overlay/src
+WORKDIR ${BUILD_DIR}/mirena_overlay
+COPY mirena_ws.repos .
+RUN vcs import --input mirena_ws.repos src
+RUN apt update && rosdep update \
+    && rosdep install --from-paths ${BUILD_DIR}/mirena_overlay/src --ignore-src -y --rosdistro jazzy 
+RUN colcon build --merge-install --install-base /opt/ros/jazzy
+
+
+# ACADOS INSTALLATION
+WORKDIR /opt
+RUN git clone https://github.com/acados/acados.git
+WORKDIR /opt/acados
+RUN git checkout 5847c74fe774137a5fb31c9791bf39aa980b8b05
+RUN git submodule update --recursive --init
+RUN mkdir -p build 
+WORKDIR /opt/acados/build
+RUN cmake -DACADOS_WITH_QPOASES=ON -DACADOS_WITH_OPENMP=ON ..
+RUN make install -j4
+#Install python interface for acados
+RUN pip install -e /opt/acados/interfaces/acados_template
+#Set neccesary env vars for acados
+ENV ACADOS_SOURCE_DIR=/opt/acados
+ENV LD_LIBRARY_PATH=/opt/acados/lib:$LD_LIBRARY_PATH
+# Force install Tera for headless setup
+RUN python3 -c "from acados_template.utils import get_tera; get_tera(force_download=True)"
+
+# Userspace
+
+# System User Setup
+
+# Delete user if it exists in container (e.g Ubuntu Noble: ubuntu)
+RUN if id -u $USER_UID ; then userdel `id -un $USER_UID` ; fi
+# Create the user
+RUN groupadd --gid $USER_GID $USERNAME \
+    && useradd --uid $USER_UID --gid $USER_GID -m $USERNAME \
+    # [Optional] Add sudo support. Omit if you don't need to install software after connecting.
+    && apt-get update \
+    && apt-get install -y sudo \
+    && echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME \
+    && chmod 0440 /etc/sudoers.d/$USERNAME
+
+# Set workspace
+USER $USERNAME
+WORKDIR /home/mirena
+
+# Install Oh My Zsh (non-interactively)
+RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+# Copy Zshell config
+COPY .zshrc /home/$USERNAME/
+
+#SET default Shell for user
+ENV SHELL=/bin/zsh
+SHELL ["/bin/zsh", "-c"]
+
+# Default launch command
+ENTRYPOINT ["/bin/zsh"]
