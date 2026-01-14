@@ -7,13 +7,20 @@
   "runArgs": [
     "--privileged",
     "--net=host",
+    "--ipc=host",
+    "--group-add",
+    "44", // Numeric ID for video
+    "--group-add",
+    "992", // Numeric ID for render (matches your host)
     "--device=/dev/dri:/dev/dri",
     "-e",
     "DISPLAY=${localEnv:DISPLAY}",
     "-e",
     "QT_X11_NO_MITSHM=1",
     "-v",
-    "/tmp/.X11-unix:/tmp/.X11-unix:rw"
+    "/tmp/.X11-unix:/tmp/.X11-unix:rw",
+    "-v",
+    "/usr/share/vulkan/icd.d:/usr/share/vulkan/icd.d:ro"
   ],
   "mounts": [
     "source=${localWorkspaceFolder},target=/home/mirena/mirena_ws,type=bind"
@@ -32,7 +39,6 @@
     "settings": {
       "terminal.integrated.shell.linux": "/bin/zsh",
       "ROS2.distro": "jazzy"
-
     }
   }
 }

@@ -25,6 +25,8 @@ RUN apt update && apt install -y \
     zsh \
     neovim \
     neofetch \
+    mesa-vulkan-drivers \
+    vulkan-tools \
     && rm -rf /var/lib/apt/lists/*
 # Use systemwide pip
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
