@@ -27,6 +27,7 @@ RUN apt update && apt install -y \
     neofetch \
     mesa-vulkan-drivers \
     vulkan-tools \
+    ros-jazzy-tf-transformations \
     && rm -rf /var/lib/apt/lists/*
 # Use systemwide pip
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
