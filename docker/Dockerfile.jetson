@@ -82,17 +82,19 @@ RUN apt update  \
 RUN colcon build --continue-on-error --merge-install --install-base /opt/ros/jazzy
 
 
+
 # ROS2 MIRENA_WS DEPS 
 # Separated from core build to minimize rebuild times of container 
 # CHANGE SHELL to be sourced inside the new ros2 installation
-SHELL ["/bin/bash", "-c", "source /opt/ros/jazzy/setup.bash && exec \"$@\""]
 RUN mkdir -p ${BUILD_DIR}/mirena_overlay/src
 WORKDIR ${BUILD_DIR}/mirena_overlay
 COPY mirena_ws.repos .
 RUN vcs import --input mirena_ws.repos src
-RUN apt update && rosdep update \
-    && rosdep install --from-paths ${BUILD_DIR}/mirena_overlay/src --ignore-src -y --rosdistro jazzy 
-RUN colcon build --merge-install --install-base /opt/ros/jazzy
+RUN /bin/bash -c "source /opt/ros/jazzy/setup.bash && apt update && rosdep update \
+    && rosdep install --from-paths ${BUILD_DIR}/mirena_overlay/src --ignore-src -y --rosdistro jazzy"
+# Use a simple shell for the RUN command and source manually
+RUN /bin/bash -c "source /opt/ros/jazzy/setup.bash && \
+    colcon build --merge-install --install-base /opt/ros/jazzy --cmake-args -DBUILD_TESTING=OFF -DCMAKE_DISABLE_FIND_PACKAGE_benchmark=ON"
 
 
 # ACADOS INSTALLATION
@@ -113,10 +115,11 @@ ENV LD_LIBRARY_PATH=/opt/acados/lib:$LD_LIBRARY_PATH
 # Force install Tera for headless setup
 RUN python3 -c "from acados_template.utils import get_tera; get_tera(force_download=True)"
 
+
 # Userspace
 
 # System User Setup
-
+SHELL ["/bin/bash", "-c"]
 # Delete user if it exists in container (e.g Ubuntu Noble: ubuntu)
 RUN if id -u $USER_UID ; then userdel `id -un $USER_UID` ; fi
 # Create the user

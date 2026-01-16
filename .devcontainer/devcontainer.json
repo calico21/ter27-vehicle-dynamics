@@ -1,7 +1,7 @@
 {
   "name": "mirena_ws",
   "build": {
-    "dockerfile": "../docker/Dockerfile.dev",
+    "dockerfile": "../docker/Dockerfile.jetson",
     "context": "../docker/"
   },
   "runArgs": [

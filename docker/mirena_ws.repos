@@ -18,3 +18,8 @@ repositories:
         type: git
         url: https://github.com/ros-perception/pcl_msgs.git
         version: ros2
+
+    src/ros_babel_fish:
+        type: git
+        url: https://github.com/LOEWE-emergenCITY/ros_babel_fish.git
+        versoin: jazzy
