@@ -6,6 +6,7 @@
   },
   "runArgs": [
     "--privileged",
+    "--runtime=nvidia",
     "--net=host",
     "--ipc=host",
     "--group-add",
