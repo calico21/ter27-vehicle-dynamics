@@ -1,8 +1,8 @@
 {
   "name": "mirena_ws",
   "build": {
-    "dockerfile": "../docker/Dockerfile.jetson",
-    "context": "../docker/"
+    "dockerfile": "../../docker/Dockerfile.jetson",
+    "context": "../../docker/"
   },
   "runArgs": [
     "--privileged",
