@@ -63,7 +63,9 @@ RUN python3 -c "from acados_template.utils import get_tera; get_tera(force_downl
 #RUN ../configure && make -j4
 #RUN make install
 
-
+# Installation of python deps
+#COPY requirements.txt /home/mirena
+#RUN pip install --no-cache-dir -r /home/mirena/requirements.txt
 
 # Install Oh My Zsh (non-interactively)
 RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended

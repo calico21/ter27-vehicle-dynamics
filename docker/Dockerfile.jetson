@@ -97,26 +97,88 @@ RUN /bin/bash -c "source /opt/ros/jazzy/setup.bash && \
     colcon build --merge-install --install-base /opt/ros/jazzy --cmake-args -DBUILD_TESTING=OFF -DCMAKE_DISABLE_FIND_PACKAGE_benchmark=ON"
 
 
-# ACADOS INSTALLATION
+# SYSTEM packages
 WORKDIR /opt
-RUN git clone https://github.com/acados/acados.git
-WORKDIR /opt/acados
-RUN git checkout 5847c74fe774137a5fb31c9791bf39aa980b8b05
-RUN git submodule update --recursive --init
-RUN mkdir -p build 
-WORKDIR /opt/acados/build
-RUN cmake -DACADOS_WITH_QPOASES=ON -DACADOS_WITH_OPENMP=ON ..
-RUN make install -j4
-#Install python interface for acados
-RUN pip install -e /opt/acados/interfaces/acados_template
-#Set neccesary env vars for acados
+
+# ACADOS INSTALLATION
 ENV ACADOS_SOURCE_DIR=/opt/acados
 ENV LD_LIBRARY_PATH=/opt/acados/lib:$LD_LIBRARY_PATH
-# Force install Tera for headless setup
-RUN python3 -c "from acados_template.utils import get_tera; get_tera(force_download=True)"
+RUN git clone https://github.com/acados/acados.git && \
+    cd acados && \
+    git checkout 5847c74fe774137a5fb31c9791bf39aa980b8b05 && \
+    git submodule update --recursive --init && \
+    mkdir build && cd build && \
+    cmake -DACADOS_WITH_QPOASES=ON \
+          -DACADOS_WITH_OPENMP=ON \
+          -DCMAKE_INSTALL_PREFIX=/opt/acados \
+          .. && \
+    make install -j$(nproc) && \
+    pip install -e /opt/acados/interfaces/acados_template && \
+    python3 -c "from acados_template.utils import get_tera; get_tera(force_download=True)"
 
+# New Cmake
+RUN apt-get update && apt-get install -y wget && \
+    wget -q https://github.com/Kitware/CMake/releases/download/v3.29.2/cmake-3.29.2-linux-aarch64.tar.gz && \
+    tar -xf cmake-3.29.2-linux-aarch64.tar.gz -C /usr/local --strip-components=1 && \
+    rm cmake-3.29.2-linux-aarch64.tar.gz
+
+
+# Open3D installation
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Core Build Tools
+    ccache git cmake build-essential \
+    # Standard Open3D Script Dependencies
+    xorg-dev libxcb-shm0 libglu1-mesa-dev python3-dev libssl-dev \
+    libc++-dev libc++abi-dev libsdl2-dev libxi-dev libtbb-dev \
+    libosmesa6-dev libudev-dev autoconf libtool gfortran \
+    # Headers for "USE_SYSTEM" Optimizations
+    libopenblas-dev liblapack-dev liblapacke-dev \
+    libeigen3-dev libvtk9-dev libglfw3-dev libglew-dev \
+    libfmt-dev libjsoncpp-dev libzmq3-dev pybind11-dev \
+    libpng-dev libjpeg-dev \
+    && rm -rf /var/lib/apt/lists/*
+    
+    RUN --mount=type=cache,target=/root/.cache/ccache \
+    export DEBIAN_FRONTEND=noninteractive && \
+    git clone --recursive  --depth 1 https://github.com/Ozuba/Open3D.git && \
+    cd Open3D && \
+    ./util/install_deps_ubuntu.sh assume-yes no-filament-deps && \
+    mkdir build && cd build && \
+    cmake -DBUILD_CUDA_MODULE=ON \
+        -DUSE_SYSTEM_VTK=ON \
+        -DUSE_SYSTEM_BLAS=ON \
+        -DUSE_SYSTEM_EIGEN3=ON \
+        -DUSE_SYSTEM_GLFW=OFF \
+        -DUSE_SYSTEM_GLEW=ON \
+        -DUSE_SYSTEM_FMT=ON \
+        -DUSE_SYSTEM_JSONCPP=ON \
+        -DUSE_SYSTEM_PNG=ON \
+        -DUSE_SYSTEM_JPEG=ON \
+        -DUSE_SYSTEM_CURL=ON \
+        -DUSE_SYSTEM_TBB=ON \
+        -DWITH_MINIZIP=ON \
+        -DBUILD_UNIT_TESTS=OFF \
+        -DWITH_IPP=OFF \
+        -DBUILD_BENCHMARKS=OFF \
+        -DBUILD_GUI=OFF \
+        .. && \
+    make install && \
+    make install-pip-package 
+
+# Install cudss
+RUN wget https://developer.download.nvidia.com/compute/cudss/0.7.1/local_installers/cudss-local-tegra-repo-ubuntu2204-0.7.1_0.7.1-1_arm64.deb && \
+    dpkg -i cudss-local-tegra-repo-ubuntu2204-0.7.1_0.7.1-1_arm64.deb && \
+    cp /var/cudss-local-tegra-repo-ubuntu2204-0.7.1/cudss-*-keyring.gpg /usr/share/keyrings/ && \
+    apt-get update && \
+    apt-get -y install cudss && \
+    # Cleanup to keep the image slim
+    rm cudss-local-tegra-repo-ubuntu2204-0.7.1_0.7.1-1_arm64.deb
 
 # Userspace
+
+# Set primary and secondary indexes for all pip commands in the container
+ENV PIP_INDEX_URL=https://pypi.jetson-ai-lab.io/jp6/cu126
+ENV PIP_EXTRA_INDEX_URL=https://pypi.org/simple
 
 # System User Setup
 SHELL ["/bin/bash", "-c"]
@@ -131,9 +193,17 @@ RUN groupadd --gid $USER_GID $USERNAME \
     && echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME \
     && chmod 0440 /etc/sudoers.d/$USERNAME
 
+
+
 # Set workspace
 USER $USERNAME
 WORKDIR /home/mirena
+
+# Installation of python deps
+COPY requirements.txt /home/mirena
+RUN pip install --no-cache-dir --index-url $PIP_INDEX_URL \
+    torch torchvision torchaudio
+RUN pip install --no-cache-dir -r /home/mirena/requirements.txt
 
 # Install Oh My Zsh (non-interactively)
 RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended

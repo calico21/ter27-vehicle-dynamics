@@ -58,9 +58,9 @@ RUN set -eux; \
 # Use systemwide pip (Standard practice in containers)
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
 
-# --- Acados Setup (MPC SOLVER GENERATOR) ---
-USER $USERNAME
-WORKDIR /home/$USERNAME
+# Use the more stable .io mirror and provide a fallback to standard PyPI
+ENV PIP_INDEX_URL=https://pypi.jetson-ai-lab.io/jp6/cu128
+ENV PIP_EXTRA_INDEX_URL=https://pypi.org/simple
 
 # Set Acados Environment Variables (set now, used later)
 ENV ACADOS_SOURCE_DIR=/home/$USERNAME/acados
@@ -82,6 +82,17 @@ RUN set -eux; \
     pip install -e $ACADOS_SOURCE_DIR/interfaces/acados_template; \
     # Force install Tera for headless setup
     python3 -c "from acados_template.utils import get_tera; get_tera(force_download=True)"
+
+
+# --- Acados Setup (MPC SOLVER GENERATOR) ---
+USER $USERNAME
+WORKDIR /home/$USERNAME
+
+# Installation of python deps
+#COPY requirements.txt /home/mirena
+#RUN pip install --no-cache-dir -r /home/mirena/requirements.txt
+
+
 
 # --- Shell Setup ---
 # Install Oh My Zsh (non-interactively)
