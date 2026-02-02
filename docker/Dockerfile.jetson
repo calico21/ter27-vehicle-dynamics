@@ -178,7 +178,7 @@ RUN wget https://developer.download.nvidia.com/compute/cudss/0.7.1/local_install
 
 # Set primary and secondary indexes for all pip commands in the container
 ENV PIP_INDEX_URL=https://pypi.jetson-ai-lab.io/jp6/cu126
-ENV PIP_EXTRA_INDEX_URL=https://pypi.org/simple
+#ENV PIP_EXTRA_INDEX_URL=https://pypi.org/simple
 
 # System User Setup
 SHELL ["/bin/bash", "-c"]
