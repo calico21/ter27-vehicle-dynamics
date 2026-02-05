@@ -104,4 +104,4 @@ source $ZSH/oh-my-zsh.sh
 # alias ohmyzsh="mate ~/.oh-my-zsh"
 
 source /opt/ros/jazzy/setup.zsh
-[ -d /root/mirena_ws/install ] && source /root/mirena_ws/install/local_setup.zsh
+[ -d /home/mirena/mirena_ws/install ] && source /home/mirena/mirena_ws/install/setup.zsh

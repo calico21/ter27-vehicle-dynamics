@@ -5,53 +5,52 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     return LaunchDescription([
-        # Launch the mirena_sim node with the --track argument
-        #Node(
-        #    package='mirena_sim',
-        #    executable='sim',
-        #    name='mirena_sim',
-        #    output='screen',
-        #    arguments=['--track=TrackFiles/track.json']
-        #),
+        Node(
+            package='mirena_sim',
+            executable='mirena_sim',
+            name='mirena_sim',
+            output='screen',
+            arguments=['']
+        ),
         
         Node(
-            package='mirena_lidar',
-            executable='mirena_lidar',
-            name='mirena_lidar',
+            package='mirena_perception',
+            executable='perception_node',
+            name='mirena_perception',
             output='screen'
         ),
 
         
-        Node(
-            package='mirena_slam',
-            executable='mirena_slam',
-            name='mirena_slam',
-            output='screen',
-            remappings=[
-                ("/debug/sim/perception_entities", "/perception/entities")#,
-                #("/debug/sim/car_state", "/consensus/car_state")
-            ]
-        ),
-        Node(
-            package='mirena_planning',
-            executable='mirena_planning',
-            name='mirena_planning',
-            output='screen',
-            remappings=[
-                #("/debug/sim/car_state", "/consensus/car_state"),
-                ("/debug/sim/slam_entities", "/slam/full_map")
-            ]
-        ),
-        Node(
-            package='mirena_control',
-            executable='mirena_control',
-            name='mirena_control',
-            output='screen',
-            remappings=[
-                #("/debug/sim/car_state", "/consensus/car_state"),
-                ("/debug/sim/full_centerline_path", "/planning/centerline_path")
-            ]
-        )
+        #Node(
+        #    package='mirena_slam',
+        #    executable='mirena_slam',
+        #    name='mirena_slam',
+        #    output='screen',
+        #    remappings=[
+        #        ("/debug/sim/perception_entities", "/perception/entities")#,
+        #        #("/debug/sim/car_state", "/consensus/car_state")
+        #    ]
+        #),
+        #Node(
+        #    package='mirena_planning',
+        #    executable='mirena_planning',
+        #    name='mirena_planning',
+        #    output='screen',
+        #    remappings=[
+        #        #("/debug/sim/car_state", "/consensus/car_state"),
+        #        ("/debug/sim/slam_entities", "/slam/full_map")
+        #    ]
+        #),
+        #Node(
+        #    package='mirena_control',
+        #    executable='mirena_control',
+        #    name='mirena_control',
+        #    output='screen',
+        #    remappings=[
+        #        #("/debug/sim/car_state", "/consensus/car_state"),
+        #        ("/debug/sim/full_centerline_path", "/planning/centerline_path")
+        #    ]
+        #)
     ])
 
 def main():

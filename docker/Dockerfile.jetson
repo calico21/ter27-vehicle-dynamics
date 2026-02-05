@@ -94,7 +94,7 @@ RUN /bin/bash -c "source /opt/ros/jazzy/setup.bash && apt update && rosdep updat
     && rosdep install --from-paths ${BUILD_DIR}/mirena_overlay/src --ignore-src -y --rosdistro jazzy"
 # Use a simple shell for the RUN command and source manually
 RUN /bin/bash -c "source /opt/ros/jazzy/setup.bash && \
-    colcon build --merge-install --install-base /opt/ros/jazzy --cmake-args -DBUILD_TESTING=OFF -DCMAKE_DISABLE_FIND_PACKAGE_benchmark=ON"
+    colcon build --merge-install --install-base /opt/ros/jazzy --cmake-args -DBUILD_TESTING=OFF -DGTSAM_USE_SYSTEM_EIGEN=ON -DCMAKE_DISABLE_FIND_PACKAGE_benchmark=ON"
 
 
 # SYSTEM packages
@@ -162,8 +162,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         -DBUILD_BENCHMARKS=OFF \
         -DBUILD_GUI=OFF \
         .. && \
-    make install && \
-    make install-pip-package 
+    make install -j6 && \
+    make install-pip-package -j6
 
 # Install cudss
 RUN wget https://developer.download.nvidia.com/compute/cudss/0.7.1/local_installers/cudss-local-tegra-repo-ubuntu2204-0.7.1_0.7.1-1_arm64.deb && \

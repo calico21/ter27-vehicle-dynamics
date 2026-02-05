@@ -20,16 +20,18 @@
     "QT_X11_NO_MITSHM=1",
     "-e",
     "NVIDIA_VISIBLE_DEVICES=all",
+    "-e",
+    "CUDA_FORCE_PTX_JIT=0",
     "-v",
     "/tmp/.X11-unix:/tmp/.X11-unix:rw",
     "-v",
     "/usr/share/vulkan/icd.d:/usr/share/vulkan/icd.d:ro"
   ],
   "mounts": [
-    "source=${localWorkspaceFolder},target=/home/mirena/mirena_ws,type=bind"
+    "source=${localWorkspaceFolder},target=/home/mirena/mirena_ws,type=bind",
+    "source=cuda_cache,target=/home/mirena/.nv/ComputeCache,type=volume" //Really Important Keeps the kernels cached so no hanging
   ],
-  "workspaceFolder": "/home/mirena/mirena_ws",
-  "remoteUser": "mirena",
+  "postCreateCommand": "sudo chown -R mirena:mirena /home/mirena/.nv && sudo chmod -R 775 /home/mirena/.nv",//Fixes permissions for cuda cache
   "initializeCommand": "xhost +local:docker && xhost +local:root",
   "customizations": {
     "vscode": {

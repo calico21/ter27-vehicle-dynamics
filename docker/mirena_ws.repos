@@ -22,4 +22,9 @@ repositories:
     src/ros_babel_fish:
         type: git
         url: https://github.com/LOEWE-emergenCITY/ros_babel_fish.git
-        versoin: jazzy
+        version: jazzy
+
+    src/gtsam:
+        type: git
+        url: https://github.com/borglab/gtsam.git
+        version: 4.2.0-ros
