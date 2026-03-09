@@ -5,45 +5,39 @@ from launch_ros.actions import Node
 def generate_launch_description():
     return LaunchDescription([
         # Launch the mirena_sim node with the --track argument
-        Node(
-            package='mirena_sim',
-            executable='sim',
-            name='mirena_sim',
-            output='screen',
-            arguments=['--track=TrackFiles/track.json']
-        ),
+        #Node(
+        #    package='mirena_sim',
+        #    executable='sim',
+        #    name='mirena_sim',
+        #    output='screen',
+        #    arguments=['--track=TrackFiles/track.json']
+        #),
         
         # Launch the mirena_lidar node
         Node(
-            package='mirena_lidar',
-            executable='mirena_lidar',
-            name='mirena_lidar',
+            package='mirena_perception',
+            executable='perception_node',
+            name='mirena_perception',
             output='screen'
         ),
 
-        # Launch RViz2 for visualization
         Node(
-            package='rviz2',
-            executable='rviz2',
-            name='rviz2',
+            package='mirena_consensus',
+            executable='mirena_consensus',
+            name='mirena_consensus',
             output='screen'
         ),
         
-        # Launch another instance of RViz2 for multiple visualizations
-        Node(
-            package='rviz2',
-            executable='rviz2',
-            name='rviz2_2',
-            output='screen'
-        ),
-        
-        # Launch the mirena_slam node
         Node(
             package='mirena_slam',
             executable='mirena_slam',
             name='mirena_slam',
-            output='screen'
-        ),
+            output='screen',
+            remappings=[
+                ("/debug/sim/perception_entities", "/perception/entities"),
+                ("/debug/sim/car_state", "/consensus/car_state")
+            ]
+        )
     ])
 
 def main():
