@@ -17,21 +17,21 @@ def generate_launch_description():
         description='Operating mode: "sim" or "car"'
     )
 
-    track_arg = DeclareLaunchArgument(
-        'track',
+    mission_arg = DeclareLaunchArgument(
+        'mission',
         default_value='random',
         description='Track type: "dicovery", "skidpad" or "acceleration"'
     )
 
     # 2. Get the values from the configurations
     mode = LaunchConfiguration('mode')
-    track = LaunchConfiguration('track')
+    mission = LaunchConfiguration('mission')
     common_params = [{'use_sim_time': False}]
 
     # 3. Dynamic Map Path Selection Logic
     map_path_expr = PythonExpression([
-        "'/home/mirena/mirena_ws/src/mirena_sim/TrackFiles/skidpad.json' if '", track, "' == 'skidpad' else (",
-        "'/home/mirena/mirena_ws/src/mirena_sim/TrackFiles/acceleration.json' if '", track, "' == 'acceleration' else 'random')"
+        "'/home/mirena/mirena_ws/src/mirena_sim/TrackFiles/skidpad.json' if '", mission, "' == 'skidpad' else (",
+        "'/home/mirena/mirena_ws/src/mirena_sim/TrackFiles/acceleration.json' if '", mission, "' == 'acceleration' else 'random')"
     ])
 
     # --- NODE DEFINITIONS ---
@@ -50,11 +50,7 @@ def generate_launch_description():
         condition=IfCondition(PythonExpression(["'", mode, "' == 'sim'"])),
         package='mirena_sim',
         executable='mirena_sim',
-        name='mirena_sim',
         output='screen',
-        #parameters=common_params,
-        #arguments=[PythonExpression(["'--' + '", track, "'"])]
-        #arguments=['--track', track]
         parameters=[
             *common_params,
             {'track': map_path_expr}
@@ -84,7 +80,7 @@ def generate_launch_description():
         name='mirena_planning',
         namespace='',
         output = 'screen',
-        parameters=[*common_params, {'mission': map_path_expr}, {'lap_count': 1}]
+        parameters=[*common_params, {'mission': mission}, {'lap_count': 1}]
     )
 
     control_node = Node(
@@ -124,7 +120,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         mode_arg,
-        track_arg,
+        mission_arg,
         rviz_node,         
         namespaced_group,  
     ])

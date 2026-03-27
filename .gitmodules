@@ -35,3 +35,6 @@
 [submodule "src/mirena_perception"]
 	path = src/mirena_perception
 	url = https://git.eracing.es/Driverless/mirena_perception
+[submodule "src/mirena_supervisor"]
+	path = src/mirena_supervisor
+	url = https://git.eracing.es/Driverless/mirena_supervisor
