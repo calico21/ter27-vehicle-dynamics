@@ -1,134 +1,112 @@
-import launch
+import os
 from launch import LaunchDescription
-from launch_ros.actions import Node, PushRosNamespace
-from launch.actions import DeclareLaunchArgument, GroupAction
-from launch.substitutions import LaunchConfiguration, PythonExpression, EqualsSubstitution
-from launch.conditions import LaunchConfigurationEquals, IfCondition, UnlessCondition
-from launch.actions import RegisterEventHandler, EmitEvent
-from launch.event_handlers import OnProcessExit
-from launch.events import Shutdown
-from launch_ros.actions import LifecycleNode
+from launch.actions import DeclareLaunchArgument, SetLaunchConfiguration, OpaqueFunction
+from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.conditions import IfCondition, UnlessCondition
+from launch_ros.actions import Node, LifecycleNode
 
 def generate_launch_description():
-    # 1. Declare Launch Arguments
-    mode_arg = DeclareLaunchArgument(
-        'mode',
-        default_value='sim',
-        description='Operating mode: "sim" or "car"'
-    )
+    # --- 1. CONFIGURATION ---
+    # Paths (adjust if using ament_index_python for portability)
+    track_dir = "/home/mirena/mirena_ws/src/mirena_sim/TrackFiles/"
+    rviz_config = "/home/mirena/mirena_ws/launch/full.rviz"
+    
+    # Arguments
+    args = [
+        DeclareLaunchArgument('mode', default_value='sim', description='sim or real'),
+        DeclareLaunchArgument('track', default_value='random', description='skidpad, acceleration, or random'),
+        DeclareLaunchArgument('use_debug_perception', default_value='false'),
+    ]
 
-    mission_arg = DeclareLaunchArgument(
-        'mission',
-        default_value='random',
-        description='Track type: "dicovery", "skidpad" or "acceleration"'
-    )
-
-    # 2. Get the values from the configurations
+    # Substitutions
     mode = LaunchConfiguration('mode')
-    mission = LaunchConfiguration('mission')
-    common_params = [{'use_sim_time': False}]
+    track = LaunchConfiguration('track')
+    use_debug_perception = LaunchConfiguration('use_debug_perception')
+    common_params = [{'use_sim_time': True}] # Usually True for simulation
 
-    # 3. Dynamic Map Path Selection Logic
-    map_path_expr = PythonExpression([
-        "'/home/mirena/mirena_ws/src/mirena_sim/TrackFiles/skidpad.json' if '", mission, "' == 'skidpad' else (",
-        "'/home/mirena/mirena_ws/src/mirena_sim/TrackFiles/acceleration.json' if '", mission, "' == 'acceleration' else 'random')"
+    # --- 2. CONDITIONAL MAPPING ---
+    # Convert track name to full path for the simulator
+    track_path = PythonExpression([
+        f"'{track_dir}' + '{track}.json' if '", track, "' != 'random' else 'random'"
     ])
 
-    # --- NODE DEFINITIONS ---
-    # Note: Removed trailing commas to prevent them from becoming tuples
-    
-    rviz_node = Node(
-        package='rviz2',
-        executable='rviz2',
-        name='rviz2',
-        output='log',
-        parameters=common_params,
-        arguments=['-d', "/home/mirena/mirena_ws/launch/full.rviz"]
-    )
+    # Define which nodes the supervisor should manage
+    nodes_to_supervise = PythonExpression([
+        "['mirena_slam', 'mirena_planning', 'mirena_control'] if '", 
+        use_debug_perception, 
+        "' == 'true' else ['mirena_perception', 'mirena_slam', 'mirena_planning', 'mirena_control']"
+    ])
 
+    # Dynamic remapping for perception
+    perception_topic = PythonExpression([
+        "'car/debug_perception' if '", use_debug_perception, "' == 'true' else 'perception/entities'"
+    ])
+
+    # --- 3. NODE DEFINITIONS ---
+
+    # Simulator (Only node that receives the track file)
     sim_node = Node(
         condition=IfCondition(PythonExpression(["'", mode, "' == 'sim'"])),
-        package='mirena_sim',
+        package='mirena_sim', 
         executable='mirena_sim',
-        output='screen',
-        parameters=[
-            *common_params,
-            {'track': map_path_expr}
-        ], 
-    )
-    
-    perception_node = Node(
-        package='mirena_perception',
-        executable='perception_node',
-        name='mirena_perception',
-        output='log',
-        parameters=common_params,
-      
-    )
-    
-    slam_node = Node(
-        package='mirena_slam',
-        executable='mirena_slam',
-        name='mirena_slam',
-        output='screen',
-        parameters=common_params,
-    )
-
-    planning_node = LifecycleNode(
-        package ='mirena_planning',
-        executable = 'planning_node',
-        name='mirena_planning',
-        namespace='',
-        output = 'screen',
-        parameters=[*common_params, {'mission': mission}, {'lap_count': 1}]
-    )
-
-    control_node = Node(
-        package='mirena_control',
-        executable='control_node',
-        name='mirena_control',
-        output='log',
-        parameters=common_params
+        parameters=[*common_params, {'track': track_path}],
     )
 
     supervisor_node = Node(
-        package='mirena_supervisor',
-        executable='supervisor_node',
+        package='mirena_supervisor', 
+        executable='supervisor_node', 
         name='mirena_supervisor',
         output='screen',
+        parameters=[*common_params, {'nodes_to_supervise': nodes_to_supervise}]
+    )
+
+    # Runtime Nodes
+    perception_node = Node(
+        condition=UnlessCondition(use_debug_perception),
+        package='mirena_perception', 
+        executable='perception_node', 
+        name='mirena_perception',
+        parameters=common_params,
+    )
+
+    slam_node = Node(
+        package='mirena_slam', 
+        executable='mirena_slam', 
+        name='mirena_slam',
+        parameters=common_params,
+        remappings=[('perception/entities', perception_topic)]
+    )
+
+    planning_node = LifecycleNode(
+        package='mirena_planning', 
+        executable='planning_node', 
+        name='mirena_planning',
+        namespace='', 
         parameters=common_params
     )
 
-    nodes_to_namespace = [
-        sim_node, 
-        perception_node, 
-        slam_node, 
-        planning_node,
-        control_node,
-        supervisor_node
-    ]
-
-    # This pushes everything inside the list into the namespace defined by 'mode'
-    namespaced_group = GroupAction(
-        actions=[
-            #PushRosNamespace(mode),
-            *nodes_to_namespace
-        ]
+    control_node = Node(
+        package='mirena_control', 
+        executable='control_node', 
+        name='mirena_control',
+        parameters=common_params
     )
 
+    rviz_node = Node(
+        package='rviz2', 
+        executable='rviz2', 
+        name='rviz2',
+        parameters=common_params,
+        arguments=['-d', rviz_config]
+    )
 
-
-    return LaunchDescription([
-        mode_arg,
-        mission_arg,
-        rviz_node,         
-        namespaced_group,  
+    # --- 4. EXECUTION ---
+    return LaunchDescription(args + [
+        rviz_node,
+        sim_node,
+        supervisor_node,
+        perception_node,
+        slam_node,
+        planning_node,
+        control_node
     ])
-
-def main():
-    launch_service = launch.LaunchService()
-    launch_service.include_launch_description(generate_launch_description())
-    launch_service.run()
-
-if __name__ == '__main__':
-    main()
