@@ -62,7 +62,6 @@ RUN apt update \
     python3-vcstool \
     && rm -rf /var/lib/apt/lists/*
 
-    
 # Create the workspace and clone the repositories
 RUN mkdir -p ${BUILD_DIR}/ros/src 
 # Clone the repositories for Jazzy + custom dependencies

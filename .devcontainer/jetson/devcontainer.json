@@ -27,7 +27,9 @@
     "-v",
     "/usr/share/vulkan/icd.d:/usr/share/vulkan/icd.d:ro",
      "-v",
-    "/dev:/dev"
+    "/dev:/dev",
+    "-v", 
+    "/lib/modules:/lib/modules:ro"  
   ],
   "mounts": [
     "source=${localWorkspaceFolder},target=/home/mirena/mirena_ws,type=bind",
