@@ -34,7 +34,7 @@ def generate_launch_description():
     nodes_to_supervise = PythonExpression([
         "['mirena_slam', 'mirena_planning', 'mirena_control'] if '", 
         use_debug_perception, 
-        "' == 'true' else ['mirena_perception', 'mirena_slam', 'mirena_planning', 'mirena_control']"
+        "' == 'false' else ['mirena_perception', 'mirena_slam', 'mirena_planning', 'mirena_control']"
     ])
 
     # Dynamic remapping for perception
