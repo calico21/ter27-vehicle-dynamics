@@ -15,7 +15,7 @@ def generate_launch_description():
     args = [
         DeclareLaunchArgument('mode', default_value='sim', description='sim or real'),
         DeclareLaunchArgument('track', default_value='random', description='skidpad, acceleration, or random'),
-        DeclareLaunchArgument('use_debug_perception', default_value='false'),
+        DeclareLaunchArgument('use_debug_perception', default_value='true'),
     ]
 
     # Substitutions
@@ -28,13 +28,6 @@ def generate_launch_description():
     # Convert track name to full path for the simulator
     track_path = PythonExpression([
         f"'{track_dir}' + '{track}.json' if '", track, "' != 'random' else 'random'"
-    ])
-
-    # Define which nodes the supervisor should manage
-    nodes_to_supervise = PythonExpression([
-        "['mirena_slam', 'mirena_planning', 'mirena_control'] if '", 
-        use_debug_perception, 
-        "' == 'false' else ['mirena_perception', 'mirena_slam', 'mirena_planning', 'mirena_control']"
     ])
 
     # Dynamic remapping for perception
@@ -57,10 +50,10 @@ def generate_launch_description():
 
     supervisor_node = Node(
         package='mirena_supervisor', 
-        executable='supervisor_node', 
+        executable='mirena_supervisor', 
         name='mirena_supervisor',
         output='screen',
-        parameters=[*common_params, {'nodes_to_supervise': nodes_to_supervise}]
+        parameters=[*common_params]
     )
 
     # Runtime Nodes
@@ -90,7 +83,7 @@ def generate_launch_description():
 
     planning_node = LifecycleNode(
         package='mirena_planning', 
-        executable='planning_node', 
+        executable='mirena_planning', 
         name='mirena_planning',
         namespace='', 
         parameters=common_params
