@@ -8,7 +8,7 @@ from launch_ros.events.lifecycle import ChangeState
 from launch_ros.event_handlers import OnStateTransition
 
 def generate_launch_description():
-    # 1. Setup Paths
+    #1. Setup Paths
     hw_config = os.path.join(
         get_package_share_directory('mirena_hardware'),
         'config', 'camera.yaml'
@@ -29,16 +29,76 @@ def generate_launch_description():
         ]
     )
 
+    camera_node = LifecycleNode(
+        package='mirena_hardware',
+        executable='mirena_camera',
+        name = 'mirena_camera',
+        namespace='',
+        parameters=[hw_config],
+        output='screen'
+    )
+
+    lidar_node = LifecycleNode(
+        package='mirena_hardware',
+        executable='mirena_lidar',
+        name = 'mirena_lidar',
+        namespace='',
+        output='screen'
+    )
+
+
     # 3. Transition Logic: Unconfigured -> Inactive (Configure)
-    emit_configure_event = EmitEvent(
+    configure_perception = EmitEvent(
         event=ChangeState(
             lifecycle_node_matcher=lambda node: node == perception_node,
             transition_id=lifecycle_msgs.msg.Transition.TRANSITION_CONFIGURE,
         )
     )
 
+    configure_camera = EmitEvent(
+        event=ChangeState(
+            lifecycle_node_matcher=lambda node: node == camera_node,
+            transition_id=lifecycle_msgs.msg.Transition.TRANSITION_CONFIGURE,
+        )
+    )
+
+    configure_lidar = EmitEvent(
+        event=ChangeState(
+            lifecycle_node_matcher=lambda node: node == lidar_node,
+            transition_id=lifecycle_msgs.msg.Transition.TRANSITION_CONFIGURE,
+        )
+    )
+
     # 4. Transition Logic: Inactive -> Active (Activate)
-    register_activate_handler = RegisterEventHandler(
+    activate_camera = RegisterEventHandler(
+        OnStateTransition(
+            target_lifecycle_node=perception_node,
+            goal_state='inactive',
+            entities=[
+                EmitEvent(
+                    event=ChangeState(
+                        lifecycle_node_matcher=lambda node: node == camera_node,
+                        transition_id=lifecycle_msgs.msg.Transition.TRANSITION_ACTIVATE,
+                    )
+                )
+            ]
+        )
+    )
+    activate_lidar = RegisterEventHandler(
+        OnStateTransition(
+            target_lifecycle_node=perception_node,
+            goal_state='inactive',
+            entities=[
+                EmitEvent(
+                    event=ChangeState(
+                        lifecycle_node_matcher=lambda node: node == lidar_node,
+                        transition_id=lifecycle_msgs.msg.Transition.TRANSITION_ACTIVATE,
+                    )
+                )
+            ]
+        )
+    )
+    activate_perception = RegisterEventHandler(
         OnStateTransition(
             target_lifecycle_node=perception_node,
             goal_state='inactive',
@@ -58,38 +118,31 @@ def generate_launch_description():
         # LiDAR: x=0.6, y=0.05 (5cm Left), z=0.25
         Node(package='tf2_ros', executable='static_transform_publisher',
             name='tf_cog_lidar', 
-            arguments=['0.6', '0.0', '0.25', '0', '0', '0', 'car/cog', 'car/lidar']),
+            arguments=['-0.2', '-0.15', '0.25', '0', '0', '0', 'car/cog', 'car/lidar']),
         
         # Camera: x=0.6, y=-0.05 (5cm Right), z=0.25
         Node(package='tf2_ros', executable='static_transform_publisher',
             name='tf_cog_cam', 
-            arguments=['1.0', '0.3', '0.25', '0', '0', '0', 'car/cog', 'car/camera_link']),
+            arguments=['0', '0.0', '0.25', '0', '0', '0', 'car/cog', 'car/camera_link']),
         
         # Optical rotation (Standard ROS camera convention: Z forward, X right, Y down)
         Node(package='tf2_ros', executable='static_transform_publisher',
             name='tf_cam_optical', 
             arguments=['0', '0', '0', '-1.571', '0', '-1.571', 'car/camera_link', 'car/camera_optical'])
+        
     ]
 
-    # 6. Hardware Nodes
-    camera_node = Node(
-        package='mirena_hardware',
-        executable='mirena_camera',
-        parameters=[hw_config],
-        output='screen'
-    )
 
-    lidar_node = Node(
-        package='mirena_hardware',
-        executable='mirena_lidar',
-        output='screen'
-    )
 
     return LaunchDescription([
         *tf_nodes,
         camera_node,
         lidar_node,
         perception_node,
-        emit_configure_event,
-        register_activate_handler
+        configure_camera,
+        configure_lidar,
+        configure_perception,
+        activate_camera,
+        activate_lidar,
+        activate_perception
     ])
