@@ -26,16 +26,16 @@
     "/tmp/.X11-unix:/tmp/.X11-unix:rw",
     "-v",
     "/usr/share/vulkan/icd.d:/usr/share/vulkan/icd.d:ro",
-     "-v",
+    "-v",
     "/dev:/dev",
-    "-v", 
-    "/lib/modules:/lib/modules:ro"  
+    "-v",
+    "/lib/modules:/lib/modules:ro"
   ],
   "mounts": [
     "source=${localWorkspaceFolder},target=/home/mirena/mirena_ws,type=bind",
     "source=cuda_cache,target=/home/mirena/.nv/ComputeCache,type=volume" //Really Important Keeps the kernels cached so no hanging
   ],
-  "postCreateCommand": "sudo chown -R mirena:mirena /home/mirena/.nv && sudo chmod -R 775 /home/mirena/.nv",//Fixes permissions for cuda cache
+  "postCreateCommand": "sudo chown -R mirena:mirena /home/mirena/.nv && sudo chmod -R 775 /home/mirena/.nv", //Fixes permissions for cuda cache
   "initializeCommand": "xhost +local:docker && xhost +local:root",
   "customizations": {
     "vscode": {
