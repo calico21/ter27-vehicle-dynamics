@@ -60,3 +60,7 @@ CATKIN_IGNORE
 /remocon_snapshots/**
 lmu
 acados_ocp.json
+rosbags
+.venv
+frames*
+testing

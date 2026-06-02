@@ -209,8 +209,12 @@ RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master
 # Copy Zshell config
 COPY .zshrc /home/$USERNAME/
 
+#ENV
+ENV ROS_DOMAIN_ID=42 
+
 #SET default Shell for user
 ENV SHELL=/bin/zsh
+
 SHELL ["/bin/zsh", "-c"]
 
 # Default launch command

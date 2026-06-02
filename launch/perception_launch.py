@@ -1,4 +1,5 @@
 import os
+import sys
 import lifecycle_msgs.msg
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -7,7 +8,12 @@ from launch.actions import EmitEvent, RegisterEventHandler
 from launch_ros.events.lifecycle import ChangeState
 from launch_ros.event_handlers import OnStateTransition
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+print(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from common import StaticTransforms
+
 def generate_launch_description():
+    print(os.getcwd())
     #1. Setup Paths
     hw_config = os.path.join(
         get_package_share_directory('mirena_hardware'),
@@ -18,14 +24,14 @@ def generate_launch_description():
     # Explicitly using keyword arguments to satisfy the 'namespace' requirement
     perception_node = LifecycleNode(
         package='mirena_perception',
-        executable='perception_node',
+        executable='mirena_perception',
         name='mirena_perception',
         namespace='',  # <--- This must be a keyword argument
         output='screen',
         remappings=[
-            ('car/camera/image_raw', 'image_raw'),
-            ('car/camera/camera_info', 'camera_info'),
-            ('car/lidar/cloud', 'lidar/cloud') 
+            ('car/camera/image_raw', 'car/camera/image_raw'),
+            ('car/camera/camera_info', 'car/camera/camera_info'),
+            ('car/lidar/cloud', 'car/lidar/cloud') 
         ]
     )
 
@@ -113,25 +119,23 @@ def generate_launch_description():
         )
     )
 
-    # 5. Static Transforms
     tf_nodes = [
-        # LiDAR: x=0.6, y=0.05 (5cm Left), z=0.25
-        Node(package='tf2_ros', executable='static_transform_publisher',
-            name='tf_cog_lidar', 
-            arguments=['-0.2', '-0.15', '0.25', '0', '0', '0', 'car/cog', 'car/lidar']),
-        
-        # Camera: x=0.6, y=-0.05 (5cm Right), z=0.25
-        Node(package='tf2_ros', executable='static_transform_publisher',
-            name='tf_cog_cam', 
-            arguments=['0', '0.0', '0.25', '0', '0', '0', 'car/cog', 'car/camera_link']),
-        
-        # Optical rotation (Standard ROS camera convention: Z forward, X right, Y down)
-        Node(package='tf2_ros', executable='static_transform_publisher',
-            name='tf_cam_optical', 
-            arguments=['0', '0', '0', '-1.571', '0', '-1.571', 'car/camera_link', 'car/camera_optical'])
-        
+            # LiDAR: x=0.6, y=0.05 (5cm Left), z=0.25
+            Node(package='tf2_ros', executable='static_transform_publisher',
+                name='tf_cog_lidar', 
+                arguments=['-0.2', '-0.15', '0.25', '0', '0', '0', 'car/cog', 'car/lidar']),
+            
+            # Camera: x=0.6, y=-0.05 (5cm Right), z=0.25
+            Node(package='tf2_ros', executable='static_transform_publisher',
+                name='tf_cog_cam', 
+                arguments=['0', '0.0', '0.25', '0', '0', '0', 'car/cog', 'car/camera_link']),
+            
+            # Optical rotation (Standard ROS camera convention: Z forward, X right, Y down)
+            Node(package='tf2_ros', executable='static_transform_publisher',
+                name='tf_cam_optical', 
+                arguments=['0', '0', '0', '-1.571', '0', '-1.571', 'car/camera_link', 'car/camera_optical'])
+            
     ]
-
 
 
     return LaunchDescription([

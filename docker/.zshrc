@@ -105,3 +105,10 @@ source $ZSH/oh-my-zsh.sh
 
 source /opt/ros/jazzy/setup.zsh
 [ -d /home/mirena/mirena_ws/install ] && source /home/mirena/mirena_ws/install/setup.zsh
+
+if [ -z $ROS_DOMAIN_ID ]
+then
+	echo "WARNING!! Ros domain ID missing"
+else
+	echo "Ros domain ID: ${ROS_DOMAIN_ID}"
+fi
