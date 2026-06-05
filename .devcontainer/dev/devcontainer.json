@@ -1,10 +1,9 @@
 {
-  "name": "mirena_ws",
-  "dockerComposeFile": "../docker/docker-compose.yml",
+  "name": "Mirena Workspace",
+  "dockerComposeFile": "docker-compose.yml",
   "service": "mirena_ws",
   "workspaceFolder": "/home/mirena/mirena_ws",
   "initializeCommand": "xhost +local:docker && xhost +local:root",
-  
   "customizations": {
     "vscode": {
       "extensions": [

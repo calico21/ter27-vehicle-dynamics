@@ -103,6 +103,8 @@ source $ZSH/oh-my-zsh.sh
 # alias zshconfig="mate ~/.zshrc"
 # alias ohmyzsh="mate ~/.oh-my-zsh"
 
+export PATH="$HOME/.local/bin:$PATH"
+
 source /opt/ros/jazzy/setup.zsh
 [ -d /home/mirena/mirena_ws/install ] && source /home/mirena/mirena_ws/install/setup.zsh
 

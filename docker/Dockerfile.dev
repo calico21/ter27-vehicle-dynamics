@@ -35,12 +35,14 @@ RUN apt update && apt install -y \
     ros-jazzy-desktop \
     && rm -rf /var/lib/apt/lists/*
 
+
 # General dependencies
 RUN apt update && apt install -y \
     unzip \
     zsh \
     python3-pip \
     libopencv-dev \
+    libopenblas-dev \
     python3-opencv \
     v4l-utils \
     libv4l-dev \
@@ -62,6 +64,7 @@ RUN apt update && apt install -y \
     
 # Use systemwide pip
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
+
 
 # Set workspace
 USER $USERNAME

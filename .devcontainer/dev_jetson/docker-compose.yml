@@ -1,37 +1,25 @@
 version: '3.8'
 
-
 volumes:
   cuda_cache:
 
 services:
   mirena_ws:
-    container_name: mirena_ws_container
+    container_name: mirena_ws_container_jetson
     build:
-      context: .
+      context: ../../docker
       dockerfile: Dockerfile.dev
     
+    runtime: nvidia
     tty: true
     stdin_open: true
-    runtime: nvidia
     privileged: true
     network_mode: host
     ipc: host
     group_add:
       - "44"
       - "992"
-    devices:
-      - /dev/dri:/dev/dri
-      - /dev:/dev
       
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu, utility, compute, display]
-
     environment:
       - DISPLAY=${DISPLAY}
       - QT_X11_NO_MITSHM=1
@@ -39,10 +27,12 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=all,display,compute,utility
 
     volumes:
-      - ..:/home/mirena/mirena_ws:rw
+      - ../..:/home/mirena/mirena_ws:rw
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - /usr/share/vulkan/icd.d:/usr/share/vulkan/icd.d:ro
       - cuda_cache:/home/mirena/.nv/ComputeCache
+      - /dev:/dev
+      - /tmp:/tmp:rw
 
 
     command: sleep infinity

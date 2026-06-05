@@ -17,7 +17,7 @@ def generate_launch_description():
     #1. Setup Paths
     hw_config = os.path.join(
         get_package_share_directory('mirena_hardware'),
-        'config', 'camera.yaml'
+        'config', 'camera_params.yaml'
     )
 
     # 2. Define the Perception Lifecycle Node
