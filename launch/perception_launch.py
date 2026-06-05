@@ -10,7 +10,7 @@ from launch_ros.event_handlers import OnStateTransition
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 print(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from common import StaticTransforms
+
 
 def generate_launch_description():
     print(os.getcwd())
@@ -28,11 +28,7 @@ def generate_launch_description():
         name='mirena_perception',
         namespace='',  # <--- This must be a keyword argument
         output='screen',
-        remappings=[
-            ('car/camera/image_raw', 'car/camera/image_raw'),
-            ('car/camera/camera_info', 'car/camera/camera_info'),
-            ('car/lidar/cloud', 'car/lidar/cloud') 
-        ]
+        arguments = ['-a']
     )
 
     camera_node = LifecycleNode(
@@ -41,7 +37,8 @@ def generate_launch_description():
         name = 'mirena_camera',
         namespace='',
         parameters=[hw_config],
-        output='screen'
+        output='screen',
+        arguments = ['-a']
     )
 
     lidar_node = LifecycleNode(
@@ -49,104 +46,25 @@ def generate_launch_description():
         executable='mirena_lidar',
         name = 'mirena_lidar',
         namespace='',
-        output='screen'
+        output='screen',
+        arguments = ['-a']
+    )
+    transform_node = LifecycleNode(
+        package='mirena_hardware',
+        executable='mirena_transform',
+        name = 'mirena_transform',
+        namespace='',
+        parameters=[hw_config],
+        output='screen',
+        arguments = ['-a']
     )
 
-
-    # 3. Transition Logic: Unconfigured -> Inactive (Configure)
-    configure_perception = EmitEvent(
-        event=ChangeState(
-            lifecycle_node_matcher=lambda node: node == perception_node,
-            transition_id=lifecycle_msgs.msg.Transition.TRANSITION_CONFIGURE,
-        )
-    )
-
-    configure_camera = EmitEvent(
-        event=ChangeState(
-            lifecycle_node_matcher=lambda node: node == camera_node,
-            transition_id=lifecycle_msgs.msg.Transition.TRANSITION_CONFIGURE,
-        )
-    )
-
-    configure_lidar = EmitEvent(
-        event=ChangeState(
-            lifecycle_node_matcher=lambda node: node == lidar_node,
-            transition_id=lifecycle_msgs.msg.Transition.TRANSITION_CONFIGURE,
-        )
-    )
-
-    # 4. Transition Logic: Inactive -> Active (Activate)
-    activate_camera = RegisterEventHandler(
-        OnStateTransition(
-            target_lifecycle_node=perception_node,
-            goal_state='inactive',
-            entities=[
-                EmitEvent(
-                    event=ChangeState(
-                        lifecycle_node_matcher=lambda node: node == camera_node,
-                        transition_id=lifecycle_msgs.msg.Transition.TRANSITION_ACTIVATE,
-                    )
-                )
-            ]
-        )
-    )
-    activate_lidar = RegisterEventHandler(
-        OnStateTransition(
-            target_lifecycle_node=perception_node,
-            goal_state='inactive',
-            entities=[
-                EmitEvent(
-                    event=ChangeState(
-                        lifecycle_node_matcher=lambda node: node == lidar_node,
-                        transition_id=lifecycle_msgs.msg.Transition.TRANSITION_ACTIVATE,
-                    )
-                )
-            ]
-        )
-    )
-    activate_perception = RegisterEventHandler(
-        OnStateTransition(
-            target_lifecycle_node=perception_node,
-            goal_state='inactive',
-            entities=[
-                EmitEvent(
-                    event=ChangeState(
-                        lifecycle_node_matcher=lambda node: node == perception_node,
-                        transition_id=lifecycle_msgs.msg.Transition.TRANSITION_ACTIVATE,
-                    )
-                )
-            ]
-        )
-    )
-
-    tf_nodes = [
-            # LiDAR: x=0.6, y=0.05 (5cm Left), z=0.25
-            Node(package='tf2_ros', executable='static_transform_publisher',
-                name='tf_cog_lidar', 
-                arguments=['-0.2', '-0.15', '0.25', '0', '0', '0', 'car/cog', 'car/lidar']),
-            
-            # Camera: x=0.6, y=-0.05 (5cm Right), z=0.25
-            Node(package='tf2_ros', executable='static_transform_publisher',
-                name='tf_cog_cam', 
-                arguments=['0', '0.0', '0.25', '0', '0', '0', 'car/cog', 'car/camera_link']),
-            
-            # Optical rotation (Standard ROS camera convention: Z forward, X right, Y down)
-            Node(package='tf2_ros', executable='static_transform_publisher',
-                name='tf_cam_optical', 
-                arguments=['0', '0', '0', '-1.571', '0', '-1.571', 'car/camera_link', 'car/camera_optical'])
-            
-    ]
 
 
     return LaunchDescription([
-        *tf_nodes,
+        transform_node,
         camera_node,
         lidar_node,
-        perception_node,
-        configure_camera,
-        configure_lidar,
-        configure_perception,
-        activate_camera,
-        activate_lidar,
-        activate_perception
+        perception_node
+       
     ])

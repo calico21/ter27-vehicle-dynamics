@@ -1,22 +1,16 @@
 {
   "name": "mirena_ws",
-  "dockerComposeFile": "../../docker/jetson/docker-compose.yml",
+  "dockerComposeFile": "../docker/docker-compose.yml",
   "service": "mirena_ws",
   "workspaceFolder": "/home/mirena/mirena_ws",
-
-  // Lifecycle hooks managed safely by VS Code
   "initializeCommand": "xhost +local:docker && xhost +local:root",
-  "postStartCommand": "sudo chown -R mirena:mirena /home/mirena/.nv && sudo chmod -R 775 /home/mirena/.nv",
-  
-  "shutdownAction": "none",
   
   "customizations": {
     "vscode": {
       "extensions": [
         "Ranch-Hand-Robotics.rde-ros-2",
         "ms-python.python",
-        "ms-vscode.cpptools-extension-pack",
-        "vscodevim.vim"
+        "ms-vscode.cpptools-extension-pack"
       ],
       "settings": {
         "terminal.integrated.shell.linux": "/bin/zsh",
