@@ -7,7 +7,7 @@ services:
   mirena_ws:
     container_name: mirena_ws_container_one
     build:
-      context: ../../docker
+      context: ../docker
       dockerfile: Dockerfile.one
     
     tty: true
