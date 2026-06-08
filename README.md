@@ -13,6 +13,28 @@ git clone https://github.com/Tecnun-eRacing/mirena_ws --recurse-submodules
 The recommended way of developing mirena_sim is using the bundled devcontainer configuration,
 download VSCode and install the devcontainer plugin. Use it to create a working dev environment.
 
+If you have NVIDIA graphics installed dont forget to install 
+[nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+set it as default runtime by editing `/etc/docker/daemon.json`
+
+```{json}
+{
+    "default-runtime": "nvidia",
+    "runtimes": {
+        "nvidia": {
+            "path": "nvidia-container-runtime",
+            "runtimeArgs": []
+        }
+    }
+}
+```
+```{bash}
+sudo systemctl restart docker
+```
+
+
+
+
 ## Building ros modules
 Finally, you can build the full pipeline with:
 ```{bash}
