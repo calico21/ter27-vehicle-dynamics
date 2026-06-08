@@ -1,0 +1,5 @@
+torch==2.7.1
+torchvision==0.22.1
+ultralytics==8.4.60
+onnxruntime-gpu==1.26.0
+matplotlib==3.10.9

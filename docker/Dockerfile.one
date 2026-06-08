@@ -1,117 +1,181 @@
+# syntax=docker/dockerfile:1.4
 FROM ubuntu:24.04
 
 # Expose Docker's built-in target architecture arg (amd64 / arm64)
 ARG TARGETARCH
 
-# ==========================================
-# 1. GLOBAL ARGS & ENVIRONMENT SETTINGS
-# ==========================================
+# ============================================================
+# BUILD ARGUMENTS & ENVIRONMENT
+# ============================================================
 ARG USERNAME=mirena
 ARG USER_UID=1000
 ARG USER_GID=1000
-ARG INSTALL_CUDA="true"
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV PIP_BREAK_SYSTEM_PACKAGES=1
-ENV LANG=en_US.UTF-8
-ENV LC_ALL=en_US.UTF-8
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_BREAK_SYSTEM_PACKAGES=1 \
+    LANG=en_US.UTF-8 \
+    LC_ALL=en_US.UTF-8 \
+    SHELL=/bin/zsh
 
-# Disable Docker's automatic apt cleanups so our BuildKit cache actually retains packages
-RUN rm -f /etc/apt/apt.conf.d/docker-clean && \
-    echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+# Keep downloaded packages in the BuildKit cache between builds
+RUN rm -f /etc/apt/apt.conf.d/docker-clean \
+ && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' \
+      > /etc/apt/apt.conf.d/keep-cache
 
-# ==========================================
-# 2. USER CREATION
-# ==========================================
+
+# ============================================================
+# USER CREATION
+# ============================================================
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends sudo && \
-    if id -u $USER_UID ; then userdel `id -un $USER_UID` ; fi && \
-    groupadd --gid $USER_GID $USERNAME && \
-    (getent group render || groupadd render) && \
-    useradd --uid $USER_UID --gid $USER_GID -m -G video,render -s /bin/zsh $USERNAME && \
-    echo "$USERNAME ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME && \
-    chmod 0440 /etc/sudoers.d/$USERNAME
+    apt-get update \
+ && apt-get install -y --no-install-recommends sudo \
+ && if id -u $USER_UID &>/dev/null; then userdel "$(id -un $USER_UID)"; fi \
+ && groupadd --gid $USER_GID $USERNAME \
+ && getent group render || groupadd render \
+ && useradd --uid $USER_UID --gid $USER_GID -m -G video,render -s /bin/zsh $USERNAME \
+ && echo "$USERNAME ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME \
+ && chmod 0440 /etc/sudoers.d/$USERNAME
 
-# ==========================================
-# 3. MINIMAL BUILD TOOLS & REPOSITORIES
-# ==========================================
-# Install core tools needed for building early, plus setup external repository keys.
+
+# ============================================================
+# PACKAGE REPOSITORIES
+# Sets up ROS 2 and CUDA apt sources.
+# Runs early so all later apt layers share the same repo state.
+# ============================================================
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
-    curl wget gnupg2 lsb-release locales ca-certificates \
-    git cmake build-essential python3 python3-pip \
-    && locale-gen en_US en_US.UTF-8 \
-    && update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 \
-    # Add ROS 2 Repository
-    && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg \
-    && echo "deb [arch=${TARGETARCH} signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu noble main" > /etc/apt/sources.list.d/ros2.list \
-    # Add CUDA Repository Conditionally using TARGETARCH
-    && if [ "$INSTALL_CUDA" = "true" ]; then \
-        if [ "$TARGETARCH" = "arm64" ]; then NV_ARCH="sbsa"; \
-        elif [ "$TARGETARCH" = "amd64" ]; then NV_ARCH="x86_64"; \
-        else echo "Unsupported architecture: $TARGETARCH" && exit 1; fi && \
-        wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/${NV_ARCH}/cuda-keyring_1.1-1_all.deb && \
-        dpkg -i cuda-keyring_1.1-1_all.deb && rm cuda-keyring_1.1-1_all.deb; \
-    fi
+    apt-get update \
+ && apt-get install -y --no-install-recommends \
+      curl wget gnupg2 lsb-release ca-certificates \
+ \
+ # Locale
+ && apt-get install -y --no-install-recommends locales \
+ && locale-gen en_US en_US.UTF-8 \
+ && update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 \
+ \
+ # ROS 2 (Jazzy / Noble)
+ && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+      -o /usr/share/keyrings/ros-archive-keyring.gpg \
+ && echo "deb [arch=${TARGETARCH} signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
+      http://packages.ros.org/ros2/ubuntu noble main" \
+      > /etc/apt/sources.list.d/ros2.list \
+ \
+ # CUDA (architecture-aware)
+ && case "$TARGETARCH" in \
+      arm64) NV_ARCH="sbsa"   ;; \
+      amd64) NV_ARCH="x86_64" ;; \
+      *)     echo "Unsupported architecture: $TARGETARCH" && exit 1 ;; \
+    esac \
+ && wget -qO cuda-keyring.deb \
+      "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/${NV_ARCH}/cuda-keyring_1.1-1_all.deb" \
+ && dpkg -i cuda-keyring.deb \
+ && rm cuda-keyring.deb
 
-# ==========================================
-# 4. HEAVY SOURCE BUILDS (ACADOS C++)
-# ==========================================
-# Build this early so adding new apt packages doesn't trigger a 5-minute recompilation.
+
+# ============================================================
+# CORE SYSTEM UTILITIES
+# Keep this layer stable — changes here invalidate everything below.
+# ============================================================
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update \
+ && apt-get install -y --no-install-recommends \
+      # Build essentials
+      git cmake build-essential \
+      python3 python3-pip \
+      # Common utilities
+      unzip zsh neovim neofetch \
+      # Compression / network
+      curl wget
+
+
+# ============================================================
+# MEDIA & HARDWARE LIBRARIES
+# ============================================================
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update \
+ && apt-get install -y --no-install-recommends \
+      libopencv-dev libopenblas-dev python3-opencv \
+      v4l-utils libv4l-dev \
+      mesa-vulkan-drivers vulkan-tools
+
+
+# ============================================================
+# ROS 2 (JAZZY) PACKAGES
+# ============================================================
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ros-dev-tools \
+      ros-jazzy-desktop \
+      ros-jazzy-cv-bridge \
+      ros-jazzy-camera-info-manager \
+      ros-jazzy-tf-transformations \
+      ros-jazzy-ros-babel-fish \
+      ros-jazzy-gtsam \
+      ros-jazzy-plotjuggler-ros \
+      ros-jazzy-rviz-satellite
+
+
+# ============================================================
+# CUDA / TENSORRT
+# ============================================================
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update \
+ && apt-get install -y --no-install-recommends \
+      cuda-toolkit-13-3 \
+      tensorrt \
+      python3-libnvinfer-dev
+
+ENV PATH=/usr/local/cuda-13.3/bin${PATH:+:${PATH}} \
+    LD_LIBRARY_PATH=/usr/local/cuda-13.3/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
+
+
+# ============================================================
+# ACADOS — C++ source build  (expensive; placed after apt layers
+# so adding a ROS package doesn't force a full recompile)
+# ============================================================
 USER $USERNAME
-WORKDIR /home/$USERNAME
+WORKDIR /home/mirena
+RUN git clone https://github.com/acados/acados.git
+WORKDIR /home/mirena/acados
+RUN git checkout 5847c74fe774137a5fb31c9791bf39aa980b8b05
+RUN git submodule update --recursive --init
+RUN mkdir -p build 
+WORKDIR /home/mirena/acados/build
+RUN cmake -DACADOS_WITH_QPOASES=ON -DACADOS_WITH_OPENMP=ON ..
+RUN make install -j4
+#Install python interface for acados
+RUN pip install -e /home/mirena/acados/interfaces/acados_template
+#Set neccesary env vars for acados
+ENV ACADOS_SOURCE_DIR=/home/mirena/acados
+ENV LD_LIBRARY_PATH=/home/mirena/acados/lib:$LD_LIBRARY_PATH
+# Force install Tera for headless setup
+RUN python3 -c "from acados_template.utils import get_tera; get_tera(force_download=True)"
 
-ENV ACADOS_SOURCE_DIR=/home/$USERNAME/acados
-ENV LD_LIBRARY_PATH=${ACADOS_SOURCE_DIR}/lib:$LD_LIBRARY_PATH
+# ============================================================
+# PYTHON DEPENDENCIES — 
+# Edit requirements.txt freely; only this layer rebuilds.
+# ============================================================
+COPY --chown=$USERNAME:$USERNAME requirements.txt /tmp/requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip3 install -r /tmp/requirements.txt
 
-RUN git clone https://github.com/acados/acados.git && \
-    cd acados && \
-    git checkout 5847c74fe774137a5fb31c9791bf39aa980b8b05 && \
-    git submodule update --recursive --init --depth 1 && \
-    mkdir -p build && cd build && \
-    cmake -DACADOS_WITH_QPOASES=ON -DACADOS_WITH_OPENMP=ON .. && \
-    make install -j$(nproc)
 
-# ==========================================
-# 5. SYSTEM & ECOSYSTEM PACKAGES (APT)
-# ==========================================
-# Switch back to root. You can safely add packages to this list without rebuilding Acados.
-USER root
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
-    ros-dev-tools \
-    ros-jazzy-desktop \
-    unzip zsh libopencv-dev libopenblas-dev python3-opencv \
-    v4l-utils libv4l-dev neovim neofetch mesa-vulkan-drivers vulkan-tools \
-    ros-jazzy-cv-bridge ros-jazzy-camera-info-manager ros-jazzy-tf-transformations \
-    ros-jazzy-ros-babel-fish ros-jazzy-gtsam ros-jazzy-plotjuggler-ros ros-jazzy-rviz-satellite \
-    && if [ "$INSTALL_CUDA" = "true" ]; then \
-        apt-get install -y --no-install-recommends cuda-toolkit-13-3 tensorrt python3-libnvinfer-dev; \
-    fi
+# ============================================================
+# SHELL CONFIGURATION
+# ============================================================
+RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" \
+      "" --unattended
 
-ENV PATH=/usr/local/cuda-13.3/bin${PATH:+:${PATH}}
-ENV LD_LIBRARY_PATH=/usr/local/cuda-13.3/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
+COPY --chown=$USERNAME:$USERNAME .zshrc /home/$USERNAME/
 
-# ==========================================
-# 6. PYTHON PACKAGES (PIP)
-# ==========================================
-# Switch to user. Modifying Python dependencies will only ever rebuild this final, fast step.
-USER $USERNAME
-RUN --mount=type=cache,target=/home/$USERNAME/.cache/pip,uid=$USER_UID,gid=$USER_GID \
-    if [ "$INSTALL_CUDA" = "true" ]; then \
-        pip3 install torch torchvision ultralytics onnxruntime --upgrade matplotlib; \
-    fi && \
-    pip3 install -e ${ACADOS_SOURCE_DIR}/interfaces/acados_template && \
-    python3 -c "from acados_template.utils import get_tera; get_tera(force_download=True)"
 
-# ==========================================
-# 7. ZSH & CONFIGURATION
-# ==========================================
-RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
-COPY .zshrc /home/$USERNAME/
-
-ENV SHELL=/bin/zsh
+# ============================================================
+# ENTRYPOINT
+# ============================================================
 CMD ["sleep", "infinity"]
