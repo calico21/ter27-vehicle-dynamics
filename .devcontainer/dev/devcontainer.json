@@ -1,5 +1,5 @@
 {
-  "name": "ONE Mirena Workspace ",
+  "name": "Development Mirena Workspace ",
   "dockerComposeFile": "docker-compose.yml",
   "service": "mirena_ws",
   "workspaceFolder": "/home/mirena/mirena_ws",

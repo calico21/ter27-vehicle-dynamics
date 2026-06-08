@@ -7,10 +7,11 @@ services:
   mirena_ws:
     container_name: mirena_ws_container_one
     build:
-      context: ../docker
+      context: ../../docker
       dockerfile: Dockerfile.one
     
     tty: true
+    restart: unless-stopped
     stdin_open: true
     privileged: true
     network_mode: host
@@ -26,7 +27,7 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=all,display,compute,utility
 
     volumes:
-      - ..:/home/mirena/mirena_ws:rw
+      - ../..:/home/mirena/mirena_ws:rw
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - /usr/share/vulkan/icd.d:/usr/share/vulkan/icd.d:ro
       - cuda_cache:/home/mirena/.nv/ComputeCache
