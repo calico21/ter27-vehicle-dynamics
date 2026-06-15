@@ -99,6 +99,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
  && apt-get install -y --no-install-recommends \
       libopencv-dev libopenblas-dev python3-opencv \
       v4l-utils libv4l-dev \
+      libsocketcan-dev can-utils \
       mesa-vulkan-drivers vulkan-tools
 
 
@@ -174,8 +175,9 @@ RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master
 
 COPY --chown=$USERNAME:$USERNAME .zshrc /home/$USERNAME/
 
-
+ENV ROS_DOMAIN_ID 42
 # ============================================================
 # ENTRYPOINT
 # ============================================================
+
 CMD ["sleep", "infinity"]

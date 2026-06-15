@@ -38,6 +38,9 @@
 [submodule "src/mirena_supervisor"]
 	path = src/mirena_supervisor
 	url = https://git.eracing.es/Driverless/mirena_supervisor
-[submodule "src/mirena_can_bus"]
-	path = src/mirena_can_bus
-	url = https://git.eracing.es/Driverless/mirena_can_bus
+[submodule "src/mirena_remote"]
+	path = src/mirena_remote
+	url = https://git.eracing.es/Driverless/mirena_remote.git
+[submodule "src/mirena_bringup"]
+	path = src/mirena_bringup
+	url = https://git.eracing.es/Driverless/mirena_bringup
