@@ -7,7 +7,7 @@ all its submodules, there you can build them and launch them using colcon.
 As always, start by cloning the repository and its submodules:
 
 ```{bash}
-git clone https://github.com/Tecnun-eRacing/mirena_ws --recurse-submodules
+git clone https://git.eracing.es/Driverless/mirena_ws/ --recurse-submodules
 ```
 ## DevContainer
 The recommended way of developing mirena_sim is using the bundled devcontainer configuration,
