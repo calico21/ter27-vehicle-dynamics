@@ -9,7 +9,8 @@
       "extensions": [
         "Ranch-Hand-Robotics.rde-ros-2",
         "ms-python.python",
-        "ms-vscode.cpptools-extension-pack"
+        "ms-vscode.cpptools-extension-pack",
+        "anthropic.claude-code"
       ],
       "settings": {
         "terminal.integrated.shell.linux": "/bin/zsh",

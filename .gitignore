@@ -2,6 +2,7 @@ devel/
 log/
 build/
 install/
+src/*/install/
 bin/
 lib/
 msg_gen/
@@ -64,3 +65,4 @@ rosbags
 .venv
 frames*
 testing
+.claude 
