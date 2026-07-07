@@ -44,3 +44,6 @@
 [submodule "src/mirena_bringup"]
 	path = src/mirena_bringup
 	url = https://git.eracing.es/Driverless/mirena_bringup
+[submodule "src/mirena_monitor"]
+	path = src/mirena_monitor
+	url = https://git.eracing.es/Driverless/mirena_monitor
