@@ -1,0 +1,27 @@
+# Simulator parameter overrides
+# Applied to autonomy nodes when launched via sim.launch.py
+
+mirena_planning:
+  ros__parameters:
+    mission: trackdrive
+
+MPCNode:
+  ros__parameters:
+    use_sim_time: true
+
+mirena_slam:
+  ros__parameters:
+    use_sim_time: true
+
+mirena_perception:
+  ros__parameters:
+    use_sim_time: true
+    # Lower confidence threshold — sim cones are cleaner than real
+    yolo_conf_thresh: 0.5
+
+mirena_supervisor:
+  ros__parameters:
+    nodes_to_monitor:
+      - mirena_slam
+      - mirena_planning
+      - MPCNode

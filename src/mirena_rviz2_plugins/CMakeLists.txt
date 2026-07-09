@@ -1,0 +1,58 @@
+cmake_minimum_required(VERSION 3.8)
+project(mirena_rviz2_plugins)
+
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+# Find dependencies
+find_package(ament_cmake REQUIRED)
+find_package(pluginlib REQUIRED) 
+find_package(rviz_common REQUIRED)
+find_package(rviz_rendering REQUIRED)
+find_package(mirena_common REQUIRED)
+find_package(Qt5 REQUIRED COMPONENTS Widgets)
+
+# Required for Q_OBJECT macros in your headers
+set(CMAKE_AUTOMOC ON)
+
+# 1. Collect all your source files into one variable
+file(GLOB DISPLAY_SOURCES "src/displays/*.cpp")
+
+# 2. Create a single shared library for the entire package
+add_library(mirena_rviz2_plugins SHARED
+  ${DISPLAY_SOURCES}
+)
+
+# 3. Add dependencies to the target
+ament_target_dependencies(mirena_rviz2_plugins
+  pluginlib
+  rviz_common 
+  rviz_rendering 
+  mirena_common
+)
+
+target_link_libraries(mirena_rviz2_plugins 
+  Qt5::Widgets
+)
+
+# 4. Install the library
+install(TARGETS mirena_rviz2_plugins
+  EXPORT export_mirena_rviz2_plugins
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
+# Install Icons
+install(DIRECTORY icons/
+        DESTINATION share/${PROJECT_NAME}/icons
+)
+
+# 5. Export the plugin description XML
+# This makes the XML visible to the ROS 2 environment
+pluginlib_export_plugin_description_file(rviz_common rviz_common_plugins.xml)
+
+# 6. Export targets and finish package
+ament_export_targets(export_mirena_rviz2_plugins)
+ament_package()

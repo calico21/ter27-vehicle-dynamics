@@ -1,0 +1,4 @@
+/mirena_planning:
+  ros__parameters:
+    mission: skidpad
+
