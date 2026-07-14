@@ -6,6 +6,7 @@
 [ext_resource type="Script" uid="uid://ds4q43s0n1ft7" path="res://addons/rclgd-sensors/ros_camera/ros_camera.gd" id="4_dflui"]
 [ext_resource type="Script" uid="uid://bsmemyc0nuhy2" path="res://addons/rclgd-sensors/ros_imu/ros_imu.gd" id="5_sviuk"]
 [ext_resource type="Script" uid="uid://c0hu800pgnmoh" path="res://addons/rclgd-sensors/ros_gps/ros_gps.gd" id="6_1avwx"]
+[ext_resource type="Script" uid="uid://bql8sdwil32cb" path="res://addons/rclgd-sensors/ros_transforms/ros_transforms.gd" id="7_tfmgr"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_iwp33"]
 size = Vector3(1.440945, 3.0220528, 1.1161242)
@@ -257,3 +258,6 @@ metadata/_custom_type_script = "uid://bsmemyc0nuhy2"
 [node name="GPS" type="Node3D" parent="." unique_id=1746440958]
 script = ExtResource("6_1avwx")
 metadata/_custom_type_script = "uid://c0hu800pgnmoh"
+
+[node name="MirenaTransform" type="Node3D" parent="." unique_id=1856220417]
+script = ExtResource("7_tfmgr")

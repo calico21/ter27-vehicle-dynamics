@@ -23,8 +23,7 @@
 
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
-#include <mirena_common/msg/car.hpp>
-#include <mirena_common/msg/heartbeat.hpp>
+#include <nav_msgs/msg/odometry.hpp>
 
 #include <limits>
 #include <cstdint>
@@ -85,7 +84,7 @@ public:
 
         // Frames
         lidar_frame_ = this->declare_parameter<std::string>("lidar_frame", "car/lidar");
-        odom_frame_ = this->declare_parameter<std::string>("odom_frame", "car/odom");
+        odom_frame_ = this->declare_parameter<std::string>("odom_frame", "odom");
         base_frame_ = this->declare_parameter<std::string>("base_frame", "car/cog");
         gnss_frame_ = this->declare_parameter<std::string>("gnss_frame", "car/gnss");
         imu_frame_ = this->declare_parameter<std::string>("imu_frame", "car/imu");
@@ -104,10 +103,12 @@ public:
 
         RCLCPP_INFO(get_logger(), "Initializing IMU bridge on %s (output %d Hz)", imu_dev_path_.c_str(), imu_output_rate_hz_);
 
+        // Sensor-layer outputs only: raw IMU streams, the onboard INS solution
+        // as odometry, and the GNSS fix. State fusion (/state/car) and health
+        // reporting are the pipeline's job (mirena_state), not the driver's.
         imu_in_lidar_pub_ = this->create_publisher<sensor_msgs::msg::Imu>("/sensors/lidar/imu", qos);
-        imu_in_cog_pub_ = this->create_publisher<sensor_msgs::msg::Imu>("/sensors/cog/imu", qos);
-        heartbeat_pub_ = this->create_publisher<mirena_common::msg::Heartbeat>("/health", 10);
-        car_pub_ = this->create_publisher<mirena_common::msg::Car>("/sensors/car", qos);
+        imu_in_cog_pub_ = this->create_publisher<sensor_msgs::msg::Imu>("/sensors/imu", qos);
+        odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("/sensors/imu/odom", qos);
         fix_pub_ = this->create_publisher<sensor_msgs::msg::NavSatFix>("/sensors/gps/fix", qos);
 
         keep_running_ = true;
@@ -160,9 +161,8 @@ private:
 
     rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_in_lidar_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_in_cog_pub_;
-    rclcpp::Publisher<mirena_common::msg::Car>::SharedPtr car_pub_;
+    rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
     rclcpp::Publisher<sensor_msgs::msg::NavSatFix>::SharedPtr fix_pub_;
-    rclcpp::Publisher<mirena_common::msg::Heartbeat>::SharedPtr heartbeat_pub_;
 
     std::thread publish_thread_;
     std::atomic<bool> keep_running_{false};
@@ -291,7 +291,8 @@ private:
 
                     imu_in_lidar_pub_->publish(ret->lidar_imu);
                     imu_in_cog_pub_->publish(ret->cog_imu);
-                    heartbeat_pub_->publish(ret->report);
+                    // No INS odometry before GPS lock — documented contract:
+                    // consumers (mirena_state) must tolerate its absence.
                 }
                 else
                 {
@@ -308,9 +309,8 @@ private:
 
                     imu_in_lidar_pub_->publish(ret->lidar_imu);
                     imu_in_cog_pub_->publish(ret->cog_imu);
-                    car_pub_->publish(ret->car);
+                    odom_pub_->publish(ret->odom);
                     fix_pub_->publish(ret->fix_msg);
-                    heartbeat_pub_->publish(ret->report);
                 }
             }
             catch (const std::exception &e)

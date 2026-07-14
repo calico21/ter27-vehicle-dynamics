@@ -12,7 +12,8 @@ class_name RosGps
 @export_group("ROS 2 Settings")
 @export var ros_namespace : String = ""
 @export var gps_rate: float = 10.0
-@export var frame_id: String = "car/gps"
+# "car/gnss" matches the hardware driver's gnss_frame — same TF contract on both
+@export var frame_id: String = "car/gnss"
 @export var parent_frame_id: String = "car/cog"
 
 
@@ -29,21 +30,19 @@ var noisy_pos: Vector3 = Vector3.ZERO
 # --- ROS Components ---
 var _node: RosNode
 var _gps_pub: RosPublisher
-var _tf_broadcaster: RosTfBroadcaster # New: For static transform
 var _timer: RosTimer
 var _msg: RosSensorMsgsNavSatFix
+
+## Mounts are broadcast centrally by the vehicle's RosTransformManager
+func get_static_transforms() -> Array:
+	return [{"transform": transform, "frame_id": frame_id, "parent_frame_id": parent_frame_id}]
 
 func _ready() -> void:
 	_node = RosNode.new()
 	_node.init(name.to_snake_case(),ros_namespace.to_snake_case())
-	_gps_pub = _node.create_publisher("/sensors/gps", "sensor_msgs/msg/NavSatFix")
+	_gps_pub = _node.create_publisher("/sensors/gps/fix", "sensor_msgs/msg/NavSatFix")
 	_timer = _node.create_timer(1.0 / gps_rate, _publish_gps)
-	
-	# --- Static Transform Publisher ---
-	# This tells ROS exactly where the antenna is relative to the car body
-	_tf_broadcaster = _node.create_tf_broadcaster()
-	_tf_broadcaster.send_transform(transform, frame_id, parent_frame_id, true) 
-	
+
 	_msg = RosSensorMsgsNavSatFix.new()
 	_fill_static_covariances()
 	

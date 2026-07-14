@@ -87,7 +87,9 @@ public:
         pointcloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
             POINTCLOUD_PUB_TOPIC, rclcpp::QoS(rclcpp::SensorDataQoS()));
 
-        imu_sub = this->create_subscription<sensor_msgs::msg::Imu>("/sensors/imu", rclcpp::QoS(rclcpp::SensorDataQoS()), std::bind(&MirenaLidar::imu_callback, this, std::placeholders::_1));
+        // Motion de-skew consumes the lidar-frame, lever-arm-compensated IMU
+        // stream (not the cog stream on /sensors/imu)
+        imu_sub = this->create_subscription<sensor_msgs::msg::Imu>("/sensors/lidar/imu", rclcpp::QoS(rclcpp::SensorDataQoS()), std::bind(&MirenaLidar::imu_callback, this, std::placeholders::_1));
 
         // Start capture thread execution instantly
         keep_running_ = true;

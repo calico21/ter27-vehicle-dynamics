@@ -9,8 +9,7 @@
 
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
-#include <mirena_common/msg/car.hpp>
-#include <mirena_common/msg/heartbeat.hpp>
+#include <nav_msgs/msg/odometry.hpp>
 
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
@@ -22,8 +21,9 @@ namespace mirena::INS
         sensor_msgs::msg::NavSatFix fix_msg;
         sensor_msgs::msg::Imu cog_imu;
         sensor_msgs::msg::Imu lidar_imu;
-        mirena_common::msg::Car car;
-        mirena_common::msg::Heartbeat report;
+        // Onboard INS solution (REP-105): pose in the odom frame, twist in the
+        // body frame. Consumed by mirena_state for sensor fusion.
+        nav_msgs::msg::Odometry odom;
     };
 
     struct GeodesicRef
@@ -97,10 +97,10 @@ namespace mirena::INS
                 cog_imu_msg.header.frame_id = cog_frame_id;
                 cog_imu_msg.header.stamp = stamp;
 
-                auto car_msg = mirena_common::msg::Car();
-                car_msg.header.frame_id = odom_frame_id;
-                car_msg.header.stamp = stamp;
-                car_msg.child_frame_id = cog_frame_id;
+                auto odom_msg = nav_msgs::msg::Odometry();
+                odom_msg.header.frame_id = odom_frame_id;
+                odom_msg.header.stamp = stamp;
+                odom_msg.child_frame_id = cog_frame_id;
 
                 // ----------------------- RESPECTIVE FRAMES TO IMU-CENTERED NWU ------------------------------
                 auto nwu_orientation = ned_to_nwu * body_orientation * ned_to_body * nwu_to_ned;
@@ -109,9 +109,6 @@ namespace mirena::INS
                 auto nwu_lin_vel = tf2::quatRotate(body_to_nwu, body_lin_vel);
                 auto nwu_lin_accel = tf2::quatRotate(body_to_nwu, body_lin_accel);
                 auto nwu_ang_accel = tf2::quatRotate(body_to_nwu, body_ang_accel);
-
-                double roll, pitch, yaw;
-                tf2::Matrix3x3(nwu_orientation).getRPY(roll, pitch, yaw);
 
                 // ----------------------- NWU TO COG (lever arm lmao) ------------------------------
                 auto nwu_cog_pos = nwu_imu_pos + t_imu_to_cog;
@@ -131,15 +128,55 @@ namespace mirena::INS
                 cog_imu_msg.linear_acceleration.y = cog_lin_accel.y();
                 cog_imu_msg.linear_acceleration.z = cog_lin_accel.z();
 
-                car_msg.x = nwu_cog_pos[0];
-                car_msg.y = nwu_cog_pos[1];
-                car_msg.psi = yaw;
-                car_msg.u = cog_lin_vel[0];
-                car_msg.v = -cog_lin_vel[1];
-                car_msg.omega = nwu_ang_vel[2];
+                // ----------------------- INS ODOMETRY (REP-105) ------------------------------
+                // Pose in the odom frame
+                odom_msg.pose.pose.position.x = nwu_cog_pos[0];
+                odom_msg.pose.pose.position.y = nwu_cog_pos[1];
+                odom_msg.pose.pose.position.z = nwu_cog_pos[2];
+                odom_msg.pose.pose.orientation.x = nwu_orientation.x();
+                odom_msg.pose.pose.orientation.y = nwu_orientation.y();
+                odom_msg.pose.pose.orientation.z = nwu_orientation.z();
+                odom_msg.pose.pose.orientation.w = nwu_orientation.w();
+
+                // Twist in the body (cog) frame, REP-103: x forward, y left.
+                // NOTE: cog_lin_vel inherits the historical NWU/cog lever-arm
+                // frame mixing above (t_imu_to_cog is a cog-frame offset applied
+                // to NWU vectors); TODO express the lever arm in NWU first.
+                auto body_cog_lin_vel = tf2::quatRotate(nwu_orientation.inverse(), cog_lin_vel);
+                auto body_ang_vel_cog = tf2::quatRotate(nwu_orientation.inverse(), nwu_ang_vel);
+                odom_msg.twist.twist.linear.x = body_cog_lin_vel[0];
+                odom_msg.twist.twist.linear.y = body_cog_lin_vel[1];
+                odom_msg.twist.twist.linear.z = body_cog_lin_vel[2];
+                odom_msg.twist.twist.angular.x = body_ang_vel_cog[0];
+                odom_msg.twist.twist.angular.y = body_ang_vel_cog[1];
+                odom_msg.twist.twist.angular.z = body_ang_vel_cog[2];
+
+                // Covariance diagonals from the onboard filter's 1-sigma
+                // uncertainties, with conservative fallbacks when not streamed.
+                const double pos_var = msg->ins.posU.has_value()
+                                           ? static_cast<double>(msg->ins.posU.value()) * msg->ins.posU.value()
+                                           : 1.0;
+                const double vel_var = msg->ins.velU.has_value()
+                                           ? static_cast<double>(msg->ins.velU.value()) * msg->ins.velU.value()
+                                           : 0.5;
+                double yaw_var = 0.05;
+                if (msg->attitude.yprU.has_value())
+                {
+                    const double yaw_unc_rad = msg->attitude.yprU.value()[0] * M_PI / 180.0;
+                    yaw_var = yaw_unc_rad * yaw_unc_rad;
+                }
+                constexpr double GYRO_VAR = 1e-4; // not streamed by the filter
+
+                for (int i = 0; i < 3; i++)
+                {
+                    odom_msg.pose.covariance[i * 7] = pos_var;
+                    odom_msg.pose.covariance[(i + 3) * 7] = yaw_var;
+                    odom_msg.twist.covariance[i * 7] = vel_var;
+                    odom_msg.twist.covariance[(i + 3) * 7] = GYRO_VAR;
+                }
 
                 ret->cog_imu = cog_imu_msg;
-                ret->car = car_msg;
+                ret->odom = odom_msg;
             }
 
             // ----------------------- ------------------------------
@@ -195,14 +232,6 @@ namespace mirena::INS
                 fix_msg.position_covariance_type = sensor_msgs::msg::NavSatFix::COVARIANCE_TYPE_UNKNOWN;
 
                 ret->fix_msg = fix_msg;
-            }
-
-            {
-                auto msg = mirena_common::msg::Heartbeat();
-                msg.node_name = "mirena_imu";
-                msg.estado.status = mirena_common::msg::NodeStatus::WORKING;
-
-                ret->report = msg;
             }
 
             return ret;

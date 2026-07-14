@@ -66,3 +66,5 @@ rosbags
 frames*
 testing
 .claude 
+
+core.*

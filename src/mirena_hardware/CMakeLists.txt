@@ -133,6 +133,7 @@ ament_target_dependencies(mirena_imu
   tf2
   tf2_geometry_msgs
   sensor_msgs
+  nav_msgs
   mirena_common
 )
 

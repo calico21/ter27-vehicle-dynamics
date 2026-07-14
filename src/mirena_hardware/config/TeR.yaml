@@ -18,7 +18,7 @@ mirena_camera:
   
 /mirena_imu:
   ros__parameters:
-    video_device: "/dev/ter_IMU"
+    imu_device: "/dev/ter_IMU"
 
 mirena_can:
   ros__parameters:

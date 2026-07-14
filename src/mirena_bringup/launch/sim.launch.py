@@ -17,8 +17,8 @@ def launch_setup(context, *args, **kwargs):
     # 2. Safely use standard Python logic to build the list of tuples
     dynamic_remappings = []
 
-    if state_gt == 'true':
-        dynamic_remappings.append(( 'car/debug_state', 'car/state'))
+    # NOTE: ground_truth_state is handled by mirena_state's passthrough mode
+    # (it republishes /debug/state/car onto /state/car), not by a remap here.
     if percep_gt == 'true':
         dynamic_remappings.append(( 'debug/perception', 'perception/cones'))
     if slam_gt == 'true':
@@ -38,7 +38,14 @@ def launch_setup(context, *args, **kwargs):
         PythonLaunchDescriptionSource([
             PathJoinSubstitution([FindPackageShare('mirena_bringup'), 'launch', 'autonomy.launch.py'])
         ]),
-        launch_arguments={'use_sim_time': 'true'}.items(),
+        # Forward the ground-truth switches so the autonomy stack can gate
+        # its nodes (previously only use_sim_time was forwarded).
+        launch_arguments={
+            'use_sim_time': 'true',
+            'ground_truth_state': state_gt,
+            'ground_truth_perception': percep_gt,
+            'ground_truth_slam': slam_gt,
+        }.items(),
     )
 
     # 4. Return the setup actions to be executed

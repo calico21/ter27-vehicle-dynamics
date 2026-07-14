@@ -23,15 +23,14 @@ var path : Path3D
 var _node: RosNode
 # Publishers
 var _state_pub: RosPublisher
-var _as_status_pub : RosPublisher
+var _as_info_pub : RosPublisher
 var _perception_pub: RosPublisher
 var _slam_pub: RosPublisher
 var _inferred_control_pub: RosPublisher
 var _debug_tim : RosTimer
 # Subscribers
 var _control_sub: RosSubscriber
-var _mission_status_sub: RosSubscriber
-var _tf_broadcaster: RosTfBroadcaster
+var _mission_info_sub: RosSubscriber
 var _ros_gas: float = 0.0
 var _ros_steer: float = 0.0
 
@@ -40,8 +39,8 @@ var origin  : Transform3D = Transform3D.IDENTITY
 var gas: float = 0.0
 var _steer_smoothed: float = 0.0
 var slam_cones: Array = [] # Seen cones
-var _as_status : RosMirenaCommonAsStatus
-var _mission_status
+var _as_info : RosMirenaCommonAsInfo
+var _mission_info
 
 @onready var car_state : RosMirenaCommonCar = RosMirenaCommonCar.new()
 
@@ -50,26 +49,22 @@ func _ready():
 	_node = RosNode.new()
 	_node.init("mirena_car", "")
 	## Publishers (absolute topic names from topic contract)
-	_as_status_pub        = _node.create_publisher("/as_status",        "mirena_common/msg/ASStatus")
-	_state_pub            = _node.create_publisher("/state/car",       "mirena_common/msg/Car")
+	_as_info_pub          = _node.create_publisher("/as_status",        "mirena_common/msg/AsInfo")
+	_state_pub            = _node.create_publisher("/debug/state/car", "mirena_common/msg/Car")
 	_perception_pub       = _node.create_publisher("/debug/perception",  "mirena_common/msg/EntityList")
 	_slam_pub             = _node.create_publisher("/debug/slam",        "mirena_common/msg/EntityList")
 	_inferred_control_pub = _node.create_publisher("/inferred_control",  "mirena_common/msg/CarControl")
 
 	# State setup
-	_as_status = RosMirenaCommonAsStatus.new()
-	_as_status.as_status = 0
-	_mission_status = RosMirenaCommonMissionStatus.new()
-	_mission_status.mission_status = 0
+	_as_info = RosMirenaCommonAsInfo.new()
+	_as_info.status = 0
+	_mission_info = RosMirenaCommonMissionInfo.new()
+	_mission_info.status = 0
 	## Publisher timers
 	_debug_tim = _node.create_timer(0.1, _debug_publish)
 	# Subscribers
 	_control_sub = _node.create_subscription("/control", "mirena_common/msg/CarControl", _on_control)
-	_mission_status_sub = _node.create_subscription("/system/mission_status","mirena_common/msg/MissionStatus",_on_mission_status)
-	# Transforms
-	_tf_broadcaster = _node.create_tf_broadcaster()
-	
-
+	_mission_info_sub = _node.create_subscription("/system/mission_status","mirena_common/msg/MissionInfo",_on_mission_info)
 
 	# Camera Registration
 	Sim.register_camera($TPCam)
@@ -79,8 +74,8 @@ func _on_control(msg):
 	_ros_gas = msg.gas
 	_ros_steer = msg.steer_angle
 	
-func _on_mission_status(msg):
-	_mission_status = msg 
+func _on_mission_info(msg):
+	_mission_info = msg
 	
 func _physics_process(delta: float) -> void:
 	# Process driving commands
@@ -107,10 +102,12 @@ func _debug_publish():
 	_publish_perception()
 	_publish_slam()
 	_publish_control()
-	_as_status_pub.publish(_as_status)
+	_as_info_pub.publish(_as_info)
 # ROS Publishing
 
-## Car state (Substitutes sensor EKF)
+## Ground-truth car state (debug). The fused /state/car and the odom->car/cog
+## TF are owned by mirena_state; this topic feeds its ground_truth_passthrough
+## mode and serves as a reference to compare the EKF against.
 func _publish_car_state():
 	var now = _node.now()
 	car_state.header.stamp = now
@@ -145,11 +142,8 @@ func _publish_car_state():
 	cov[35] = 0  # omega variance (rad/s^2)
 	
 	car_state.covariance = cov
-	# Publish debug odom and map transforms 
-	#_tf_broadcaster.send_transform(odom_transform.translated(center_of_mass).inverse(), "debug_odom", frame_id, false, now)
-	#_tf_broadcaster.send_transform(origin.inverse(), "debug_map", "debug_odom", false, now)
-	_tf_broadcaster.send_transform(odom_transform.translated(center_of_mass),frame_id, "odom", false, now)
-
+	# NOTE: the dynamic odom->car/cog TF is broadcast by mirena_state (the state
+	# estimator owns it per REP-105) — the sim must not double-publish it.
 
 	_state_pub.publish(car_state)
 

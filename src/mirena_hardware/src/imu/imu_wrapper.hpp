@@ -79,6 +79,11 @@ namespace mirena::IMU
             bin_out_1.ins.posLla = true;
             bin_out_1.ins.velBody = true;
             bin_out_1.attitude.linBodyAcc = true;
+            // Onboard-filter uncertainties (1 sigma) — used to fill the INS
+            // odometry covariance published for the state estimator.
+            bin_out_1.ins.posU = true;
+            bin_out_1.ins.velU = true;
+            bin_out_1.attitude.yprU = true;
             bin_out_1.gnss.gnss1SatInfo=true;
             bin_out_1.gnss2.gnss2SatInfo=true;
 

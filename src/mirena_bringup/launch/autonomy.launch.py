@@ -3,10 +3,11 @@ from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch.conditions import UnlessCondition # ── Added ──
 from launch_ros.actions import LifecycleNode
+from launch_ros.parameter_descriptions import ParameterValue
 
 def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time')
-    
+
     # Capture the forwarded ground truth parameters
     gt_state   = LaunchConfiguration('ground_truth_state')
     gt_percep  = LaunchConfiguration('ground_truth_perception')
@@ -17,7 +18,22 @@ def generate_launch_description():
         DeclareLaunchArgument('ground_truth_state', default_value='false'),
         DeclareLaunchArgument('ground_truth_perception', default_value='false'),
         DeclareLaunchArgument('ground_truth_slam', default_value='false'),
-    
+
+        # ── State Estimation ────────────────────────────────────────────────────
+        # Always runs: owns /state/car and the odom->car/cog TF in every mode.
+        # With ground_truth_state=true it republishes the sim's ground truth
+        # (/debug/state/car) instead of running the EKF.
+        LifecycleNode(
+            package='mirena_state',
+            executable='mirena_state',
+            name='mirena_state',
+            namespace='',
+            parameters=[{
+                'use_sim_time': use_sim_time,
+                'ground_truth_passthrough': ParameterValue(gt_state, value_type=bool),
+            }],
+        ),
+
         # ── Perception ─────────────────────────────────────────────────────────
         # Only run if we are NOT using ground truth perception
         LifecycleNode(
@@ -67,7 +83,7 @@ def generate_launch_description():
             namespace='',
             parameters=[{
                 'use_sim_time': use_sim_time,
-                'nodes_to_monitor': ['mirena_slam', 'mirena_planning', 'mirena_control',] #'mirena_perception',
+                'nodes_to_monitor': ['mirena_state', 'mirena_slam', 'mirena_planning', 'mirena_control',] #'mirena_perception',
             }],
         ),
     ])

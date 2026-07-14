@@ -7,8 +7,6 @@
 
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
-#include <mirena_common/msg/car.hpp>
-#include <mirena_common/msg/heartbeat.hpp>
 #include "ang_accel_estimator.hpp"
 
 #include <tf2/LinearMath/Quaternion.h>
@@ -19,7 +17,6 @@ namespace mirena::AHRS
     {
         sensor_msgs::msg::Imu cog_imu;
         sensor_msgs::msg::Imu lidar_imu;
-        mirena_common::msg::Heartbeat report;
     };
 
     class Pipeline
@@ -129,14 +126,6 @@ namespace mirena::AHRS
                 lidar_imu_msg.linear_acceleration.y = cog_lin_accel.y();
                 lidar_imu_msg.linear_acceleration.z = cog_lin_accel.z();
                 ret->lidar_imu = lidar_imu_msg;
-            }
-
-            {
-                auto msg = mirena_common::msg::Heartbeat();
-                msg.node_name = "mirena_imu";
-                msg.estado.status = mirena_common::msg::NodeStatus::PARTIAL;
-
-                ret->report = msg;
             }
 
             return ret;

@@ -25,7 +25,6 @@ var _remote_transform: RemoteTransform3D # The bridge node
 var _node: RosNode
 var _camera_pub: RosPublisher
 var _camera_info_pub: RosPublisher
-var _tf_broadcaster: RosTfBroadcaster
 var _ros_timer: RosTimer
 
 # --- Internal Variables ---
@@ -38,6 +37,14 @@ var _current_stamp: RosMsg
 
 var optical_tf = Transform3D(Basis(Vector3(0, 1, 0), Vector3(0, 0, -1), Vector3(-1, 0, 0)).orthonormalized(), Vector3.ZERO)
 
+## Mounts are broadcast centrally by the vehicle's RosTransformManager:
+## the physical mount plus the ROS optical-frame convention under it.
+func get_static_transforms() -> Array:
+	return [
+		{"transform": transform, "frame_id": frame_id, "parent_frame_id": parent_frame_id},
+		{"transform": optical_tf, "frame_id": optical_frame_id, "parent_frame_id": frame_id},
+	]
+
 func _ready() -> void:
 	_setup_internal_nodes()
 	Vector3.FORWARD
@@ -46,16 +53,12 @@ func _ready() -> void:
 	
 	_camera_pub = _node.create_publisher("/sensors/camera/image", "sensor_msgs/msg/Image")
 	_camera_info_pub = _node.create_publisher("/sensors/camera/camera_info", "sensor_msgs/msg/CameraInfo")
-	_tf_broadcaster = _node.create_tf_broadcaster()
 	_resolved_optical_frame = _node.resolve_frame(optical_frame_id)
 
 	rd = RenderingServer.get_rendering_device()
 
 	_cache_message_templates(_camera)
-	
-	# Initial TF publish
-	_tf_broadcaster.send_transform(optical_tf, optical_frame_id, frame_id, true)
-	
+
 	var interval: float = 1.0 / publish_rate
 	_ros_timer = _node.create_timer(interval, _request_capture)
 
@@ -95,13 +98,9 @@ func _setup_internal_nodes() -> void:
 func _request_capture() -> void:
 	if not is_visible_in_tree() or is_requesting: return 
 		
-	is_requesting = true 
+	is_requesting = true
 	_current_stamp = _node.now()
-	
-	# Sync the TF right before we render to ensure the "photo" is taken at the correct spot
-	# Use the exact same stamp as the image message to prevent synchronization lag
-	_tf_broadcaster.send_transform(transform, frame_id, parent_frame_id, true)
-	
+
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 	
 	if not RenderingServer.frame_post_draw.is_connected(_on_frame_drawn):

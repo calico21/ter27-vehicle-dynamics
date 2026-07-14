@@ -37,7 +37,6 @@ var _effects: Array[LidarFaceCompositorEffect] = []
 # --- ROS Components ---
 var _node: RosNode
 var _lidar_pub: RosPublisher
-var _tf_broadcaster: RosTfBroadcaster
 var _ros_timer: RosTimer
 
 # --- Rendering Components ---
@@ -57,6 +56,10 @@ var _stitch_uniform_set: RID
 var _params_float_array: PackedFloat32Array = PackedFloat32Array()
 var _lidar_environment: Environment
 var _actual_face_resolution: int = 256
+
+## Mounts are broadcast centrally by the vehicle's RosTransformManager
+func get_static_transforms() -> Array:
+	return [{"transform": transform, "frame_id": frame_id, "parent_frame_id": parent_frame_id}]
 
 func _ready() -> void:
 	# 1. Setup hardware rendering
@@ -79,7 +82,6 @@ func _ready() -> void:
 	_node = RosNode.new()
 	_node.init(name.to_snake_case(),ros_namespace.to_snake_case())
 	_lidar_pub = _node.create_publisher(lidar_topic, "sensor_msgs/msg/PointCloud2")
-	_tf_broadcaster = _node.create_tf_broadcaster()
 
 	# 4. Start loop
 	_prepare_msg_template()
@@ -259,9 +261,6 @@ func _on_timer_timeout():
 		
 	is_sampling = true
 	_current_stamp = _node.now()
-	
-	# Update TF before render
-	_tf_broadcaster.send_transform(transform, frame_id, parent_frame_id, true)
 
 	# Determine which viewports need to be rendered based on FOV configuration
 	var render_mask = [false, false, false, false, false, false]

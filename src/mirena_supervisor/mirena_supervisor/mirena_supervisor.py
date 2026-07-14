@@ -19,7 +19,7 @@ from lifecycle_msgs.srv import ChangeState
 from lifecycle_msgs.msg import Transition
 
 # Adjust the import path if your package name differs
-from mirena_common.msg import Heartbeat, ASStatus, MissionStatus
+from mirena_common.msg import Heartbeat, AsInfo, MissionInfo
 
 MAX_REPORT_SLACK_SEC: float = 3600  # 500ms threshold — node considered dead if exceeded
 
@@ -32,8 +32,18 @@ SLAM_NODE_NAME: str = 'mirena_slam'
 PLANNING_NODE_NAME: str = 'mirena_planning'
 
 mission_laps = {
-    'trackdrive':10,
-    'autocross': 1,
+    'TRACKDRIVE': 10,
+    'AUTOCROSS': 1,
+}
+
+# AsInfo mission enum -> mission_config YAML basename
+mission_names = {
+    AsInfo.AS_MISSION_ACCELERATION: 'ACCELERATION',
+    AsInfo.AS_MISSION_SKIDPAD: 'SKIDPAD',
+    AsInfo.AS_MISSION_TRACKDRIVE: 'TRACKDRIVE',
+    AsInfo.AS_MISSION_BRAKE_TEST: 'BRAKE_TEST',
+    AsInfo.AS_MISSION_INSPECTION: 'INSPECTION',
+    AsInfo.AS_MISSION_AUTOCROSS: 'AUTOCROSS',
 }
 
 class MirenaSupervisor(Node):
@@ -47,12 +57,12 @@ class MirenaSupervisor(Node):
         self.nodes_to_monitor: List[str] = self.get_parameter('nodes_to_monitor').get_parameter_value().string_array_value
 
         # --- State Members (Stored as full ROS messages) ---
-        self._as_status: ASStatus = ASStatus()
-        self._as_status.as_status = ASStatus.AS_OFF
-        self._as_status.mission_selected = ""
-        
-        self._mission_status: MissionStatus = MissionStatus()
-        self._mission_status.mission_status = MissionStatus.INACTIVE
+        self._as_info: AsInfo = AsInfo()
+        self._as_info.status = AsInfo.AS_STATUS_OFF
+        self._as_info.mission = AsInfo.AS_MISSION_NONE
+
+        self._mission_info: MissionInfo = MissionInfo()
+        self._mission_info.status = MissionInfo.MISSION_STATUS_INACTIVE
 
         # --- Tracking Dictionaries ---
         self._master_report: Dict[str, Dict[str, Any]] = {}
@@ -67,10 +77,10 @@ class MirenaSupervisor(Node):
         self._activating: bool = False
 
         # --- Subscriptions & Publishers ---
-        self._as_status_sub: Subscription = self.create_subscription(
-            ASStatus,
+        self._as_info_sub: Subscription = self.create_subscription(
+            AsInfo,
             "/as_status",
-            self.as_status_callback,
+            self.as_info_callback,
             10
         )
 
@@ -82,8 +92,8 @@ class MirenaSupervisor(Node):
             10
         )
 
-        self._mission_status_pub: Publisher = self.create_publisher(
-            MissionStatus,
+        self._mission_info_pub: Publisher = self.create_publisher(
+            MissionInfo,
             "/system/mission_status",
             10
         )
@@ -120,11 +130,11 @@ class MirenaSupervisor(Node):
         Runs fully asynchronously: once every node has acknowledged its
         parameters the CONFIGURE transition is triggered.
         """
-        # Read the string field from the stored ASStatus message
-        mission_name = self._as_status.mission_selected
+        # Resolve the mission enum from the stored AsInfo message to a config name
+        mission_name = mission_names.get(self._as_info.mission, "")
 
         if not mission_name:
-            self.get_logger().error("No mission selected in ASStatus message. Cannot load parameters.")
+            self.get_logger().error("No mission selected in AsInfo message. Cannot load parameters.")
             self.fail_mission()
             return
 
@@ -189,7 +199,7 @@ class MirenaSupervisor(Node):
     def _on_param_loaded(self, node_name: str, future: Future) -> None:
         """Handles a single node's parameter-set response and advances when all are done."""
         # Sequence may have been aborted/reset while this was in flight.
-        if self._mission_status.mission_status != MissionStatus.CONFIGURING:
+        if self._mission_info.status != MissionInfo.MISSION_STATUS_CONFIGURING:
             return
 
         try:
@@ -217,16 +227,16 @@ class MirenaSupervisor(Node):
         self._batch_transition(Transition.TRANSITION_CONFIGURE, self._on_all_configured)
 
     def _on_all_configured(self) -> None:
-        if self._mission_status.mission_status != MissionStatus.CONFIGURING:
+        if self._mission_info.status != MissionInfo.MISSION_STATUS_CONFIGURING:
             return
         self.get_logger().info("All nodes configured. Mission READY.")
-        self._mission_status.mission_status = MissionStatus.READY
+        self._mission_info.status = MissionInfo.MISSION_STATUS_READY
 
     def _on_all_activated(self) -> None:
-        if self._mission_status.mission_status != MissionStatus.READY:
+        if self._mission_info.status != MissionInfo.MISSION_STATUS_READY:
             return
         self.get_logger().info("All nodes activated. Mission RUNNING.")
-        self._mission_status.mission_status = MissionStatus.RUNNING
+        self._mission_info.status = MissionInfo.MISSION_STATUS_RUNNING
         self._activating = False
 
     def _batch_transition(
@@ -290,25 +300,25 @@ class MirenaSupervisor(Node):
 
         client.call_async(req).add_done_callback(callback)
 
-    def as_status_callback(self, msg: ASStatus) -> None:
+    def as_info_callback(self, msg: AsInfo) -> None:
         
         """Handles low-level Autonomous System state changes."""
-        prev_status = self._as_status.as_status
+        prev_status = self._as_info.status
         # Store the entire incoming message
-        self._as_status = msg
+        self._as_info = msg
 
         # Trigger configuring when AS goes to READY
-        if self._as_status.as_status == ASStatus.AS_READY and prev_status != ASStatus.AS_READY:
-            if self._mission_status.mission_status in [MissionStatus.INACTIVE, MissionStatus.FAILED]:
+        if self._as_info.status == AsInfo.AS_STATUS_READY and prev_status != AsInfo.AS_STATUS_READY:
+            if self._mission_info.status in [MissionInfo.MISSION_STATUS_INACTIVE, MissionInfo.MISSION_STATUS_FAILED]:
                 self.get_logger().info("AS Status is READY. Preparing configuration...")
                 # Enter CONFIGURING immediately: this guards against re-entry and
                 # the rest of the bring-up (params -> CONFIGURE -> READY) runs
                 # asynchronously from here.
-                self._mission_status.mission_status = MissionStatus.CONFIGURING
+                self._mission_info.status = MissionInfo.MISSION_STATUS_CONFIGURING
                 self._load_mission_parameters()
 
         # Trigger activate when AS goes to DRIVING
-        elif self._as_status.as_status == ASStatus.AS_DRIVING and self._mission_status.mission_status == MissionStatus.READY:
+        elif self._as_info.status == AsInfo.AS_STATUS_DRIVING and self._mission_info.status == MissionInfo.MISSION_STATUS_READY:
             # READY persists until activation actually completes, so guard against
             # re-triggering the batch on repeated DRIVING messages.
             if not self._activating:
@@ -316,13 +326,13 @@ class MirenaSupervisor(Node):
                 self._activating = True
                 self._batch_transition(Transition.TRANSITION_ACTIVATE, self._on_all_activated)
 
-        elif self._as_status.as_status == ASStatus.AS_EMERGENCY:
+        elif self._as_info.status == AsInfo.AS_STATUS_EMERGENCY:
             self.get_logger().error("Emergency triggered from AS_STATUS!")
             self.fail_mission()
 
     def health_callback(self, msg: Heartbeat) -> None:
         """Aggregates node JSON reports and tracks timestamp from the global /health topic."""
-        if self._mission_status.mission_status != MissionStatus.RUNNING:
+        if self._mission_info.status != MissionInfo.MISSION_STATUS_RUNNING:
             return        
         self.get_logger().info(msg.node_name)
         # Ignore heartbeats from nodes we don't care about
@@ -341,11 +351,11 @@ class MirenaSupervisor(Node):
             self.get_logger().warning(f"Malformed JSON report received from {msg.node_name}")
 
     def monitor_system(self) -> None:
-        #self.get_logger().info(f"MONITORING!! {self._mission_status.mission_status}")
+        #self.get_logger().info(f"MONITORING!! {self._mission_info.status}")
         
         """Checks for dead nodes and publishes the current MissionStatus."""
         # 1. Check Node Heartbeats (Only enforce if we are active/configured)
-        if self._mission_status.mission_status not in [MissionStatus.READY, MissionStatus.RUNNING]:
+        if self._mission_info.status not in [MissionInfo.MISSION_STATUS_READY, MissionInfo.MISSION_STATUS_RUNNING]:
             return
 
         now = self.get_clock().now()
@@ -362,13 +372,13 @@ class MirenaSupervisor(Node):
                 break
 
         # 2. Count laps while the mission is actually running.
-        if self._mission_status.mission_status == MissionStatus.RUNNING:
+        if self._mission_info.status == MissionInfo.MISSION_STATUS_RUNNING:
             self._update_lap_count()
             print(f'LAP COUNT IS: {self.lap_count}')
 
         # 3. Publish the full Mission Status message
-        self.get_logger().info(f"MONITORINi OUT!! {self._mission_status.mission_status}")
-        self._mission_status_pub.publish(self._mission_status)
+        self.get_logger().info(f"MONITORINi OUT!! {self._mission_info.status}")
+        self._mission_info_pub.publish(self._mission_info)
 
     def _car_position(self) -> Optional[tuple]:
         """Latest car (x, y) from the SLAM heartbeat report, or None if unavailable."""
@@ -427,13 +437,13 @@ class MirenaSupervisor(Node):
 
     def finish_mission(self) -> None:
         """Marks the mission FINISHED and brings nodes down (lap goal reached)."""
-        if self._mission_status.mission_status == MissionStatus.FINISHED:
+        if self._mission_info.status == MissionInfo.MISSION_STATUS_FINISHED:
             return  # Already finished
 
         self.get_logger().info(
             f"Lap goal reached ({self.lap_count}/{self.lap_goal}). Mission FINISHED."
         )
-        self._mission_status.mission_status = MissionStatus.FINISHED
+        self._mission_info.status = MissionInfo.MISSION_STATUS_FINISHED
 
         # Reset any in-flight startup sequencing state.
         self._activating = False
@@ -445,11 +455,11 @@ class MirenaSupervisor(Node):
 
     def fail_mission(self) -> None:
         """Sets mission to FAILED and attempts to deactivate/cleanup nodes."""
-        if self._mission_status.mission_status == MissionStatus.FAILED:
+        if self._mission_info.status == MissionInfo.MISSION_STATUS_FAILED:
             return  # Already failed
 
         self.get_logger().fatal("ABORTING MISSION: System entered FAILED state.")
-        self._mission_status.mission_status = MissionStatus.FAILED
+        self._mission_info.status = MissionInfo.MISSION_STATUS_FAILED
 
         # Reset any in-flight startup sequencing state.
         self._activating = False
