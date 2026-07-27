@@ -437,7 +437,7 @@ class MirenaPerception(LifecycleNode):
                 norm_depths = np.clip(depths_np / 20.0, 0, 1) * 255
                 norm_depths = norm_depths.astype(np.uint8)
                 
-                color_map = cv2.applyColorMap(norm_depths, cv2.COLORMAP_JET)
+                color_map = cv2.applyColorMap(norm_depths.reshape(-1,1), cv2.COLORMAP_JET)
                 
                 for i in range(len(uv_np)):
                     u, v = uv_np[i]

@@ -75,6 +75,8 @@ class MirenaMapping : public rclcpp_lifecycle::LifecycleNode
     double _current_car_y = 0.0;
     double _current_car_psi = 0.0;
 
+    rclcpp::Time last_uptdated_synchronized_timestamp;
+
     // SLAM Engine
     std::unique_ptr<mirena::Slam> _slam;
     gtsam::Pose2 _last_keyframe_raw_odom;
@@ -155,6 +157,15 @@ private:
     {
         if (this->get_current_state().id() != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) return;
 
+        rclcpp::Time car_stamp(car_msg->header.stamp);
+        rclcpp::Time landmark_stamp(landmark_msg->header.stamp);
+        
+        double delta_ms = std::abs((car_stamp - landmark_stamp).seconds() * 1000.0);
+
+        last_uptdated_synchronized_timestamp = car_stamp;
+        RCLCPP_INFO(this->get_logger(), "Sync Delta: %.2f ms (Car stamp: %f | Cones stamp: %f)", 
+                    delta_ms, car_stamp.seconds(), landmark_stamp.seconds());
+
         // NUEVO: Guardamos la última posición recibida del coche de forma segura
         {
             std::lock_guard<std::mutex> lock(_report_mutex);
@@ -206,13 +217,12 @@ private:
         if (this->get_current_state().id() != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE || !_is_initialized)
             return;
 
-        auto now = this->now();
 
         // 1. Update and Broadcast map -> odom TF
         gtsam::Pose2 map_to_odom = _slam->get_correction();
         
         geometry_msgs::msg::TransformStamped t;
-        t.header.stamp = now + MAP_PUBLISH_PERIOD; 
+        t.header.stamp = last_uptdated_synchronized_timestamp; 
         t.header.frame_id = FIXED_FRAME;
         t.child_frame_id = MOVING_FRAME;
         
@@ -238,7 +248,7 @@ private:
             e.type = l.color;
             map_msg->entities.push_back(e);
         }
-        map_msg->header.stamp = now;
+        map_msg->header.stamp = last_uptdated_synchronized_timestamp;
         map_msg->header.frame_id = FIXED_FRAME;
         _map_pub->publish(*map_msg);
     }
