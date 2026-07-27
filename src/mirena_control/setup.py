@@ -24,7 +24,7 @@ setup(
     license='Apache-2.0', # Better to define this now
     entry_points={
         'console_scripts': [
-             'control_node = mirena_control.mpc_node:main',
+             'mirena_control = mirena_control.mpc_node:main',
         ],
     },
 )

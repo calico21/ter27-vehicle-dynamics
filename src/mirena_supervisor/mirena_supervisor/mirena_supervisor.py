@@ -23,13 +23,13 @@ from mirena_common.msg import Heartbeat, AsInfo, MissionInfo
 
 MAX_REPORT_SLACK_SEC: float = 3600  # 500ms threshold — node considered dead if exceeded
 
-# How close (metres) the car must come to the start/finish gate for a crossing to
-# count. The car must first leave this zone before a re-entry is counted as a lap.
-LAP_ZONE_RADIUS_M: float = 5.0
+
 
 # Node names whose heartbeat reports feed lap counting.
 SLAM_NODE_NAME: str = 'mirena_slam'
 PLANNING_NODE_NAME: str = 'mirena_planning'
+CONTROL_NODE_NAME: str = 'mirena_control'
+
 
 mission_laps = {
     'TRACKDRIVE': 10,
@@ -102,12 +102,7 @@ class MirenaSupervisor(Node):
         # 10Hz monitor loop for publishing status and checking heartbeats
         self._monitor_timer: Timer = self.create_timer(0.1, self.monitor_system)
 
-        # --- Lap counting ---
-        # lap_goal is loaded per-mission; 0 disables lap counting for that mission.
-        self.lap_count: int = 0
-        self.lap_goal: int = 0
-        self._lap_in_zone: bool = False
-        self._lap_armed: bool = True
+      
 
         # Initialize tracking structures for the defined nodes
         self._init_node_tracking()
@@ -156,10 +151,7 @@ class MirenaSupervisor(Node):
 
         # Reset lap counting for the new mission. Missions absent from the table
         # have a goal of 0, which disables lap-based completion.
-        self.lap_goal = mission_laps.get(mission_name, 0)
-        self.lap_count = 0
-        self._lap_in_zone = True
-        self._lap_armed = False
+        
 
         # Build the request set fully before dispatching, otherwise a fast
         # response could fire its callback and find _pending_params still
@@ -244,6 +236,7 @@ class MirenaSupervisor(Node):
         transition_id: int,
         on_complete: Optional[Callable[[], None]] = None,
         critical: bool = True,
+        reverse: bool = False
     ) -> None:
         """Requests a lifecycle transition on all monitored nodes.
 
@@ -252,8 +245,14 @@ class MirenaSupervisor(Node):
         best-effort cleanup), otherwise it aborts the mission.
         """
         pending: Set[str] = set(self.nodes_to_monitor)
-        for node in self.nodes_to_monitor:
-            self._request_transition(node, transition_id, pending, on_complete, critical)
+        if reverse == False:
+            for node in self.nodes_to_monitor:
+                self.get_logger().info(f"{node} called to transition")
+                self._request_transition(node, transition_id, pending, on_complete, critical)
+        else:
+            for node in reversed(self.nodes_to_monitor):
+                self.get_logger().info(f"{node} called to transition")
+                self._request_transition(node, transition_id, pending, on_complete, critical)
 
     def _request_transition(
         self,
@@ -334,7 +333,6 @@ class MirenaSupervisor(Node):
         """Aggregates node JSON reports and tracks timestamp from the global /health topic."""
         if self._mission_info.status != MissionInfo.MISSION_STATUS_RUNNING:
             return        
-        self.get_logger().info(msg.node_name)
         # Ignore heartbeats from nodes we don't care about
         if msg.node_name not in self.nodes_to_monitor:
             return
@@ -371,69 +369,41 @@ class MirenaSupervisor(Node):
                 self.fail_mission()
                 break
 
-        # 2. Count laps while the mission is actually running.
-        if self._mission_info.status == MissionInfo.MISSION_STATUS_RUNNING:
-            self._update_lap_count()
-            print(f'LAP COUNT IS: {self.lap_count}')
 
         # 3. Publish the full Mission Status message
-        self.get_logger().info(f"MONITORINi OUT!! {self._mission_info.status}")
         self._mission_info_pub.publish(self._mission_info)
+        self._last_lap()
+        self._slam_elapsed()
 
-    def _car_position(self) -> Optional[tuple]:
-        """Latest car (x, y) from the SLAM heartbeat report, or None if unavailable."""
-        report = self._master_report.get(SLAM_NODE_NAME, {})
-        x = report.get('car_pos_x')
-        y = report.get('car_pos_y')
-        if x is None or y is None:
-            return None
-        return float(x), float(y)
+ 
 
-    def _start_gate(self) -> Optional[tuple]:
+    def _last_lap(self) -> Optional[tuple]:
         """Latest start/finish gate (x, y) from the planning heartbeat report.
 
         Returns None until the planner has published a start point.
         """
-        report = self._master_report.get(PLANNING_NODE_NAME, {})
-        start_point = report.get('start_point')
-        if not isinstance(start_point, dict):
-            return None
-        x = start_point.get('x')
-        y = start_point.get('y')
-        if x is None or y is None:
-            return None
-        return float(x), float(y)
+        report = self._master_report.get(CONTROL_NODE_NAME, {})
+        last_lap = report.get('last_lap')
+       
+        if last_lap == True :
+            self.finish_mission()
 
-    def _update_lap_count(self) -> None:
-        """Counts laps by detecting the car re-entering the start/finish zone.
+    def _slam_elapsed(self) -> Optional[tuple]:
+            """Latest start/finish gate (x, y) from the planning heartbeat report.
+    
+            Returns None until the planner has published a start point.
+            """
+            report = self._master_report.get('mirena_slam', {})
+            elapsed_time = report.get('last_update_ms_elapsed')
+            self.get_logger().info(
+                        f"Time from last inference {elapsed_time}"
+                    )
+           
+            
+    
 
-        Uses the SLAM car position and the planner's start gate (both in the map
-        frame). A lap is registered each time the car returns within
-        ``LAP_ZONE_RADIUS_M`` of the gate after having left that zone. When the
-        configured ``lap_goal`` is reached the mission is finished.
-        """
-        if self.lap_goal <= 0:
-            return  # Lap counting disabled for this mission.
 
-        car = self._car_position()
-        gate = self._start_gate()
-        if car is None or gate is None:
-            return  # Not enough data yet.
-
-        dist = math.hypot(car[0] - gate[0], car[1] - gate[1])
-
-        if dist > LAP_ZONE_RADIUS_M:
-            # Car is clear of the start gate: arm the next crossing.
-            self._lap_in_zone = False
-            self._lap_armed = True
-        elif self._lap_armed and not self._lap_in_zone:
-            # Car re-entered the zone after leaving it: one lap completed.
-            self._lap_in_zone = True
-            self._lap_armed = False
-            self.lap_count += 1
-            self.get_logger().info(f"Lap {self.lap_count}/{self.lap_goal} completed.")
-            if self.lap_count >= self.lap_goal:
-                self.finish_mission()
+    
 
     def finish_mission(self) -> None:
         """Marks the mission FINISHED and brings nodes down (lap goal reached)."""
@@ -441,7 +411,7 @@ class MirenaSupervisor(Node):
             return  # Already finished
 
         self.get_logger().info(
-            f"Lap goal reached ({self.lap_count}/{self.lap_goal}). Mission FINISHED."
+            f"Lap goal reached. Mission FINISHED."
         )
         self._mission_info.status = MissionInfo.MISSION_STATUS_FINISHED
 
@@ -450,8 +420,8 @@ class MirenaSupervisor(Node):
         self._pending_params = set()
 
         # Best-effort deactivate then cleanup; errors here are non-critical.
-        self._batch_transition(Transition.TRANSITION_DEACTIVATE, critical=False)
-        self._batch_transition(Transition.TRANSITION_CLEANUP, critical=False)
+        self._batch_transition(Transition.TRANSITION_DEACTIVATE, critical=False, reverse = True)
+        self._batch_transition(Transition.TRANSITION_CLEANUP, critical=False, reverse = True)
 
     def fail_mission(self) -> None:
         """Sets mission to FAILED and attempts to deactivate/cleanup nodes."""
@@ -467,8 +437,8 @@ class MirenaSupervisor(Node):
 
         # Best-effort deactivate then cleanup. Errors are non-critical here so a
         # node that is already inactive/unconfigured does not re-trigger failure.
-        self._batch_transition(Transition.TRANSITION_DEACTIVATE, critical=False)
-        self._batch_transition(Transition.TRANSITION_CLEANUP, critical=False)
+        self._batch_transition(Transition.TRANSITION_DEACTIVATE, critical=False, reverse = True)
+        self._batch_transition(Transition.TRANSITION_CLEANUP, critical=False, reverse = True)
 
 
 def main(args: Optional[List[str]] = None) -> None:

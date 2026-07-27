@@ -69,7 +69,7 @@ def generate_launch_description():
         # ── Control ─────────────────────────────────────────────────────────────
         LifecycleNode(
             package='mirena_control',
-            executable='control_node',
+            executable='mirena_control',
             name='mirena_control',
             namespace='',
             parameters=[{'use_sim_time': use_sim_time}],
@@ -83,7 +83,7 @@ def generate_launch_description():
             namespace='',
             parameters=[{
                 'use_sim_time': use_sim_time,
-                'nodes_to_monitor': ['mirena_state', 'mirena_slam', 'mirena_planning', 'mirena_control',] #'mirena_perception',
+                'nodes_to_monitor': ['mirena_state', 'mirena_slam', 'mirena_planning', 'mirena_control','mirena_perception'] 
             }],
         ),
     ])
