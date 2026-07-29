@@ -78,6 +78,7 @@ namespace mirena
         // Increased threshold for Multi-Hypothesis gating.
         // 9.0 is roughly a 99% confidence interval for 2 Degrees of Freedom (x,y).
         const double mahalanobis_threshold_ = 5.98;
+        double max_confidence_yet = 0;
     };
 
 } // namespace mirena

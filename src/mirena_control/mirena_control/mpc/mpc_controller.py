@@ -108,7 +108,7 @@ class MPCController:
             2 * e_psi +
             -0.08 * vp +              # (3) Maximizar progreso (MINIMIZAR -vp)
             0.005 * g_dot**2 +        # (4) Penalización a tasa de gas
-            0.5 * d_dot**2 +        # (5) Penalización a tasa de volante
+            0.7 * d_dot**2 +        # (5) Penalización a tasa de volante
             0.001 * vp_dot**2         # (6) Penalización a tasa de vp
         )
 

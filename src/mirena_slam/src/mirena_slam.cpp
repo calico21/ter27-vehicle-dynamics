@@ -152,6 +152,7 @@ public:
     }
 
 private:
+    
     void synchronized_callback(const mirena_common::msg::Car::ConstSharedPtr &car_msg,
                                const mirena_common::msg::EntityList::ConstSharedPtr &landmark_msg)
     {
@@ -166,7 +167,6 @@ private:
         RCLCPP_INFO(this->get_logger(), "Sync Delta: %.2f ms (Car stamp: %f | Cones stamp: %f)", 
                     delta_ms, car_stamp.seconds(), landmark_stamp.seconds());
 
-        // NUEVO: Guardamos la última posición recibida del coche de forma segura
         {
             std::lock_guard<std::mutex> lock(_report_mutex);
             _current_car_x = car_msg->x;
@@ -213,32 +213,33 @@ private:
     }
 
     void map_publish_timer_callback()
-    {
-        if (this->get_current_state().id() != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE || !_is_initialized)
-            return;
+{
+    if (this->get_current_state().id() != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE || !_is_initialized)
+        return;
 
+    auto current_time = this->now();
 
-        // 1. Update and Broadcast map -> odom TF
-        gtsam::Pose2 map_to_odom = _slam->get_correction();
-        
-        geometry_msgs::msg::TransformStamped t;
-        t.header.stamp = last_uptdated_synchronized_timestamp; 
-        t.header.frame_id = FIXED_FRAME;
-        t.child_frame_id = MOVING_FRAME;
-        
-        t.transform.translation.x = map_to_odom.x();
-        t.transform.translation.y = map_to_odom.y();
-        t.transform.translation.z = 0.0;
+    gtsam::Pose2 map_to_odom = _slam->get_correction();
+    
+    geometry_msgs::msg::TransformStamped t;
+    t.header.stamp = current_time; 
+    t.header.frame_id = FIXED_FRAME;
+    t.child_frame_id = MOVING_FRAME;
+    
+    t.transform.translation.x = map_to_odom.x();
+    t.transform.translation.y = map_to_odom.y();
+    t.transform.translation.z = 0.0;
 
-        tf2::Quaternion q;
-        q.setRPY(0, 0, map_to_odom.theta());
-        t.transform.rotation.x = q.x();
-        t.transform.rotation.y = q.y();
-        t.transform.rotation.z = q.z();
-        t.transform.rotation.w = q.w();
+    tf2::Quaternion q;
+    q.setRPY(0, 0, map_to_odom.theta());
+    t.transform.rotation.x = q.x();
+    t.transform.rotation.y = q.y();
+    t.transform.rotation.z = q.z();
+    t.transform.rotation.w = q.w();
 
-        _tf_broadcaster->sendTransform(t);
+    _tf_broadcaster->sendTransform(t);
 
+    if (_map_pub->is_activated()) {
         auto map_msg = std::make_shared<mirena_common::msg::EntityList>();
         auto landmarks = _slam->get_map();
         for (const auto &l : landmarks) {
@@ -248,10 +249,11 @@ private:
             e.type = l.color;
             map_msg->entities.push_back(e);
         }
-        map_msg->header.stamp = last_uptdated_synchronized_timestamp;
+        map_msg->header.stamp = current_time;
         map_msg->header.frame_id = FIXED_FRAME;
         _map_pub->publish(*map_msg);
     }
+}
 
     void report_callback() {
         if (!_report_pub->is_activated()) { return; }

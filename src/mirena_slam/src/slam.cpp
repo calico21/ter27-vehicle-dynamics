@@ -123,85 +123,143 @@ void Slam::add_keyframe(const gtsam::Pose2 &raw_odom,
 
     update_isam();
 }
- std::vector<std::vector<int>> Slam::find_candidate_associations(const std::vector<Landmark>& observations, gtsam::SharedNoiseModel meas_noise) 
-    {
+std::vector<std::vector<int>> Slam::find_candidate_associations(
+    const std::vector<Landmark>& observations, 
+    gtsam::SharedNoiseModel meas_noise) 
+{
+    int num_obs = observations.size();
+    std::vector<std::vector<int>> all_candidates(num_obs);
+    if (num_obs == 0) return all_candidates;
 
-        int num_obs = observations.size();
-        std::vector<std::vector<int>> all_candidates(num_obs);
-        if (num_obs == 0) return all_candidates;
+    // -------------------------------------------------------------
+    // 1. Safe Vehicle Pose Retrieval (Checks new_values_ AND current_estimate_)
+    // -------------------------------------------------------------
+    gtsam::Symbol curr_x_key('x', step_count_);
+    gtsam::Symbol prev_x_key('x', step_count_ > 0 ? step_count_ - 1 : 0);
+    gtsam::Pose2 vehicle_pose(0.0, 0.0, 0.0);
 
-        // 1. Get current pose
-        gtsam::Symbol curr_x_key('x', step_count_);
-        gtsam::Symbol prev_x_key('x', step_count_ - 1);
+    try {
+        if (new_values_.exists(curr_x_key)) {
+            vehicle_pose = new_values_.at<gtsam::Pose2>(curr_x_key);
+        } else if (current_estimate_.exists(curr_x_key)) {
+            vehicle_pose = current_estimate_.at<gtsam::Pose2>(curr_x_key);
+        } else if (new_values_.exists(prev_x_key)) {
+            vehicle_pose = new_values_.at<gtsam::Pose2>(prev_x_key);
+        } else if (current_estimate_.exists(prev_x_key)) {
+            vehicle_pose = current_estimate_.at<gtsam::Pose2>(prev_x_key);
+        }
+    } catch (const std::exception& e) {
+        // Fallback to origin if state lookup fails on step 0
+        vehicle_pose = gtsam::Pose2(0.0, 0.0, 0.0);
+    }
+
+    // Safe Pose Covariance Retrieval
+    gtsam::Matrix33 P_pose = gtsam::Matrix3::Identity() * 0.05;
+    try {
+        if (step_count_ > 0) {
+            P_pose = isam_.marginalCovariance(prev_x_key);
+        }
+    } catch (...) {
+        P_pose = gtsam::Matrix3::Identity() * 0.05;
+    }
+
+    // -------------------------------------------------------------
+    // 2. Fetch Local Existing Landmarks (From both estimates)
+    // -------------------------------------------------------------
+    std::vector<int> existing_ids;
+    gtsam::Point2 vehicle_pos = vehicle_pose.translation();
+    
+    for (auto const& [id, color] : landmark_colors_) {
+        gtsam::Symbol l_key('l', id);
+        gtsam::Point2 lm_pos;
         
-        gtsam::Pose2 vehicle_pose = new_values_.exists(curr_x_key) ? 
-                                    new_values_.at<gtsam::Pose2>(curr_x_key) : 
-                                    current_estimate_.at<gtsam::Pose2>(prev_x_key);
-
-        // 2. Local Map Fetch (Radius 20m)
-        std::vector<int> existing_ids;
-        gtsam::Point2 vehicle_pos = vehicle_pose.translation();
-        for (auto const& [id, color] : landmark_colors_) {
-            gtsam::Symbol l_key('l', id);
-            if (!current_estimate_.exists(l_key)) continue;
-            if ((current_estimate_.at<gtsam::Point2>(l_key) - vehicle_pos).norm() < 20.0) {
-                existing_ids.push_back(id);
-            }
+        if (new_values_.exists(l_key)) {
+            lm_pos = new_values_.at<gtsam::Point2>(l_key);
+        } else if (current_estimate_.exists(l_key)) {
+            lm_pos = current_estimate_.at<gtsam::Point2>(l_key);
+        } else {
+            continue; // Landmark key not initialized yet
         }
 
-        if (existing_ids.empty()) return all_candidates; // Return empty vectors -> trigger new landmarks
-
-        // 3. Precompute Covariances for speed
-        std::map<int, gtsam::Matrix22> precomputed_covs;
-        for (int id : existing_ids) {
-            try { precomputed_covs[id] = isam_.marginalCovariance(gtsam::Symbol('l', id)); }
-            catch (...) { precomputed_covs[id] = gtsam::Matrix2::Identity() * 0.1; }
+        // 20-meter local radius filter
+        if ((lm_pos - vehicle_pos).norm() < 20.0) {
+            existing_ids.push_back(id);
         }
+    }
 
-        gtsam::Matrix22 P_pos = gtsam::Matrix2::Identity() * 0.1;
-        try { P_pos = isam_.marginalCovariance(prev_x_key).block<2, 2>(0, 0); } catch (...) {}
-        gtsam::Matrix22 R = boost::dynamic_pointer_cast<gtsam::noiseModel::Gaussian>(meas_noise)->covariance();
-        gtsam::Matrix22 RiT = vehicle_pose.rotation().matrix().transpose();
+    // If no local landmarks exist, return empty vectors to trigger creation of new landmarks
+    if (existing_ids.empty()) return all_candidates;
 
-        // 4. Find all matching hypotheses per observation
+    // -------------------------------------------------------------
+    // 3. Precompute Landmark Covariances
+    // -------------------------------------------------------------
+    std::map<int, gtsam::Matrix22> precomputed_covs;
+    for (int id : existing_ids) {
+        try { 
+            precomputed_covs[id] = isam_.marginalCovariance(gtsam::Symbol('l', id)); 
+        } catch (...) { 
+            precomputed_covs[id] = gtsam::Matrix2::Identity() * 0.1; 
+        }
+    }
 
-        double min_d2_yet;
-        for (int i = 0; i < num_obs; ++i) {
-            min_d2_yet = std::numeric_limits<double>::infinity();
-            gtsam::Point2 measured_pt(observations[i].x, observations[i].y);
-            for (int lm_id : existing_ids) {
-                // HARD COLOR GATE: Prune impossible matches immediately
-                if (observations[i].color != landmark_colors_[lm_id] && 
-                   (observations[i].color.find("orange") == std::string::npos && 
-                    landmark_colors_[lm_id].find("orange") == std::string::npos)) continue;
-                
-                gtsam::Point2 lm_pos = current_estimate_.at<gtsam::Point2>(gtsam::Symbol('l', lm_id));
-                gtsam::Vector2 innovation = measured_pt - vehicle_pose.transformTo(lm_pos);
-                //Cmputamos covarianza
-                gtsam::Matrix22 P_lm = precomputed_covs[lm_id];
-                const double COV_FLOOR = 0.01;
-                P_lm(0,0) += COV_FLOOR;
-                P_lm(1,1) += COV_FLOOR;
-                // EUCLIDEAN PRE-GATE: Skip heavy math if it's obviously wrong (>2.5m away)
-                if (innovation.norm() > 2.5) continue;
+    gtsam::Matrix22 R = boost::dynamic_pointer_cast<gtsam::noiseModel::Gaussian>(meas_noise)->covariance();
 
-                // MAHALANOBIS DISTANCE
-                gtsam::Matrix22 S = RiT * (P_pos + P_lm) * vehicle_pose.rotation().matrix() + R;
-                double d2 = innovation.transpose() * S.inverse() * innovation;
-                
-                // MULTI-HYPOTHESIS TRIGGER: If it passes the threshold, keep it!
-                // Note: You can slightly increase mahalanobis_threshold_ in your config
-                // to allow the graph to resolve more ambiguity safely.
-                if (d2 < mahalanobis_threshold_ && d2 < min_d2_yet) {
-                    min_d2_yet = d2;
-                    all_candidates.at(i).clear();
-                    all_candidates.at(i).push_back(lm_id);
+    // -------------------------------------------------------------
+    // 4. Data Association Loop
+    // -------------------------------------------------------------
+    for (int i = 0; i < num_obs; ++i) {
+        gtsam::Point2 measured_pt(observations[i].x, observations[i].y);
+        
+        double best_d2 = std::numeric_limits<double>::infinity();
+        int best_lm_id = -1;
+
+        for (int lm_id : existing_ids) {
+            gtsam::Symbol l_key('l', lm_id);
+            gtsam::Point2 lm_pos = new_values_.exists(l_key) ? 
+                                    new_values_.at<gtsam::Point2>(l_key) : 
+                                    current_estimate_.at<gtsam::Point2>(l_key);
+
+            // COLOR GATING: Soft color matching
+            bool obs_is_orange = (observations[i].color.find("orange") != std::string::npos);
+            bool lm_is_orange  = (landmark_colors_[lm_id].find("orange") != std::string::npos);
+
+            if (landmark_confidence_[lm_id] > 0.8 && observations[i].confidence > 0.8) {
+                if ((observations[i].color != landmark_colors_[lm_id]) && !obs_is_orange && !lm_is_orange) {
+                    continue; 
                 }
             }
+
+            // Jacobians for transformTo (World -> Vehicle frame)
+            gtsam::Matrix23 H_pose;
+            gtsam::Matrix22 H_lm;
+            gtsam::Point2 predicted_pt = vehicle_pose.transformTo(lm_pos, H_pose, H_lm);
+            
+            gtsam::Vector2 innovation = measured_pt - predicted_pt;
+
+            // Spatial Euclidean pre-filter
+            if (innovation.norm() > 2.0) continue;
+
+            // Full Innovation Covariance: S = H_pose * P_pose * H_pose^T + H_lm * P_lm * H_lm^T + R
+            gtsam::Matrix22 P_lm = precomputed_covs[lm_id];
+            gtsam::Matrix22 S = H_pose * P_pose * H_pose.transpose() + 
+                                H_lm * P_lm * H_lm.transpose() + R;
+
+            double d2 = innovation.transpose() * S.inverse() * innovation;
+
+            if (d2 < mahalanobis_threshold_ && d2 < best_d2) {
+                best_d2 = d2;
+                best_lm_id = lm_id;
+            }
         }
 
-        return all_candidates;
+        // Push ONLY the best match for this observation
+        if (best_lm_id != -1) {
+            all_candidates[i].push_back(best_lm_id);
+        }
     }
+
+    return all_candidates;
+}
     void Slam::update_isam()
     {
         using namespace std::chrono;

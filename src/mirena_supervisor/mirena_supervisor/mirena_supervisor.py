@@ -414,6 +414,8 @@ class MirenaSupervisor(Node):
             f"Lap goal reached. Mission FINISHED."
         )
         self._mission_info.status = MissionInfo.MISSION_STATUS_FINISHED
+        self._mission_info_pub.publish(self._mission_info)
+
 
         # Reset any in-flight startup sequencing state.
         self._activating = False

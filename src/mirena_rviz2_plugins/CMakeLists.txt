@@ -13,18 +13,26 @@ find_package(rviz_rendering REQUIRED)
 find_package(mirena_common REQUIRED)
 find_package(Qt5 REQUIRED COMPONENTS Widgets)
 
-# Required for Q_OBJECT macros in your headers
+# AUTOMOC processes Q_OBJECT macros
 set(CMAKE_AUTOMOC ON)
 
-# 1. Collect all your source files into one variable
+# 1. Collect sources AND headers (AUTOMOC needs to scan headers for Q_OBJECT!)
 file(GLOB DISPLAY_SOURCES "src/displays/*.cpp")
+file(GLOB DISPLAY_HEADERS "src/displays/*.hpp" "src/displays/*.h")
 
-# 2. Create a single shared library for the entire package
+# 2. Create the shared library containing both sources and headers
 add_library(mirena_rviz2_plugins SHARED
   ${DISPLAY_SOURCES}
+  ${DISPLAY_HEADERS}
 )
 
-# 3. Add dependencies to the target
+# 3. CRITICAL: Tell CMake and AUTOMOC where your header files are located!
+target_include_directories(mirena_rviz2_plugins PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+# 4. Add dependencies
 ament_target_dependencies(mirena_rviz2_plugins
   pluginlib
   rviz_common 
@@ -36,7 +44,7 @@ target_link_libraries(mirena_rviz2_plugins
   Qt5::Widgets
 )
 
-# 4. Install the library
+# 5. Install the library and headers
 install(TARGETS mirena_rviz2_plugins
   EXPORT export_mirena_rviz2_plugins
   ARCHIVE DESTINATION lib
@@ -44,15 +52,18 @@ install(TARGETS mirena_rviz2_plugins
   RUNTIME DESTINATION bin
 )
 
-# Install Icons
-install(DIRECTORY icons/
-        DESTINATION share/${PROJECT_NAME}/icons
+install(DIRECTORY include/
+  DESTINATION include
 )
 
-# 5. Export the plugin description XML
-# This makes the XML visible to the ROS 2 environment
+# Install Icons
+install(DIRECTORY icons/
+  DESTINATION share/${PROJECT_NAME}/icons
+)
+
+# 6. Export the plugin description XML
 pluginlib_export_plugin_description_file(rviz_common rviz_common_plugins.xml)
 
-# 6. Export targets and finish package
+# 7. Export targets and finish package
 ament_export_targets(export_mirena_rviz2_plugins)
 ament_package()

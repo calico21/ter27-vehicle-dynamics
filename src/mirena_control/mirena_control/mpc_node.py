@@ -83,6 +83,7 @@ class MPCNode(LifecycleNode):
         self._lap_armed: bool = True
         self.last_lap = False
         self.last_solve_start_time = None
+        self.finish = False
 
     def as_info_callback(self, msg: AsInfo):
         """Callback to store autonomous system status and mission."""
@@ -201,10 +202,11 @@ class MPCNode(LifecycleNode):
                 t_o2c.transform.translation.y,
                 self._yaw_from_quat(t_o2c.transform.rotation),
             ])
-            if self.last_lap == False:
-                s_max = self.trajectory.x[-1]
-            else: 
-                s_max = 20
+            
+            s_max = self.trajectory.x[-1]
+            if self.last_lap and self.global_s >= 30:
+                self.finish = True
+
 
             is_closed = self.is_track_closed and not self.last_lap 
             def dist_sq(s):
@@ -286,6 +288,13 @@ class MPCNode(LifecycleNode):
     def control_executor(self):
         if not self.control_pub.is_activated: 
             return
+
+        if self.last_lap:
+            ctrl_msg = CarControl(gas=0.0, steer_angle=0.0)
+            ctrl_msg.header.stamp = self.get_clock().now().to_msg()
+            self.control_pub.publish(ctrl_msg)
+            return
+
         with self.lock:
             if not self.car or self.last_solve_start_time is None: return
             dt = (self.get_clock().now() - self.last_solve_start_time).nanoseconds / 1e9
@@ -294,7 +303,6 @@ class MPCNode(LifecycleNode):
         
         ctrl_msg = CarControl(gas=gas, steer_angle=steer)
         ctrl_msg.header.stamp = self.get_clock().now().to_msg()
-        
         self.control_pub.publish(ctrl_msg)
 
 
@@ -321,7 +329,7 @@ class MPCNode(LifecycleNode):
             report_data = {
                 "status_state": "WORKING",
                 "progress": self.global_s,
-                "last_lap": self.last_lap
+                "last_lap": self.finish
             }
             msg.report = json.dumps(report_data)
             self.heartbeat_pub.publish(msg)
