@@ -38,7 +38,23 @@ func _callback(msg: RosMirenaCommonHeartbeat):
 	
 	if msg.node_name == _target :
 		tiempo_anterior = Time.get_unix_time_from_system()
-		_change_color(int(msg.estado.status))
+		_change_color(_status_from_report(msg.report))
+
+# Nodes optionally publish "status_state" inside their json report; a heartbeat
+# without one just means the node is alive and publishing.
+func _status_from_report(report: String) -> int:
+	var parsed = JSON.parse_string(report)
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return 1
+	match parsed.get("status_state", "WORKING"):
+		"PARTIAL":
+			return 3
+		"IDLE":
+			return 2
+		"NOT_WORKING":
+			return 0
+		_:
+			return 1
 
 func _change_color(status: int):
 	match (status):

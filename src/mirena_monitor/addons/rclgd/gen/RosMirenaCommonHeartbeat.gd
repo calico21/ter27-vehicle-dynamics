@@ -17,7 +17,3 @@ var node_name : String:
 var report : String:
 	get: return get_member(&"report")
 	set(v): set_member(&"report", v)
-
-var estado : RosMirenaCommonNodeStatus:
-	get: return get_member(&"estado")
-	set(v): set_member(&"estado", v)

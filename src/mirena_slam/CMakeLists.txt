@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 3.8)
 project(mirena_slam)
 
+# GTSAM and Eigen are template-heavy: an unoptimised build is several times
+# slower, which is the difference between hitting the keyframe budget and not.
+# Default to Release rather than inheriting CMake's empty build type.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic -Wdeprecated-declarations)
 endif()

@@ -224,7 +224,7 @@ private:
                     logged_timestamp_source_ = true;
                 }
             }
-            // ==========================================
+            // ==================================================================================================================================
 
             auto img_msg = std::make_unique<sensor_msgs::msg::Image>();
             img_msg->header.stamp = frame_stamp;

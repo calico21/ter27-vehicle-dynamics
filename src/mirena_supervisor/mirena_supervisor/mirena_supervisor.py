@@ -30,11 +30,8 @@ SLAM_NODE_NAME: str = 'mirena_slam'
 PLANNING_NODE_NAME: str = 'mirena_planning'
 CONTROL_NODE_NAME: str = 'mirena_control'
 
-
-mission_laps = {
-    'TRACKDRIVE': 10,
-    'AUTOCROSS': 1,
-}
+# Lap goals live in mission_config/<MISSION>.yaml as the control node's `laps`
+# parameter, which is pushed to it before CONFIGURE. Do not duplicate them here.
 
 # AsInfo mission enum -> mission_config YAML basename
 mission_names = {
@@ -148,10 +145,6 @@ class MirenaSupervisor(Node):
             return
 
         self.get_logger().info(f"Loading parameters from {config_path}...")
-
-        # Reset lap counting for the new mission. Missions absent from the table
-        # have a goal of 0, which disables lap-based completion.
-        
 
         # Build the request set fully before dispatching, otherwise a fast
         # response could fire its callback and find _pending_params still
@@ -372,8 +365,8 @@ class MirenaSupervisor(Node):
 
         # 3. Publish the full Mission Status message
         self._mission_info_pub.publish(self._mission_info)
+        # Check for mission completion
         self._last_lap()
-        self._slam_elapsed()
 
  
 
@@ -388,22 +381,6 @@ class MirenaSupervisor(Node):
         if last_lap == True :
             self.finish_mission()
 
-    def _slam_elapsed(self) -> Optional[tuple]:
-            """Latest start/finish gate (x, y) from the planning heartbeat report.
-    
-            Returns None until the planner has published a start point.
-            """
-            report = self._master_report.get('mirena_slam', {})
-            elapsed_time = report.get('last_update_ms_elapsed')
-            self.get_logger().info(
-                        f"Time from last inference {elapsed_time}"
-                    )
-           
-            
-    
-
-
-    
 
     def finish_mission(self) -> None:
         """Marks the mission FINISHED and brings nodes down (lap goal reached)."""

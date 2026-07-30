@@ -1,0 +1,47 @@
+# Defaults for the MPC control node.  These mirror the values compiled in as
+# parameter defaults; override any subset from a launch file.
+#
+# Per-mission values are NOT loaded from here at runtime -- the supervisor
+# pushes them from mirena_supervisor/mission_config/<MISSION>.yaml before it
+# triggers CONFIGURE.  `laps` in particular lives there, one file per mission.
+#
+# The horizon length, number of shooting nodes and number of reference points
+# are fixed by the generated acados solver (codegen/generate_solver.py) and are
+# deliberately not runtime parameters.
+mirena_control:
+  ros__parameters:
+    # Mission end.  Laps are counted from arc-length progress along the
+    # centreline, and the run ends by cutting the reference short so the MPC
+    # decelerates into the gap of its own accord -- there is no separate stop
+    # command.  laps = 0 means an open track (skidpad, acceleration): stop at
+    # the last gate.  laps > 0 means stop stop_distance metres past the final
+    # crossing of the start/finish line.
+    laps: 0
+    stop_distance: 20.0         # m past the final crossing; closed tracks only
+    min_path_length: 5.0        # m, floor on the reference window (must be > 0)
+    stop_speed_eps: 0.3         # m/s below which the car counts as stationary
+    stop_hold_time: 0.5         # s stationary before the run is reported done
+
+    # Reference window: lookahead grows with speed.  This also governs cruise
+    # speed -- the horizon settles near 2u = lookahead_base + lookahead_gain*u,
+    # so ~18.8 m/s today.  Raising the gain raises that speed, but braking
+    # distance grows as u^2 while the reference left to brake in only grows
+    # linearly, so past ~2.5 the car can no longer stop in what it is given.
+    lookahead_base: 15.0        # m
+    lookahead_gain: 1.2         # m per (m/s)
+
+    # Frames.
+    robot_frame: "car/cog"
+    work_frame: "odom"
+    map_frame: "map"
+
+    # Loop rates, in seconds.
+    solver_period: 0.05         # 20 Hz  NLP solve
+    command_period: 0.01        # 100 Hz command replay
+    heartbeat_period: 0.1       # 10 Hz  supervisor report
+    tf_timeout: 0.005
+
+    # Centreline projection search, in metres.
+    projection_window_back: 5.0
+    projection_window_forward: 20.0
+    projection_coarse_step: 0.25
