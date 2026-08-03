@@ -8,6 +8,11 @@
 # The horizon length, number of shooting nodes and number of reference points
 # are fixed by the generated acados solver (codegen/generate_solver.py) and are
 # deliberately not runtime parameters.
+#
+# The inspection node takes this same node name for the INSPECTION mission, so
+# its defaults cannot live in this block -- it would reject every key below.
+# They are compiled into src/inspection/inspection_node.cpp and overridden from
+# mission_config/INSPECTION.yaml.
 mirena_control:
   ros__parameters:
     # Mission end.  Laps are counted from arc-length progress along the

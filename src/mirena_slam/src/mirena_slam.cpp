@@ -1,7 +1,4 @@
 #include <rclcpp/rclcpp.hpp>
-#include <rclcpp_lifecycle/lifecycle_node.hpp>
-#include <rclcpp_lifecycle/lifecycle_publisher.hpp>
-#include <lifecycle_msgs/msg/state.hpp>
 #include <chrono>
 #include <mutex> // NUEVO: Para seguridad en hilos (Thread-safety)
 
@@ -41,9 +38,7 @@
 #define REPORT_STALE_AFTER_S 1.0
 
 using namespace std::chrono_literals;
-using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
-
-class MirenaMapping : public rclcpp_lifecycle::LifecycleNode
+class MirenaMapping : public rclcpp::Node
 {
     // Synchronize the Car state with the detected Landmarks
     using SyncPolicy = message_filters::sync_policies::ApproximateTime<mirena_common::msg::Car, mirena_common::msg::EntityList>;
@@ -59,13 +54,13 @@ class MirenaMapping : public rclcpp_lifecycle::LifecycleNode
     rclcpp::CallbackGroup::SharedPtr _tf_cb_group;
 
     // Subscribers & Synchronizer
-    std::shared_ptr<message_filters::Subscriber<mirena_common::msg::Car, rclcpp_lifecycle::LifecycleNode>> _sync_car_sub;
-    std::shared_ptr<message_filters::Subscriber<mirena_common::msg::EntityList, rclcpp_lifecycle::LifecycleNode>> _sync_landmark_sub;
+    std::shared_ptr<message_filters::Subscriber<mirena_common::msg::Car, rclcpp::Node>> _sync_car_sub;
+    std::shared_ptr<message_filters::Subscriber<mirena_common::msg::EntityList, rclcpp::Node>> _sync_landmark_sub;
     std::shared_ptr<message_filters::Synchronizer<SyncPolicy>> _sync;
 
-    // Lifecycle Publishers
-    rclcpp_lifecycle::LifecyclePublisher<mirena_common::msg::EntityList>::SharedPtr _map_pub;
-    rclcpp_lifecycle::LifecyclePublisher<mirena_common::msg::Heartbeat>::SharedPtr _report_pub;
+    // Publishers
+    rclcpp::Publisher<mirena_common::msg::EntityList>::SharedPtr _map_pub;
+    rclcpp::Publisher<mirena_common::msg::Heartbeat>::SharedPtr _report_pub;
 
     // Transform broadcaster (map -> odom)
     std::unique_ptr<tf2_ros::TransformBroadcaster> _tf_broadcaster;
@@ -98,10 +93,8 @@ class MirenaMapping : public rclcpp_lifecycle::LifecycleNode
 
     // SLAM Engine.
     //
-    // Guarded because the lifecycle transition callbacks run in the node's
-    // default callback group while the sync callback runs in _slam_cb_group, and
-    // this is a MultiThreadedExecutor: on_cleanup() could otherwise free the
-    // engine out from under an in-flight add_keyframe().
+    // Guarded because the sync callback runs in _slam_cb_group under a
+    // MultiThreadedExecutor while the map and report timers run in their own.
     std::mutex _slam_mutex;
     std::unique_ptr<mirena::Slam> _slam;
     gtsam::Pose2 _last_keyframe_raw_odom;
@@ -112,14 +105,11 @@ class MirenaMapping : public rclcpp_lifecycle::LifecycleNode
     double _last_kf_cov[3] = {0.0, 0.0, 0.0};
 
 public:
-    MirenaMapping() : rclcpp_lifecycle::LifecycleNode("mirena_mapping") {
+    MirenaMapping() : rclcpp::Node("mirena_mapping") {
         this->_last_update_timestamp = this->now();
         this->_last_update_total_landmark_count = 0;
-    }
 
-    CallbackReturn on_configure(const rclcpp_lifecycle::State &) override
-    {
-        RCLCPP_INFO(this->get_logger(), "Configuring Mirena Mapping");
+        RCLCPP_INFO(this->get_logger(), "Starting Mirena Mapping");
 
         _slam_cb_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
         _report_cb_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -134,10 +124,10 @@ public:
         _tf_broadcaster = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
         // Filtered Subscribers
-        _sync_car_sub = std::make_shared<message_filters::Subscriber<mirena_common::msg::Car, rclcpp_lifecycle::LifecycleNode>>(
+        _sync_car_sub = std::make_shared<message_filters::Subscriber<mirena_common::msg::Car, rclcpp::Node>>(
             this, CAR_STATE_TOPIC, rmw_qos_profile_default, slam_sub_options);
 
-        _sync_landmark_sub = std::make_shared<message_filters::Subscriber<mirena_common::msg::EntityList, rclcpp_lifecycle::LifecycleNode>>(
+        _sync_landmark_sub = std::make_shared<message_filters::Subscriber<mirena_common::msg::EntityList, rclcpp::Node>>(
             this, LANDMARK_TOPIC, rmw_qos_profile_default, slam_sub_options);
 
         _sync = std::make_shared<message_filters::Synchronizer<SyncPolicy>>(
@@ -156,54 +146,12 @@ public:
             REPORT_PERIOD, std::bind(&MirenaMapping::report_callback, this), _report_cb_group);
 
         _is_initialized = false;
-        return CallbackReturn::SUCCESS;
-    }
-
-    CallbackReturn on_activate(const rclcpp_lifecycle::State &) override {
-        RCLCPP_INFO(this->get_logger(), "SLAM Node Active");
-        _map_pub->on_activate();
-        _report_pub->on_activate();
-        return CallbackReturn::SUCCESS;
-    }
-
-    CallbackReturn on_deactivate(const rclcpp_lifecycle::State &) override {
-        _map_pub->on_deactivate();
-        _report_pub->on_deactivate();
-        return CallbackReturn::SUCCESS;
-    }
-
-    CallbackReturn on_cleanup(const rclcpp_lifecycle::State &) override {
-        _map_publish_timer.reset();
-        _report_timer.reset();
-        _sync.reset();
-        _sync_car_sub.reset();
-        _sync_landmark_sub.reset();
-        _map_pub.reset();
-        _report_pub.reset();
-        {
-            std::lock_guard<std::mutex> lock(_slam_mutex);
-            _slam.reset();
-            _is_initialized = false;
-        }
-        {
-            // Drop the snapshot too, so a re-configure cannot broadcast a
-            // correction belonging to the previous run.
-            std::lock_guard<std::mutex> lock(_snapshot_mutex);
-            _map_snapshot.reset();
-            _has_snapshot = false;
-        }
-        {
-            std::lock_guard<std::mutex> lock(_report_mutex);
-            _has_keyframe = false;
-        }
-        return CallbackReturn::SUCCESS;
     }
 
 private:
     void synchronized_callback(const mirena_common::msg::Car::ConstSharedPtr &car_msg,
                                const mirena_common::msg::EntityList::ConstSharedPtr &landmark_msg)
     {
-        if (this->get_current_state().id() != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) return;
 
         rclcpp::Time car_stamp(car_msg->header.stamp);
         rclcpp::Time landmark_stamp(landmark_msg->header.stamp);
@@ -351,9 +299,6 @@ private:
 
     void map_publish_timer_callback()
     {
-        if (this->get_current_state().id() != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE)
-            return;
-
         // Read the last optimisation result and get straight out of the way.
         gtsam::Pose2 map_to_odom;
         std::shared_ptr<const mirena_common::msg::EntityList> map_msg;
@@ -394,12 +339,12 @@ private:
 
         // 2. Republish the map as-is; it keeps the stamp of the update that
         // produced it, which is the time the landmarks were actually valid.
-        if (_map_pub->is_activated() && map_msg)
+        if (map_msg)
             _map_pub->publish(*map_msg);
     }
 
     void report_callback() {
-        if (!_report_pub || !_report_pub->is_activated()) { return; }
+        if (!_report_pub) { return; }
 
         mirena_common::msg::Heartbeat msg;
         msg.timestamp = this->now();
@@ -443,24 +388,8 @@ int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
     auto node = std::make_shared<MirenaMapping>();
 
-    bool autostart_flag = false;
-    for (int i = 1; i < argc; i++) {
-        if (std::string(argv[i]) == "-a") {
-            autostart_flag = true;
-            break;
-        }
-    }
-
-    if(autostart_flag){
-        RCLCPP_INFO(node->get_logger(), "Autoactivating");
-        node->configure();
-        node->activate();
-    } else {
-        RCLCPP_INFO(node->get_logger(), "Awaiting activation. Use argument '-a' when running for autoactivation");
-    }
-
     rclcpp::executors::MultiThreadedExecutor executor;
-    executor.add_node(node->get_node_base_interface());
+    executor.add_node(node);
     executor.spin();
     rclcpp::shutdown();
     return 0;

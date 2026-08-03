@@ -18,7 +18,6 @@ option(MIRENA_CONTROL_NATIVE_ARCH
 # ---------------------------------------------------------------------------
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
-find_package(rclcpp_lifecycle REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(tf2 REQUIRED)
@@ -120,8 +119,8 @@ target_compile_options(mpc_solver_generated PRIVATE -O3 -w)
 # Controller library
 # ---------------------------------------------------------------------------
 add_library(mirena_control_core STATIC
-  src/cubic_spline.cpp
-  src/mpc_controller.cpp
+  src/mpc/cubic_spline.cpp
+  src/mpc/mpc_controller.cpp
 )
 target_include_directories(mirena_control_core PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>")
@@ -139,16 +138,24 @@ endif()
 
 # ---------------------------------------------------------------------------
 # Executables
+#
+# Two alternative occupants of the same slot in the stack: exactly one runs per
+# mission, under the node name the supervisor monitors. mirena_control drives
+# the track; mirena_control_inspection sweeps the steering on stands. Both
+# report mission_finished in their heartbeat, which is all the supervisor reads.
 # ---------------------------------------------------------------------------
-add_executable(mirena_control src/mpc_node.cpp)
+add_executable(mirena_control src/mpc/mpc_node.cpp)
 target_link_libraries(mirena_control mirena_control_core nlohmann_json::nlohmann_json)
 target_compile_options(mirena_control PRIVATE -O3 -Wall -Wextra -Wpedantic)
 ament_target_dependencies(mirena_control
-  rclcpp rclcpp_lifecycle geometry_msgs visualization_msgs tf2 tf2_ros mirena_common)
+  rclcpp geometry_msgs visualization_msgs tf2 tf2_ros mirena_common)
 
-add_executable(mirena_control_inspection src/inspection_node.cpp)
+# No solver, no track, no TF: the inspection node needs none of the above.
+add_executable(mirena_control_inspection src/inspection/inspection_node.cpp)
+target_link_libraries(mirena_control_inspection nlohmann_json::nlohmann_json)
 target_compile_options(mirena_control_inspection PRIVATE -O2 -Wall -Wextra -Wpedantic)
-ament_target_dependencies(mirena_control_inspection rclcpp mirena_common)
+ament_target_dependencies(mirena_control_inspection
+  rclcpp mirena_common)
 
 install(TARGETS mirena_control mirena_control_inspection
   DESTINATION lib/${PROJECT_NAME})

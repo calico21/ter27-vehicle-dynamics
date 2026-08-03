@@ -1,423 +1,334 @@
-import os
+"""Mission supervisor for the Mirena driverless car.
+
+Watches the AS state machine and runs one mission's worth of autonomy per run.
+A mission is a launch file: selecting SKIDPAD starts missions/skidpad.launch.py,
+selecting INSPECTION starts a launch file with one node in it, and ending a run
+shuts that launch file down again.
+
+    AS READY, mission selected  ->  launch it                       CONFIGURING
+    every node is beating       ->                                  READY
+    AS DRIVING                  ->                                  RUNNING
+    any node reports finished   ->                                  FINISHED, held
+    AS EMERGENCY / node death   ->                                  FAILED, held
+
+The states report, they do not gate. CONFIGURING means the pipeline is still
+coming up; READY means it is up and the car may be released; RUNNING is the
+confirmation that the car has taken us up on it. Nothing here holds the
+controller back -- the car's own state machine ignores our commands until it
+reaches DRIVING, and that is the interlock that matters.
+
+FINISHED and FAILED are terminal and latched: the launch file is torn down but
+the status keeps publishing, because the verdict on a run is what someone at the
+car needs to read afterwards. Selecting the next mission is what clears it.
+
+The end of a run is whichever node says so. Any node of the mission may put
+`mission_finished: true` in its heartbeat report; the controller does that today,
+but that is the controller's business and is not encoded here. Nor is the
+mission's node list: the pipeline is whoever publishes on /health, discovered
+from the graph, so adding a node to a mission is one edit in its launch file.
+"""
+
 import json
-import math
-from typing import Dict, Any, List, Optional, Set, Callable
+import os
+import threading
+from typing import Any, Dict, List, Optional, Set
 
 import rclpy
 from rclpy.node import Node
-from rclpy.time import Time
-from rclpy.client import Client
-from rclpy.subscription import Subscription
 from rclpy.publisher import Publisher
+from rclpy.subscription import Subscription
+from rclpy.time import Time
 from rclpy.timer import Timer
-from rclpy.task import Future
-from rclpy.parameter import parameter_dict_from_yaml_file
-from rclpy.parameter_client import AsyncParameterClient
 from ament_index_python.packages import get_package_share_directory
 
-from lifecycle_msgs.srv import ChangeState
-from lifecycle_msgs.msg import Transition
-
-# Adjust the import path if your package name differs
 from mirena_common.msg import Heartbeat, AsInfo, MissionInfo
 
-MAX_REPORT_SLACK_SEC: float = 3600  # 500ms threshold — node considered dead if exceeded
+from mirena_supervisor.mission_launcher import MissionLauncher
 
+# The topic every pipeline node reports on. Publishing here is what makes a node
+# part of the mission as far as this supervisor is concerned.
+HEALTH_TOPIC: str = '/health'
 
+# Any node of the mission setting this in its report ends the run.
+MISSION_FINISHED_KEY: str = 'mission_finished'
 
-# Node names whose heartbeat reports feed lap counting.
-SLAM_NODE_NAME: str = 'mirena_slam'
-PLANNING_NODE_NAME: str = 'mirena_planning'
-CONTROL_NODE_NAME: str = 'mirena_control'
+# A mission is in flight in these and nowhere else. INACTIVE before the first
+# run, FINISHED and FAILED after one: all three mean no pipeline is running and
+# the next mission may be started.
+ACTIVE_STATUSES = (
+    MissionInfo.MISSION_STATUS_CONFIGURING,
+    MissionInfo.MISSION_STATUS_READY,
+    MissionInfo.MISSION_STATUS_RUNNING,
+)
 
-# Lap goals live in mission_config/<MISSION>.yaml as the control node's `laps`
-# parameter, which is pushed to it before CONFIGURE. Do not duplicate them here.
-
-# AsInfo mission enum -> mission_config YAML basename
-mission_names = {
-    AsInfo.AS_MISSION_ACCELERATION: 'ACCELERATION',
-    AsInfo.AS_MISSION_SKIDPAD: 'SKIDPAD',
-    AsInfo.AS_MISSION_TRACKDRIVE: 'TRACKDRIVE',
-    AsInfo.AS_MISSION_BRAKE_TEST: 'BRAKE_TEST',
-    AsInfo.AS_MISSION_INSPECTION: 'INSPECTION',
-    AsInfo.AS_MISSION_AUTOCROSS: 'AUTOCROSS',
+# AsInfo mission enum -> launch file basename under launch/missions/.
+MISSION_LAUNCH_FILES: Dict[int, str] = {
+    AsInfo.AS_MISSION_ACCELERATION: 'acceleration',
+    AsInfo.AS_MISSION_SKIDPAD: 'skidpad',
+    AsInfo.AS_MISSION_TRACKDRIVE: 'trackdrive',
+    AsInfo.AS_MISSION_INSPECTION: 'inspection',
+    AsInfo.AS_MISSION_AUTOCROSS: 'autocross',
+    # AS_MISSION_BRAKE_TEST has no launch file yet; selecting it fails the
+    # mission with a clear message rather than launching something wrong.
 }
+
 
 class MirenaSupervisor(Node):
     def __init__(self) -> None:
         super().__init__('mirena_supervisor')
-        self.get_logger().info("Mirena Supervisor Initialized")
 
-        # --- Parameters ---
-        self.declare_parameter('nodes_to_monitor', ['mirena_slam', 'mirena_planning', 'mirena_control'])
+        # Where the mission launch files live, and what to forward to them. The
+        # top-level launch file sets these, which is how a simulated run reaches
+        # the missions as use_sim_time:=true without the supervisor knowing
+        # anything about simulation.
+        self.declare_parameter('mission_launch_package', 'mirena_supervisor')
+        self.declare_parameter('mission_launch_directory', 'launch/missions')
+        self.declare_parameter('mission_launch_arguments', [''])
+        # How long the pipeline gets to come up before its silence is a failure.
+        # Covers the slowest node's startup: loading a model, building a solver.
+        self.declare_parameter('startup_timeout_sec', 60.0)
+        # How long the set of heartbeat publishers must hold still before it is
+        # taken to be the whole pipeline.
+        self.declare_parameter('discovery_settle_sec', 2.0)
+        # A running mission with any node quiet for this long is dead.
+        self.declare_parameter('heartbeat_timeout_sec', 3.0)
 
-        self.nodes_to_monitor: List[str] = self.get_parameter('nodes_to_monitor').get_parameter_value().string_array_value
+        self._launch_dir = os.path.join(
+            get_package_share_directory(
+                self.get_parameter('mission_launch_package').value),
+            self.get_parameter('mission_launch_directory').value)
+        # Passed through to every mission launch file as-is. A string array
+        # rather than a dict parameter because ROS 2 has no map parameter type,
+        # and this way the top-level launch file writes the same `name:=value`
+        # a human would type.
+        self._launch_arguments = [
+            a for a in self.get_parameter('mission_launch_arguments').value if a]
+        self._startup_timeout = self.get_parameter('startup_timeout_sec').value
+        self._discovery_settle = self.get_parameter('discovery_settle_sec').value
+        self._heartbeat_timeout = self.get_parameter('heartbeat_timeout_sec').value
 
-        # --- State Members (Stored as full ROS messages) ---
-        self._as_info: AsInfo = AsInfo()
-        self._as_info.status = AsInfo.AS_STATUS_OFF
-        self._as_info.mission = AsInfo.AS_MISSION_NONE
-
+        self._as_status: int = AsInfo.AS_STATUS_OFF
         self._mission_info: MissionInfo = MissionInfo()
         self._mission_info.status = MissionInfo.MISSION_STATUS_INACTIVE
 
-        # --- Tracking Dictionaries ---
-        self._master_report: Dict[str, Dict[str, Any]] = {}
-        self._node_heartbeats: Dict[str, Time] = {}
-        self._lifecycle_clients: Dict[str, Client] = {}
-        self._param_clients: Dict[str, AsyncParameterClient] = {}
+        self._launcher = MissionLauncher(self.get_logger())
+        self._launched_at: Optional[Time] = None
+        # Who has ever reported this run, and when they last did.
+        self._last_report: Dict[str, Time] = {}
+        # The heartbeat publishers seen so far, and when that set last changed:
+        # CONFIGURING ends when it has held still long enough to believe it is
+        # the whole pipeline. Not _publishers -- rclpy's Node owns that name.
+        self._pipeline: Set[str] = set()
+        self._pipeline_changed_at: Optional[Time] = None
 
-        # --- Startup sequencing guards ---
-        # Set of nodes whose parameter load has not yet completed.
-        self._pending_params: Set[str] = set()
-        # Guards against re-triggering activation while a previous batch is in flight.
-        self._activating: bool = False
-
-        # --- Subscriptions & Publishers ---
-        self._as_info_sub: Subscription = self.create_subscription(
-            AsInfo,
-            "/as_status",
-            self.as_info_callback,
-            10
-        )
-
-        # New global health subscription
+        self._as_sub: Subscription = self.create_subscription(
+            AsInfo, '/as_status', self.as_info_callback, 10)
         self._health_sub: Subscription = self.create_subscription(
-            Heartbeat,
-            "/health",
-            self.health_callback,
-            10
-        )
-
+            Heartbeat, HEALTH_TOPIC, self.health_callback, 10)
         self._mission_info_pub: Publisher = self.create_publisher(
-            MissionInfo,
-            "/system/mission_status",
-            10
-        )
+            MissionInfo, '/system/mission_status', 10)
 
-        # --- Timers ---
-        # 10Hz monitor loop for publishing status and checking heartbeats
-        self._monitor_timer: Timer = self.create_timer(0.1, self.monitor_system)
+        self._monitor_timer: Timer = self.create_timer(0.1, self.monitor)
 
-      
+        self.get_logger().info(f"Mirena Supervisor ready. Missions: {self._launch_dir}")
 
-        # Initialize tracking structures for the defined nodes
-        self._init_node_tracking()
-
-    def _init_node_tracking(self) -> None:
-        """Sets up lifecycle clients, parameter clients and tracking data for monitored nodes."""
-        for node in self.nodes_to_monitor:
-            self._master_report[node] = {}
-            self._node_heartbeats[node] = self.get_clock().now()
-
-            self._lifecycle_clients[node] = self.create_client(
-                ChangeState,
-                f'{node}/change_state'
-            )
-            self._param_clients[node] = AsyncParameterClient(self, node)
-
-    def _load_mission_parameters(self) -> None:
-        """Loads the mission YAML to all monitored nodes via the standard parameter client.
-
-        Runs fully asynchronously: once every node has acknowledged its
-        parameters the CONFIGURE transition is triggered.
-        """
-        # Resolve the mission enum from the stored AsInfo message to a config name
-        mission_name = mission_names.get(self._as_info.mission, "")
-
-        if not mission_name:
-            self.get_logger().error("No mission selected in AsInfo message. Cannot load parameters.")
-            self.fail_mission()
-            return
-
-        try:
-            share_dir = get_package_share_directory('mirena_supervisor')
-        except Exception as e:
-            self.get_logger().error(f"Could not find package share directory: {e}")
-            self.fail_mission()
-            return
-
-        config_path = os.path.join(share_dir, 'mission_config', f"{mission_name}.yaml")
-
-        if not os.path.exists(config_path):
-            self.get_logger().error(f"Mission config file not found: {config_path}")
-            self.fail_mission()
-            return
-
-        self.get_logger().info(f"Loading parameters from {config_path}...")
-
-        # Build the request set fully before dispatching, otherwise a fast
-        # response could fire its callback and find _pending_params still
-        # incomplete, advancing the sequence prematurely.
-        self._pending_params = set()
-        dispatch: List[tuple] = []
-        for node in self.nodes_to_monitor:
-            try:
-                param_dict = parameter_dict_from_yaml_file(config_path, target_nodes=[node])
-            except RuntimeError:
-                # No section for this node in the config: nothing to load.
-                self.get_logger().info(f"No parameters for '{node}' in {mission_name} config. Skipping.")
-                continue
-
-            params = list(param_dict.values())
-            if not params:
-                continue
-
-            client = self._param_clients[node]
-            if not client.wait_for_services(timeout_sec=1.0):
-                self.get_logger().error(f"Parameter service for '{node}' not available.")
-                self.fail_mission()
-                return
-
-            self._pending_params.add(node)
-            dispatch.append((node, params, client))
-
-        if not self._pending_params:
-            self.get_logger().info("No parameters to load. Triggering CONFIGURE transition...")
-            self._configure_nodes()
-            return
-
-        for node, params, client in dispatch:
-            future = client.set_parameters(params)
-            future.add_done_callback(lambda f, n=node: self._on_param_loaded(n, f))
-
-    def _on_param_loaded(self, node_name: str, future: Future) -> None:
-        """Handles a single node's parameter-set response and advances when all are done."""
-        # Sequence may have been aborted/reset while this was in flight.
-        if self._mission_info.status != MissionInfo.MISSION_STATUS_CONFIGURING:
-            return
-
-        try:
-            response = future.result()
-        except Exception as e:
-            self.get_logger().error(f"Parameter load failed for '{node_name}': {e}")
-            self.fail_mission()
-            return
-
-        if not all(result.successful for result in response.results):
-            reasons = "; ".join(r.reason for r in response.results if not r.successful)
-            self.get_logger().error(f"Parameters rejected by '{node_name}': {reasons}")
-            self.fail_mission()
-            return
-
-        self.get_logger().info(f"Parameters loaded for '{node_name}'.")
-        self._pending_params.discard(node_name)
-
-        if not self._pending_params:
-            self.get_logger().info("All parameters loaded. Triggering CONFIGURE transition...")
-            self._configure_nodes()
-
-    def _configure_nodes(self) -> None:
-        """Triggers CONFIGURE on every monitored node; advances to READY when all succeed."""
-        self._batch_transition(Transition.TRANSITION_CONFIGURE, self._on_all_configured)
-
-    def _on_all_configured(self) -> None:
-        if self._mission_info.status != MissionInfo.MISSION_STATUS_CONFIGURING:
-            return
-        self.get_logger().info("All nodes configured. Mission READY.")
-        self._mission_info.status = MissionInfo.MISSION_STATUS_READY
-
-    def _on_all_activated(self) -> None:
-        if self._mission_info.status != MissionInfo.MISSION_STATUS_READY:
-            return
-        self.get_logger().info("All nodes activated. Mission RUNNING.")
-        self._mission_info.status = MissionInfo.MISSION_STATUS_RUNNING
-        self._activating = False
-
-    def _batch_transition(
-        self,
-        transition_id: int,
-        on_complete: Optional[Callable[[], None]] = None,
-        critical: bool = True,
-        reverse: bool = False
-    ) -> None:
-        """Requests a lifecycle transition on all monitored nodes.
-
-        ``on_complete`` is invoked once every node has acknowledged success.
-        When ``critical`` is False a failing transition is only logged (used for
-        best-effort cleanup), otherwise it aborts the mission.
-        """
-        pending: Set[str] = set(self.nodes_to_monitor)
-        if reverse == False:
-            for node in self.nodes_to_monitor:
-                self.get_logger().info(f"{node} called to transition")
-                self._request_transition(node, transition_id, pending, on_complete, critical)
-        else:
-            for node in reversed(self.nodes_to_monitor):
-                self.get_logger().info(f"{node} called to transition")
-                self._request_transition(node, transition_id, pending, on_complete, critical)
-
-    def _request_transition(
-        self,
-        node_name: str,
-        transition_id: int,
-        pending: Set[str],
-        on_complete: Optional[Callable[[], None]],
-        critical: bool,
-    ) -> None:
-        """Asynchronously requests a single lifecycle state transition without blocking the executor."""
-        client: Optional[Client] = self._lifecycle_clients.get(node_name)
-        if not client:
-            self.get_logger().error(f"No lifecycle client found for {node_name}")
-            if critical:
-                self.fail_mission()
-            return
-
-        if not client.wait_for_service(timeout_sec=1.0):
-            self.get_logger().error(f"Lifecycle service for {node_name} not available")
-            if critical:
-                self.fail_mission()
-            return
-
-        req = ChangeState.Request()
-        req.transition.id = transition_id
-
-        def callback(future: Future) -> None:
-            try:
-                result = future.result()
-                ok = result is not None and result.success
-            except Exception as e:
-                self.get_logger().error(f"Service call failed for {node_name}: {e}")
-                ok = False
-
-            if not ok:
-                self.get_logger().error(f"Failed transition {transition_id} for {node_name}")
-                if critical:
-                    self.fail_mission()
-                    return
-
-            pending.discard(node_name)
-            if not pending and on_complete is not None:
-                on_complete()
-
-        client.call_async(req).add_done_callback(callback)
+    # ------------------------------------------------------------- transitions
 
     def as_info_callback(self, msg: AsInfo) -> None:
-        
-        """Handles low-level Autonomous System state changes."""
-        prev_status = self._as_info.status
-        # Store the entire incoming message
-        self._as_info = msg
+        previous, self._as_status = self._as_status, msg.status
 
-        # Trigger configuring when AS goes to READY
-        if self._as_info.status == AsInfo.AS_STATUS_READY and prev_status != AsInfo.AS_STATUS_READY:
-            if self._mission_info.status in [MissionInfo.MISSION_STATUS_INACTIVE, MissionInfo.MISSION_STATUS_FAILED]:
-                self.get_logger().info("AS Status is READY. Preparing configuration...")
-                # Enter CONFIGURING immediately: this guards against re-entry and
-                # the rest of the bring-up (params -> CONFIGURE -> READY) runs
-                # asynchronously from here.
-                self._mission_info.status = MissionInfo.MISSION_STATUS_CONFIGURING
-                self._load_mission_parameters()
-
-        # Trigger activate when AS goes to DRIVING
-        elif self._as_info.status == AsInfo.AS_STATUS_DRIVING and self._mission_info.status == MissionInfo.MISSION_STATUS_READY:
-            # READY persists until activation actually completes, so guard against
-            # re-triggering the batch on repeated DRIVING messages.
-            if not self._activating:
-                self.get_logger().info("AS Status is DRIVING. Activating nodes...")
-                self._activating = True
-                self._batch_transition(Transition.TRANSITION_ACTIVATE, self._on_all_activated)
-
-        elif self._as_info.status == AsInfo.AS_STATUS_EMERGENCY:
-            self.get_logger().error("Emergency triggered from AS_STATUS!")
-            self.fail_mission()
-
-    def health_callback(self, msg: Heartbeat) -> None:
-        """Aggregates node JSON reports and tracks timestamp from the global /health topic."""
-        if self._mission_info.status != MissionInfo.MISSION_STATUS_RUNNING:
-            return        
-        # Ignore heartbeats from nodes we don't care about
-        if msg.node_name not in self.nodes_to_monitor:
+        if msg.status == AsInfo.AS_STATUS_EMERGENCY:
+            # A run that already ended is not turned into a failure by a later
+            # emergency: FINISHED is the truth about what happened.
+            if self._mission_info.status in ACTIVE_STATUSES:
+                self.get_logger().error('Emergency signalled by the AS.')
+                self.fail_mission()
             return
 
-        # Update last seen timestamp
-        stamp_time = Time.from_msg(msg.timestamp)
-        self._node_heartbeats[msg.node_name] = stamp_time
+        if msg.status == previous:
+            return
 
-        # Update the master dictionary with the node's JSON payload
+        if msg.status == AsInfo.AS_STATUS_READY:
+            if self._mission_info.status not in ACTIVE_STATUSES:
+                self.start_mission(msg.mission)
+
+        elif msg.status == AsInfo.AS_STATUS_DRIVING:
+            # Purely a report: the car has released itself and is acting on what
+            # we publish. Nothing on our side changes behaviour here.
+            if self._mission_info.status == MissionInfo.MISSION_STATUS_READY:
+                self.get_logger().info('AS is DRIVING. Mission RUNNING.')
+                self._mission_info.status = MissionInfo.MISSION_STATUS_RUNNING
+            elif self._mission_info.status == MissionInfo.MISSION_STATUS_CONFIGURING:
+                # The car went before the pipeline was up. Nothing useful can
+                # come of the run, and it is already moving.
+                self.get_logger().error('AS reached DRIVING while still configuring.')
+                self.fail_mission()
+
+    def start_mission(self, mission_id: int) -> None:
+        name = MISSION_LAUNCH_FILES.get(mission_id)
+        launch_file = os.path.join(self._launch_dir, f'{name}.launch.py') if name else None
+        if launch_file is None or not os.path.exists(launch_file):
+            self.get_logger().error(f"No mission launch file for mission id {mission_id}.")
+            self.fail_mission()
+            return
+
+        self._last_report = {}
+        self._pipeline = set()
+        self._pipeline_changed_at = None
+        self._mission_info.status = MissionInfo.MISSION_STATUS_CONFIGURING
+
+        if not self._launcher.start(name, launch_file, self._launch_arguments):
+            self.fail_mission()
+            return
+
+        self._launched_at = self.get_clock().now()
+
+    # ---------------------------------------------------------------- monitor
+
+    def health_callback(self, msg: Heartbeat) -> None:
+        """Every heartbeat is liveness; any of them may end the run."""
+        if self._mission_info.status not in ACTIVE_STATUSES:
+            return
+
+        self._last_report[msg.node_name] = self.get_clock().now()
+
+        if self._mission_info.status != MissionInfo.MISSION_STATUS_RUNNING:
+            return
         try:
-            report_data: Dict[str, Any] = json.loads(msg.report)
-            self._master_report[msg.node_name] = report_data
+            report: Dict[str, Any] = json.loads(msg.report)
         except json.JSONDecodeError:
-            self.get_logger().warning(f"Malformed JSON report received from {msg.node_name}")
+            self.get_logger().warning(f"Malformed JSON report from '{msg.node_name}'.")
+            return
+        if report.get(MISSION_FINISHED_KEY) is True:
+            self.get_logger().info(f"'{msg.node_name}' reported the run complete.")
+            self.finish_mission()
 
-    def monitor_system(self) -> None:
-        #self.get_logger().info(f"MONITORING!! {self._mission_info.status}")
-        
-        """Checks for dead nodes and publishes the current MissionStatus."""
-        # 1. Check Node Heartbeats (Only enforce if we are active/configured)
-        if self._mission_info.status not in [MissionInfo.MISSION_STATUS_READY, MissionInfo.MISSION_STATUS_RUNNING]:
+    def monitor(self) -> None:
+        self._mission_info_pub.publish(self._mission_info)
+
+        if self._mission_info.status not in ACTIVE_STATUSES:
+            return
+
+        # The launch file exiting on its own means a node died or refused to
+        # start -- a mission cannot end that way, only be torn down by us.
+        if not self._launcher.is_running():
+            self.get_logger().error('The mission launch exited on its own.')
+            self.fail_mission()
             return
 
         now = self.get_clock().now()
 
-        for node_name, last_report in self._node_heartbeats.items():
-            elapsed_sec = (now - last_report).nanoseconds / 1e9
+        if self._mission_info.status == MissionInfo.MISSION_STATUS_CONFIGURING:
+            self._check_configuring(now)
+        else:
+            self._check_alive(now)
 
-            if elapsed_sec > MAX_REPORT_SLACK_SEC:
-                self.get_logger().error(
-                    f"Critical Node '{node_name}' exceeded heartbeat threshold! "
-                    f"({elapsed_sec:.2f}s > {MAX_REPORT_SLACK_SEC}s). Shutting down."
-                )
-                self.fail_mission()
-                break
+    def _check_configuring(self, now: Time) -> None:
+        """CONFIGURING is the wait for the pipeline to start beating.
 
-
-        # 3. Publish the full Mission Status message
-        self._mission_info_pub.publish(self._mission_info)
-        # Check for mission completion
-        self._last_lap()
-
- 
-
-    def _last_lap(self) -> Optional[tuple]:
-        """Latest start/finish gate (x, y) from the planning heartbeat report.
-
-        Returns None until the planner has published a start point.
+        There is no list of nodes to check against -- the pipeline is whoever
+        publishes on /health -- so the end of the wait is the publisher set
+        holding still. Nodes come up at wildly different speeds (perception
+        loads a TensorRT engine, control builds an acados solver), and a node
+        only starts beating once it is genuinely up, so a set that has stopped
+        growing is the whole mission.
         """
-        report = self._master_report.get(CONTROL_NODE_NAME, {})
-        last_lap = report.get('last_lap')
-       
-        if last_lap == True :
-            self.finish_mission()
+        found = self._health_publishers()
+        if found != self._pipeline:
+            self._pipeline = found
+            self._pipeline_changed_at = now
+            if found:
+                self.get_logger().info(f"Pipeline so far: {', '.join(sorted(found))}")
 
+        waited = self._seconds_since(self._launched_at, now)
+        if waited > self._startup_timeout:
+            missing = 'nothing has' if not found else f"only {', '.join(sorted(found))} have"
+            self.get_logger().error(
+                f"Pipeline did not come up within {self._startup_timeout:.0f}s: {missing} reported.")
+            self.fail_mission()
+            return
 
-    def finish_mission(self) -> None:
-        """Marks the mission FINISHED and brings nodes down (lap goal reached)."""
-        if self._mission_info.status == MissionInfo.MISSION_STATUS_FINISHED:
-            return  # Already finished
+        # Every publisher must also have actually been heard from: a node can be
+        # advertising /health a moment before its first message lands.
+        if not found or not found.issubset(self._last_report.keys()):
+            return
+        if self._seconds_since(self._pipeline_changed_at, now) < self._discovery_settle:
+            return
 
         self.get_logger().info(
-            f"Lap goal reached. Mission FINISHED."
-        )
+            f"All {len(found)} pipeline nodes beating. Mission READY.")
+        self._mission_info.status = MissionInfo.MISSION_STATUS_READY
+
+    def _check_alive(self, now: Time) -> None:
+        """Past CONFIGURING, a node that stops beating kills the mission."""
+        for node_name, last in self._last_report.items():
+            silent = self._seconds_since(last, now)
+            if silent > self._heartbeat_timeout:
+                self.get_logger().error(
+                    f"'{node_name}' silent for {silent:.1f}s; the mission is dead.")
+                self.fail_mission()
+                return
+
+    def _health_publishers(self) -> Set[str]:
+        """Node names of everything publishing on /health.
+
+        get_publishers_info_by_topic is the supported way to ask the graph who
+        is on a topic, which is what makes the pipeline self-describing.
+
+        An endpoint is visible before the participant info that names it has
+        arrived, and shows up as a placeholder until then. Those are dropped:
+        one can never be matched against a heartbeat, so counting it would hold
+        the mission in CONFIGURING for as long as it lingered.
+        """
+        try:
+            info = self.get_publishers_info_by_topic(HEALTH_TOPIC)
+        except Exception as e:
+            self.get_logger().warning(f"Could not read {HEALTH_TOPIC} publishers: {e}")
+            return set()
+        return {i.node_name for i in info if not i.node_name.startswith('_NODE_NAME_UNKNOWN')}
+
+    @staticmethod
+    def _seconds_since(stamp: Optional[Time], now: Time) -> float:
+        return 0.0 if stamp is None else (now - stamp).nanoseconds / 1e9
+
+    # ------------------------------------------------------------------- end
+
+    def finish_mission(self) -> None:
+        if self._mission_info.status == MissionInfo.MISSION_STATUS_FINISHED:
+            return
+        self.get_logger().info('Mission FINISHED.')
         self._mission_info.status = MissionInfo.MISSION_STATUS_FINISHED
         self._mission_info_pub.publish(self._mission_info)
-
-
-        # Reset any in-flight startup sequencing state.
-        self._activating = False
-        self._pending_params = set()
-
-        # Best-effort deactivate then cleanup; errors here are non-critical.
-        self._batch_transition(Transition.TRANSITION_DEACTIVATE, critical=False, reverse = True)
-        self._batch_transition(Transition.TRANSITION_CLEANUP, critical=False, reverse = True)
+        self._teardown()
 
     def fail_mission(self) -> None:
-        """Sets mission to FAILED and attempts to deactivate/cleanup nodes."""
         if self._mission_info.status == MissionInfo.MISSION_STATUS_FAILED:
-            return  # Already failed
-
-        self.get_logger().fatal("ABORTING MISSION: System entered FAILED state.")
+            return
+        self.get_logger().fatal('ABORTING MISSION: system entered FAILED state.')
         self._mission_info.status = MissionInfo.MISSION_STATUS_FAILED
+        self._mission_info_pub.publish(self._mission_info)
+        self._teardown()
 
-        # Reset any in-flight startup sequencing state.
-        self._activating = False
-        self._pending_params = set()
+    def _teardown(self) -> None:
+        """Stop the launch file, leaving the terminal status where it is.
 
-        # Best-effort deactivate then cleanup. Errors are non-critical here so a
-        # node that is already inactive/unconfigured does not re-trigger failure.
-        self._batch_transition(Transition.TRANSITION_DEACTIVATE, critical=False, reverse = True)
-        self._batch_transition(Transition.TRANSITION_CLEANUP, critical=False, reverse = True)
+        The stop runs on its own thread. Killing a mission's process group takes
+        as long as its slowest node takes to die, and this node has a status to
+        keep publishing at 10 Hz meanwhile -- going quiet at the exact moment a
+        run ends is indistinguishable, from the car, from having crashed.
+
+        What makes the supervisor ready for the next mission is the launcher
+        being empty, not the status -- which is held until one is next selected.
+        """
+        self._launched_at = None
+        self._last_report = {}
+        self._pipeline = set()
+        self._pipeline_changed_at = None
+        threading.Thread(target=self._launcher.stop, daemon=True).start()
+
+    def destroy_node(self) -> bool:
+        self._launcher.stop()
+        return super().destroy_node()
 
 
 def main(args: Optional[List[str]] = None) -> None:
@@ -426,11 +337,8 @@ def main(args: Optional[List[str]] = None) -> None:
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        node.get_logger().info("Keyboard Interrupt detected. Shutting down...")
+        node.get_logger().info('Keyboard interrupt; shutting down.')
     finally:
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
-
-if __name__ == '__main__':
-    main()

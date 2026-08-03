@@ -23,8 +23,6 @@
 #include <nlohmann/json.hpp>
 
 #include <rclcpp/rclcpp.hpp>
-#include <rclcpp_lifecycle/lifecycle_node.hpp>
-#include <rclcpp_lifecycle/lifecycle_publisher.hpp>
 
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
@@ -44,7 +42,6 @@
 namespace mirena
 {
 
-using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
 using Mpc = MpcController;
 
 namespace
@@ -88,17 +85,15 @@ struct TrackSnapshot
 
 }  // namespace
 
-class MpcNode : public rclcpp_lifecycle::LifecycleNode
+class MpcNode : public rclcpp::Node
 {
 public:
   MpcNode()
-  : rclcpp_lifecycle::LifecycleNode("MPCNode")
+  : rclcpp::Node("mirena_control")
   {
-    // Declare only. The values are read in on_configure, because the supervisor
-    // pushes the mission's parameters with set_parameters() and only then
-    // triggers CONFIGURE -- anything cached here would be the default forever.
-    // Every key a mission YAML may set must appear here: rclcpp rejects setting
-    // an undeclared parameter and the supervisor aborts the mission on rejection.
+    // The mission's values arrive as launch arguments from the mission launch
+    // file the supervisor started, so they are already in place by the time
+    // they are read below.
     declare_parameter<int>("laps", 0);
     declare_parameter<double>("stop_distance", 20.0);
     declare_parameter<double>("min_path_length", 5.0);
@@ -125,14 +120,9 @@ public:
     // A dedicated listener thread keeps /tf ingestion off the solver's
     // callback group and is what makes a bounded canTransform() legal here.
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this, true);
-  }
 
-  CallbackReturn on_configure(const rclcpp_lifecycle::State &) override
-  {
-    RCLCPP_INFO(get_logger(), "Configuring local-frame control node...");
+    RCLCPP_INFO(get_logger(), "Starting local-frame control node...");
 
-    // Read parameters first: the mission's values have just been pushed, and
-    // the timers and markers created below already consume some of them.
     laps_ = get_parameter("laps").as_int();
     stop_distance_ = get_parameter("stop_distance").as_double();
     min_path_length_ = std::max(get_parameter("min_path_length").as_double(), 0.1);
@@ -159,12 +149,7 @@ public:
       RCLCPP_INFO(get_logger(), "Open-track mission: stopping at the last gate.");
     }
 
-    try {
-      mpc_ = std::make_unique<Mpc>();
-    } catch (const std::exception & e) {
-      RCLCPP_ERROR(get_logger(), "Failed to create the acados solver: %s", e.what());
-      return CallbackReturn::FAILURE;
-    }
+    mpc_ = std::make_unique<Mpc>();   // throws; main() reports and exits non-zero
     step_duration_ = mpc_->stepDuration();
     RCLCPP_INFO(
       get_logger(), "acados solver ready: %d states, %d inputs, %d steps of %.3f s",
@@ -221,47 +206,6 @@ public:
     solver_status_.store(-1, std::memory_order_relaxed);
     last_solve_ok_ns_.store(0, std::memory_order_relaxed);
     car_.store(CarState{0, 0.0, 0.0, 0.0, false});
-
-    return CallbackReturn::SUCCESS;
-  }
-
-  CallbackReturn on_activate(const rclcpp_lifecycle::State & state) override
-  {
-    RCLCPP_INFO(get_logger(), "Activating MPCNode timers...");
-    if (solver_timer_) {solver_timer_->reset();}
-    if (command_timer_) {command_timer_->reset();}
-    LifecycleNode::on_activate(state);
-    return CallbackReturn::SUCCESS;
-  }
-
-  CallbackReturn on_deactivate(const rclcpp_lifecycle::State & state) override
-  {
-    RCLCPP_INFO(get_logger(), "Deactivating MPCNode...");
-    if (solver_timer_) {solver_timer_->cancel();}
-    if (command_timer_) {command_timer_->cancel();}
-    if (mpc_) {mpc_->reset();}
-    LifecycleNode::on_deactivate(state);
-    return CallbackReturn::SUCCESS;
-  }
-
-  CallbackReturn on_cleanup(const rclcpp_lifecycle::State &) override
-  {
-    RCLCPP_INFO(get_logger(), "Cleaning up node resources...");
-    heartbeat_timer_.reset();
-    solver_timer_.reset();
-    command_timer_.reset();
-    track_sub_.reset();
-    car_sub_.reset();
-    control_pub_.reset();
-    viz_pub_.reset();
-    heartbeat_pub_.reset();
-    mpc_.reset();
-    return CallbackReturn::SUCCESS;
-  }
-
-  CallbackReturn on_shutdown(const rclcpp_lifecycle::State &) override
-  {
-    return CallbackReturn::SUCCESS;
   }
 
 private:
@@ -308,9 +252,6 @@ private:
 
   void carCallback(const mirena_common::msg::Car::SharedPtr msg)
   {
-    if (!control_pub_ || !control_pub_->is_activated()) {
-      return;
-    }
     CarState s;
     s.stamp_ns = rclcpp::Time(msg->header.stamp).nanoseconds();
     s.u = msg->u;
@@ -471,7 +412,7 @@ private:
 
   void solverIteration()
   {
-    if (!control_pub_ || !control_pub_->is_activated() || !mpc_) {
+    if (!mpc_) {
       return;
     }
 
@@ -599,10 +540,9 @@ private:
 
   void commandIteration()
   {
-    if (!control_pub_ || !control_pub_->is_activated()) {
-      return;
-    }
-
+    // No gate here: commands go out from the moment there is a solution. The
+    // car is what decides whether to act on them -- it ignores this node until
+    // its own state machine reaches DRIVING.
     const auto now = get_clock()->now();
     command_msg_.header.stamp = now;
 
@@ -648,7 +588,7 @@ private:
 
   void broadcastDebug(const Reference & ref)
   {
-    if (!viz_pub_ || !viz_pub_->is_activated()) {
+    if (!viz_pub_) {
       return;
     }
     const auto stamp = get_clock()->now();
@@ -671,7 +611,7 @@ private:
 
   void publishHeartbeat()
   {
-    if (!heartbeat_pub_ || !heartbeat_pub_->is_activated()) {
+    if (!heartbeat_pub_) {
       return;
     }
     mirena_common::msg::Heartbeat msg;
@@ -699,12 +639,15 @@ private:
 
     nlohmann::json report;
 
-    // "last_lap" is the exact key the supervisor ends the mission off; keep it,
-    // and the three beside it, spelled as they are.
+    // "mission_finished" is the exact key the supervisor ends the mission off:
+    // the lap goal is met and the car has come to a stop. Deciding that is this
+    // node's job alone -- nothing else in the stack may declare a run over --
+    // and the inspection node reports the same key when its sweep completes.
+    report["mission_finished"] = finished_.load(std::memory_order_relaxed);
+    report["mode"] = "mpc";
     report["status_state"] = status_state;
     report["progress"] = global_s_.load(std::memory_order_relaxed);
     report["laps"] = laps_done_.load(std::memory_order_relaxed);
-    report["last_lap"] = finished_.load(std::memory_order_relaxed);
 
     report["laps_target"] = laps_;
     report["finish_armed"] = finish_armed_.load(std::memory_order_relaxed);
@@ -759,9 +702,9 @@ private:
   rclcpp::Subscription<mirena_common::msg::Track>::SharedPtr track_sub_;
   rclcpp::Subscription<mirena_common::msg::Car>::SharedPtr car_sub_;
 
-  rclcpp_lifecycle::LifecyclePublisher<mirena_common::msg::CarControl>::SharedPtr control_pub_;
-  rclcpp_lifecycle::LifecyclePublisher<visualization_msgs::msg::Marker>::SharedPtr viz_pub_;
-  rclcpp_lifecycle::LifecyclePublisher<mirena_common::msg::Heartbeat>::SharedPtr heartbeat_pub_;
+  rclcpp::Publisher<mirena_common::msg::CarControl>::SharedPtr control_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr viz_pub_;
+  rclcpp::Publisher<mirena_common::msg::Heartbeat>::SharedPtr heartbeat_pub_;
 
   rclcpp::TimerBase::SharedPtr solver_timer_;
   rclcpp::TimerBase::SharedPtr command_timer_;
@@ -806,9 +749,17 @@ int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
 
-  auto node = std::make_shared<mirena::MpcNode>();
+  std::shared_ptr<mirena::MpcNode> node;
+  try {
+    node = std::make_shared<mirena::MpcNode>();
+  } catch (const std::exception & e) {
+    RCLCPP_FATAL(rclcpp::get_logger("mirena_control"), "Startup failed: %s", e.what());
+    rclcpp::shutdown();
+    return 1;
+  }
+
   rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 4);
-  executor.add_node(node->get_node_base_interface());
+  executor.add_node(node);
 
   try {
     executor.spin();
@@ -816,7 +767,7 @@ int main(int argc, char ** argv)
     RCLCPP_ERROR(node->get_logger(), "Executor terminated: %s", e.what());
   }
 
-  executor.remove_node(node->get_node_base_interface());
+  executor.remove_node(node);
   rclcpp::shutdown();
   return 0;
 }

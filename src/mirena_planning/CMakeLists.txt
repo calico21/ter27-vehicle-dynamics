@@ -15,8 +15,6 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(rclcpp REQUIRED)
-find_package(rclcpp_lifecycle REQUIRED)
-find_package(lifecycle_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
@@ -29,9 +27,9 @@ find_package(mirena_common REQUIRED)
 add_library(mirena_planning_core
   src/geometry.cpp
   src/planner.cpp
-  src/unknown_planner.cpp
-  src/known_planner.cpp
-  src/track_template.cpp
+  src/unknown/unknown_planner.cpp
+  src/known/known_planner.cpp
+  src/known/track_template.cpp
 )
 target_include_directories(mirena_planning_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -40,22 +38,33 @@ target_include_directories(mirena_planning_core PUBLIC
 target_link_libraries(mirena_planning_core nlohmann_json::nlohmann_json)
 
 # ---------------------------------------------------------------------------
-# ROS 2 node
+# ROS 2 nodes
+#
+# Two alternative occupants of the same slot in the stack: exactly one runs per
+# mission, under the node name the supervisor monitors. mirena_planning
+# discovers the track (trackdrive, autocross); mirena_planning_known registers a
+# surveyed template against it (skidpad, acceleration). Both publish the same
+# planning/track and health topics, and neither shares a line of node code with
+# the other -- each is one self-contained translation unit.
 # ---------------------------------------------------------------------------
-add_executable(mirena_planning src/planner_node.cpp)
-target_link_libraries(mirena_planning mirena_planning_core nlohmann_json::nlohmann_json)
-ament_target_dependencies(mirena_planning
+set(PLANNER_NODE_DEPS
   ament_index_cpp
   rclcpp
-  rclcpp_lifecycle
-  lifecycle_msgs
   geometry_msgs
   std_msgs
   visualization_msgs
   mirena_common
 )
 
-install(TARGETS mirena_planning DESTINATION lib/${PROJECT_NAME})
+add_executable(mirena_planning src/unknown/unknown_planner_node.cpp)
+target_link_libraries(mirena_planning mirena_planning_core nlohmann_json::nlohmann_json)
+ament_target_dependencies(mirena_planning ${PLANNER_NODE_DEPS})
+
+add_executable(mirena_planning_known src/known/known_planner_node.cpp)
+target_link_libraries(mirena_planning_known mirena_planning_core nlohmann_json::nlohmann_json)
+ament_target_dependencies(mirena_planning_known ${PLANNER_NODE_DEPS})
+
+install(TARGETS mirena_planning mirena_planning_known DESTINATION lib/${PROJECT_NAME})
 install(TARGETS mirena_planning_core
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib

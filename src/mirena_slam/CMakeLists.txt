@@ -15,7 +15,6 @@ endif()
 # Find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
-find_package(rclcpp_lifecycle REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(message_filters REQUIRED)
@@ -43,7 +42,6 @@ target_include_directories(mirena_slam PRIVATE
 # ROS 2 dependency mapping
 ament_target_dependencies(mirena_slam 
   rclcpp 
-  rclcpp_lifecycle
   visualization_msgs 
   geometry_msgs
   mirena_common

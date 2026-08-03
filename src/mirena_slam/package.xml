@@ -14,8 +14,6 @@
   <depend>tf2_ros</depend>
   <depend>tf2_geometry_msgs</depend>
   <depend>rclcpp</depend>
-  <depend>rclcpp_lifecycle</depend>
-  <depend>lifecycle_msgs</depend>
   <depend>gtsam</depend>
   <depend>mirena_common</depend>
 

@@ -1,7 +1,4 @@
 #include <rclcpp/rclcpp.hpp>
-#include <rclcpp_lifecycle/lifecycle_node.hpp>
-#include <rclcpp_lifecycle/lifecycle_publisher.hpp>
-#include <lifecycle_msgs/msg/state.hpp>
 #include <chrono>
 #include <mutex>
 
@@ -30,7 +27,6 @@
 #define REPORT_PERIOD 100ms
 
 using namespace std::chrono_literals;
-using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
 
 /**
  * MirenaState — sensor fusion / state estimation node.
@@ -50,7 +46,7 @@ using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface
  * omega = CCW-positive yaw rate. This matches the sim's established Car
  * convention that SLAM/MPC were developed against.
  */
-class MirenaState : public rclcpp_lifecycle::LifecycleNode
+class MirenaState : public rclcpp::Node
 {
     // Callback Groups for thread safety
     rclcpp::CallbackGroup::SharedPtr _filter_cb_group;
@@ -61,9 +57,9 @@ class MirenaState : public rclcpp_lifecycle::LifecycleNode
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr _ins_odom_sub;
     rclcpp::Subscription<mirena_common::msg::Car>::SharedPtr _gt_sub;
 
-    // Lifecycle Publishers
-    rclcpp_lifecycle::LifecyclePublisher<mirena_common::msg::Car>::SharedPtr _car_pub;
-    rclcpp_lifecycle::LifecyclePublisher<mirena_common::msg::Heartbeat>::SharedPtr _report_pub;
+    // Publishers
+    rclcpp::Publisher<mirena_common::msg::Car>::SharedPtr _car_pub;
+    rclcpp::Publisher<mirena_common::msg::Heartbeat>::SharedPtr _report_pub;
 
     // Transform broadcaster (odom -> base)
     std::unique_ptr<tf2_ros::TransformBroadcaster> _tf_broadcaster;
@@ -78,7 +74,7 @@ class MirenaState : public rclcpp_lifecycle::LifecycleNode
     rclcpp::Time _last_imu_stamp{0, 0, RCL_ROS_TIME};
     rclcpp::Time _last_odom_stamp{0, 0, RCL_ROS_TIME};
 
-    // Parameters (resolved in on_configure)
+    // Parameters (resolved in the constructor)
     std::string _odom_frame, _base_frame;
     bool _passthrough = false;
     bool _broadcast_tf = true;
@@ -86,7 +82,7 @@ class MirenaState : public rclcpp_lifecycle::LifecycleNode
     double _imu_timeout_sec = 0.2;
 
 public:
-    MirenaState() : rclcpp_lifecycle::LifecycleNode("mirena_state")
+    MirenaState() : rclcpp::Node("mirena_state")
     {
         this->declare_parameter<bool>("ground_truth_passthrough", false);
         this->declare_parameter<bool>("broadcast_tf", true);
@@ -103,11 +99,8 @@ public:
         this->declare_parameter<std::vector<double>>(
             "odom_meas_floor_diag", {0.01, 0.01, 0.001, 0.01, 0.01, 0.001});
         this->declare_parameter<double>("gyro_meas_var", 0.0001);
-    }
 
-    CallbackReturn on_configure(const rclcpp_lifecycle::State &) override
-    {
-        RCLCPP_INFO(this->get_logger(), "Configuring Mirena State");
+        RCLCPP_INFO(this->get_logger(), "Starting Mirena State");
 
         _passthrough = this->get_parameter("ground_truth_passthrough").as_bool();
         _broadcast_tf = this->get_parameter("broadcast_tf").as_bool();
@@ -160,36 +153,6 @@ public:
 
         _report_timer = this->create_wall_timer(
             REPORT_PERIOD, std::bind(&MirenaState::report_callback, this), _report_cb_group);
-
-        return CallbackReturn::SUCCESS;
-    }
-
-    CallbackReturn on_activate(const rclcpp_lifecycle::State &) override
-    {
-        RCLCPP_INFO(this->get_logger(), "State Node Active");
-        _car_pub->on_activate();
-        _report_pub->on_activate();
-        return CallbackReturn::SUCCESS;
-    }
-
-    CallbackReturn on_deactivate(const rclcpp_lifecycle::State &) override
-    {
-        _car_pub->on_deactivate();
-        _report_pub->on_deactivate();
-        return CallbackReturn::SUCCESS;
-    }
-
-    CallbackReturn on_cleanup(const rclcpp_lifecycle::State &) override
-    {
-        _publish_timer.reset();
-        _report_timer.reset();
-        _imu_sub.reset();
-        _ins_odom_sub.reset();
-        _gt_sub.reset();
-        _car_pub.reset();
-        _report_pub.reset();
-        _ekf.reset();
-        return CallbackReturn::SUCCESS;
     }
 
 private:
@@ -209,16 +172,10 @@ private:
         return std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
     }
 
-    bool is_active()
-    {
-        return this->get_current_state().id() == lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE;
-    }
-
     // --- EKF mode -----------------------------------------------------------
 
     void imu_callback(const sensor_msgs::msg::Imu::ConstSharedPtr &msg)
     {
-        if (!is_active()) return;
         std::lock_guard<std::mutex> lock(_filter_mutex);
         _last_imu_stamp = msg->header.stamp;
         if (!_ekf->is_initialized()) return; // wait for the first INS fix
@@ -232,7 +189,6 @@ private:
 
     void ins_odom_callback(const nav_msgs::msg::Odometry::ConstSharedPtr &msg)
     {
-        if (!is_active()) return;
         std::lock_guard<std::mutex> lock(_filter_mutex);
         _last_odom_stamp = msg->header.stamp;
 
@@ -265,7 +221,6 @@ private:
 
     void publish_timer_callback()
     {
-        if (!is_active()) return;
         std::lock_guard<std::mutex> lock(_filter_mutex);
         if (!_ekf->is_initialized()) return; // no state before the first INS fix
 
@@ -297,7 +252,6 @@ private:
 
     void gt_callback(const mirena_common::msg::Car::ConstSharedPtr &msg)
     {
-        if (!is_active()) return;
         std::lock_guard<std::mutex> lock(_filter_mutex);
         _last_odom_stamp = msg->header.stamp;
 
@@ -333,7 +287,6 @@ private:
 
     void report_callback()
     {
-        if (!_report_pub->is_activated()) return;
 
         mirena_common::msg::Heartbeat msg;
         msg.timestamp = this->now();
@@ -379,29 +332,8 @@ int main(int argc, char **argv)
     rclcpp::init(argc, argv);
     auto node = std::make_shared<MirenaState>();
 
-    bool autostart_flag = false;
-    for (int i = 1; i < argc; i++)
-    {
-        if (std::string(argv[i]) == "-a")
-        {
-            autostart_flag = true;
-            break;
-        }
-    }
-
-    if (autostart_flag)
-    {
-        RCLCPP_INFO(node->get_logger(), "Autoactivating");
-        node->configure();
-        node->activate();
-    }
-    else
-    {
-        RCLCPP_INFO(node->get_logger(), "Awaiting activation. Use argument '-a' when running for autoactivation");
-    }
-
     rclcpp::executors::MultiThreadedExecutor executor;
-    executor.add_node(node->get_node_base_interface());
+    executor.add_node(node);
     executor.spin();
     rclcpp::shutdown();
     return 0;

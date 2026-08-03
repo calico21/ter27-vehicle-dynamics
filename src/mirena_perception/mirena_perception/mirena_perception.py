@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import json
 import time
 import sys
 import random
@@ -10,16 +11,16 @@ from ultralytics import YOLO
 
 import rclpy
 import rclpy.time
+from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 
 from std_msgs.msg import Header
 from sensor_msgs.msg import Image, PointCloud2, CameraInfo, PointField
 from sensor_msgs_py import point_cloud2
 from tf2_ros import TransformException, Buffer, TransformListener
-from rclpy.lifecycle import LifecycleNode, State, TransitionCallbackReturn
 import message_filters
 
-from mirena_common.msg import EntityList, Entity
+from mirena_common.msg import EntityList, Entity, Heartbeat
 from mirena_perception.landmark_extractor import LandmarkExtractor, time_execution
 
 # --- Global Topic Constants ---
@@ -31,6 +32,11 @@ ENTITY_LIST_PUB_TOPIC = '/perception/cones'
 DEBUG_PC_PUB_TOPIC = '/perception/debug/clustered_points'
 DEBUG_IMG_PUB_TOPIC = '/perception/debug/segmentation_mask'
 DEBUG_PROJ_IMG_PUB_TOPIC = '/perception/debug/depth_projection'
+HEALTH_PUB_TOPIC = 'health'
+
+# The supervisor holds the mission in CONFIGURING until every pipeline node is
+# beating, so this rate is what it waits on, not a diagnostic nicety.
+HEARTBEAT_PERIOD_SEC = 0.1
 
 # Activate pytorch logs
 torch._logging.set_logs(graph_code=True)
@@ -45,7 +51,7 @@ sensor_qos = QoSProfile(
         )
 
 
-class MirenaPerception(LifecycleNode):
+class MirenaPerception(Node):
     """Synchronized YOLOv8 + LiDAR Fusion Node with complete GPU/CUDA optimization."""
 
     CLASS_ID_MAP = {
@@ -79,14 +85,23 @@ class MirenaPerception(LifecycleNode):
         self.cloud_sub = None
         self.ts = None
 
+        self.health_pub = None
+        self.health_timer = None
+
+        # Read by the heartbeat, written by the fusion callback.
+        self.frames_processed = 0
+        self.cones_last_frame = 0
+        self.last_frame_at = 0.0
+
         self.entity_list_pub = None
         self.debug_pc_pub = None
         self.debug_img_pub = None
         self.debug_proj_img_pub = None
 
-    def on_configure(self, state: State) -> TransitionCallbackReturn:
-        self.get_logger().info('Configuring Mirena Perception Node...')
-        super().on_configure(state)
+    def start(self) -> None:
+        """Bring the node up. Raises on failure so main() can exit non-zero --
+        the supervisor fails the mission when a node dies."""
+        self.get_logger().info('Starting Mirena Perception Node...')
 
         self.model_path = self.get_parameter('model_path').value
         self.conf_thresh = self.get_parameter('yolo_conf_thresh').value
@@ -95,68 +110,47 @@ class MirenaPerception(LifecycleNode):
         self.yolo_device = 'cuda'
         self.device = torch.device('cuda')
 
-        try:
-            self.model = YOLO(self.model_path, task="segment")
-            self.tf_buffer = Buffer()
-            self.tf_listener = TransformListener(self.tf_buffer, self)
-        except Exception as e:
-            self.get_logger().error(f'Configuration failed during subsystem setup: {str(e)}')
-            return TransitionCallbackReturn.FAILURE
+        self.model = YOLO(self.model_path, task="segment")
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
 
-        self.entity_list_pub = self.create_lifecycle_publisher(EntityList, ENTITY_LIST_PUB_TOPIC, 10)
-        self.debug_pc_pub = self.create_lifecycle_publisher(PointCloud2, DEBUG_PC_PUB_TOPIC, 1)
-        self.debug_img_pub = self.create_lifecycle_publisher(Image, DEBUG_IMG_PUB_TOPIC, 1)
-        self.debug_proj_img_pub = self.create_lifecycle_publisher(Image, DEBUG_PROJ_IMG_PUB_TOPIC, 1) 
+        self.entity_list_pub = self.create_publisher(EntityList, ENTITY_LIST_PUB_TOPIC, 10)
+        self.debug_pc_pub = self.create_publisher(PointCloud2, DEBUG_PC_PUB_TOPIC, 1)
+        self.debug_img_pub = self.create_publisher(Image, DEBUG_IMG_PUB_TOPIC, 1)
+        self.debug_proj_img_pub = self.create_publisher(Image, DEBUG_PROJ_IMG_PUB_TOPIC, 1)
 
-        self.info_sub = self.create_subscription(CameraInfo, CAMERA_INFO_SUB_TOPIC, self.info_cb,qos_profile=sensor_qos)
-        self.img_sub = message_filters.Subscriber(self, Image, IMAGE_SUB_TOPIC,qos_profile=sensor_qos)
-        self.cloud_sub = message_filters.Subscriber(self, PointCloud2, CLOUD_SUB_TOPIC,qos_profile=sensor_qos)
+        self.info_sub = self.create_subscription(CameraInfo, CAMERA_INFO_SUB_TOPIC, self.info_cb, qos_profile=sensor_qos)
+        self.img_sub = message_filters.Subscriber(self, Image, IMAGE_SUB_TOPIC, qos_profile=sensor_qos)
+        self.cloud_sub = message_filters.Subscriber(self, PointCloud2, CLOUD_SUB_TOPIC, qos_profile=sensor_qos)
 
-        return TransitionCallbackReturn.SUCCESS
+        self.ts = message_filters.ApproximateTimeSynchronizer(
+            [self.img_sub, self.cloud_sub], queue_size=10, slop=self.sync_slop
+        )
+        self.ts.registerCallback(self.sync_cb)
 
-    def on_activate(self, state: State) -> TransitionCallbackReturn:
-        self.get_logger().info('Activating node...')
-        super().on_activate(state)
-        try:
-            self.ts = message_filters.ApproximateTimeSynchronizer(
-                [self.img_sub, self.cloud_sub], queue_size=10, slop=self.sync_slop
-            )
-            self.ts.registerCallback(self.sync_cb)
-        except Exception as e:
-            self.get_logger().error(str(e))
-            return TransitionCallbackReturn.FAILURE
-        
-        return TransitionCallbackReturn.SUCCESS
+        # Last, deliberately: the first heartbeat is this node telling the
+        # supervisor it is up, so it must not go out before it actually is.
+        # Loading the TensorRT engine above is what that wait is usually for.
+        self.health_pub = self.create_publisher(Heartbeat, HEALTH_PUB_TOPIC, 10)
+        self.health_timer = self.create_timer(HEARTBEAT_PERIOD_SEC, self.publish_heartbeat)
 
-    def on_deactivate(self, state: State) -> TransitionCallbackReturn:
-        self.get_logger().info('Deactivating node...')
-        super().on_deactivate(state)
-        self.ts.callbacks = {}
-        return TransitionCallbackReturn.SUCCESS
+        self.get_logger().info('Mirena Perception running.')
 
-    def on_cleanup(self, state: State) -> TransitionCallbackReturn:
-        super().on_cleanup(state)
-        self.get_logger().info('Cleaning up node resources...')
-        
-        self.destroy_subscription(self.info_sub)
-        self.destroy_publisher(self.entity_list_pub)
-        self.destroy_publisher(self.debug_pc_pub)
-        self.destroy_publisher(self.debug_img_pub)
-        self.destroy_publisher(self.debug_proj_img_pub)
+    def publish_heartbeat(self) -> None:
+        report = {
+            'status_state': 'WORKING' if self.frames_processed else 'IDLE',
+            'frames_processed': self.frames_processed,
+            'cones_last_frame': self.cones_last_frame,
+            'have_camera_info': self.k_tensor is not None,
+            'seconds_since_frame':
+                (time.time() - self.last_frame_at) if self.last_frame_at else -1.0,
+        }
+        msg = Heartbeat()
+        msg.node_name = self.get_name()
+        msg.timestamp = self.get_clock().now().to_msg()
+        msg.report = json.dumps(report)
+        self.health_pub.publish(msg)
 
-        self.model = None
-        self.tf_buffer = None
-        self.tf_listener = None
-        self.ts = None
-        self.img_sub = None
-        self.cloud_sub = None
-        
-        return TransitionCallbackReturn.SUCCESS
-
-    def on_shutdown(self, state: State) -> TransitionCallbackReturn:
-        self.get_logger().info('Shutting down node...')
-        return TransitionCallbackReturn.SUCCESS
-        
     def info_cb(self, msg: CameraInfo):
         if self.k_tensor is None:
             self.k_tensor = torch.tensor(msg.k, dtype=torch.float32, device=self.device).view(3, 3)
@@ -480,27 +474,31 @@ class MirenaPerception(LifecycleNode):
             entity.confidence = float(conf)
             entity_list.entities.append(entity)
             
+        self.frames_processed += 1
+        self.cones_last_frame = len(entity_list.entities)
+        self.last_frame_at = time.time()
         self.entity_list_pub.publish(entity_list)
 
 def main(args=None):
     rclpy.init(args=args)
-    node = MirenaPerception()   
-    
-    autostart_flag = False
-    for i in range(1, len(sys.argv)):
-        if sys.argv[i] == "-a":
-            autostart_flag = True
-            break
+    node = MirenaPerception()
+    try:
+        node.start()
+    except Exception as e:
+        node.get_logger().fatal(f"Startup failed: {e}")
+        node.destroy_node()
+        rclpy.shutdown()
+        sys.exit(1)
 
-    if autostart_flag:
-        node.get_logger().info("Autoactivating")
-        node.trigger_configure()
-        node.trigger_activate()
-    else:
-        node.get_logger().info("Awaiting activation. Use argument '-a' when running for autoactivation")
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
-    rclpy.spin(node)
-    rclpy.shutdown()
 
 if __name__ == '__main__':
     main()

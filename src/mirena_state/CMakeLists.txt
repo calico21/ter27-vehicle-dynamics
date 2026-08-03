@@ -8,7 +8,6 @@ endif()
 # Find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
-find_package(rclcpp_lifecycle REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
@@ -34,7 +33,6 @@ target_include_directories(mirena_state PRIVATE
 # ROS 2 dependency mapping
 ament_target_dependencies(mirena_state
   rclcpp
-  rclcpp_lifecycle
   tf2
   tf2_ros
   sensor_msgs

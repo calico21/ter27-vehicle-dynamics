@@ -6,6 +6,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "tf2_ros/static_transform_broadcaster.h"
+#include "ament_index_cpp/get_package_share_directory.hpp"
 #include <yaml-cpp/yaml.h>
 
 using namespace std::chrono_literals;
@@ -13,11 +14,16 @@ using namespace std::chrono_literals;
 class TransformBroadcasterNode : public rclcpp::Node {
 public:
     TransformBroadcasterNode() : Node("mirena_transform") {
-        this->declare_parameter("yaml_path", "/home/kor/Personal/Proyects/Racing/mirena_ws/src/mirena_hardware/config/transforms.yaml");
-        
-        yaml_path_ = this->get_parameter("yaml_path").as_string();
+        // Empty means "use the copy installed with this package", resolved via the
+        // ament index so it works from any install/overlay prefix.
+        this->declare_parameter("yaml_path", "");
 
-        if (!parse_yaml(yaml_path_)) {
+        yaml_path_ = this->get_parameter("yaml_path").as_string();
+        if (yaml_path_.empty()) {
+            yaml_path_ = default_yaml_path();
+        }
+
+        if (yaml_path_.empty() || !parse_yaml(yaml_path_)) {
             RCLCPP_ERROR(get_logger(), "Configuration Failed: Could not parse YAML file at %s", yaml_path_.c_str());
             exit(39);
         }
@@ -40,6 +46,16 @@ private:
     std::string yaml_path_;
     std::shared_ptr<tf2_ros::StaticTransformBroadcaster> tf_broadcaster_;
     std::vector<geometry_msgs::msg::TransformStamped> transforms_;
+
+    std::string default_yaml_path() {
+        try {
+            return ament_index_cpp::get_package_share_directory("mirena_hardware")
+                   + "/config/transforms.yaml";
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR(get_logger(), "Could not locate the mirena_hardware share directory: %s", e.what());
+            return "";
+        }
+    }
 
     bool parse_yaml(const std::string& path) {
         try {
