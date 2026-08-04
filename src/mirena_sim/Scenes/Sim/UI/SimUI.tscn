@@ -247,9 +247,18 @@ text = "Clear Track"
 layout_mode = 2
 text = "Open Track"
 
+[node name="ExportTrack" type="Button" parent="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK/HBoxContainer/VBoxContainer" unique_id=1531126951]
+layout_mode = 2
+text = "Export Track"
+
 [node name="EnableConeCollision" type="CheckButton" parent="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK/HBoxContainer/VBoxContainer" unique_id=258316078]
 layout_mode = 2
 text = "Enable Cone Collision"
+
+[node name="TrackStats" type="Label" parent="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK/HBoxContainer/VBoxContainer" unique_id=2111812979]
+layout_mode = 2
+autowrap_mode = 2
+text = "No track generated"
 
 [node name="FileDialog" type="FileDialog" parent="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK" unique_id=1697685901]
 oversampling_override = 1.0
@@ -258,6 +267,16 @@ initial_position = 2
 file_mode = 0
 display_mode = 1
 root_subfolder = "TrackFiles"
+
+[node name="ExportDialog" type="FileDialog" parent="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK" unique_id=1697685902]
+oversampling_override = 1.0
+title = "Export the track as JSON"
+initial_position = 2
+ok_button_text = "Export"
+file_mode = 4
+display_mode = 1
+root_subfolder = "TrackFiles"
+filters = PackedStringArray("*.json ; Track files")
 
 [node name="EXTRA" type="MarginContainer" parent="MainMenu/MarginContainer/VBoxContainer/MenuTabs" unique_id=137354673]
 visible = false
@@ -301,3 +320,5 @@ script = ExtResource("2_hox2s")
 [connection signal="toggled" from="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK/HBoxContainer/VBoxContainer/EnableConeCollision" to="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK" method="_on_enable_cone_collision_toggled"]
 [connection signal="file_selected" from="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK/FileDialog" to="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK" method="_on_track_file_selected"]
 [connection signal="pressed" from="MainMenu/MarginContainer/VBoxContainer/MenuTabs/EXTRA/VBoxContainer/39" to="MainMenu/MarginContainer/VBoxContainer/MenuTabs/EXTRA" method="_miku_truco"]
+[connection signal="pressed" from="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK/HBoxContainer/VBoxContainer/ExportTrack" to="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK" method="_on_export_track_pressed"]
+[connection signal="file_selected" from="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK/ExportDialog" to="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK" method="_on_export_file_selected"]

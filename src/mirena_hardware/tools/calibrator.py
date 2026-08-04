@@ -8,15 +8,21 @@ import numpy as np
 import cv2
 from scipy.spatial.transform import Rotation as R
 
+# The pip wheel of OpenCV ships its own Qt build and points Qt at it on import.
+# That plugin set is incompatible with the system PyQt5 used below ("Could not
+# load the Qt platform plugin xcb"), so drop the hints before PyQt5 is imported.
+os.environ.pop('QT_QPA_PLATFORM_PLUGIN_PATH', None)
+os.environ.pop('QT_QPA_FONTDIR', None)
+
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image, PointCloud2
 import sensor_msgs_py.point_cloud2 as pc2
-from cv_bridge import CvBridge
 
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QTabWidget, QLabel, QPushButton, 
-                             QDoubleSpinBox, QSpinBox, QFormLayout, QMessageBox, 
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                             QHBoxLayout, QTabWidget, QLabel, QPushButton,
+                             QDoubleSpinBox, QSpinBox, QFormLayout, QMessageBox,
                              QGroupBox, QComboBox, QFrame)
 from PyQt5.QtCore import QTimer, Qt
 from PyQt5.QtGui import QImage, QPixmap
@@ -35,11 +41,62 @@ ARUCO_DICTS = {
     "DICT_ARUCO_ORIGINAL": cv2.aruco.DICT_ARUCO_ORIGINAL
 }
 
+# OpenCV 5 moved the fisheye calibration flags out of the cv2.fisheye namespace.
+FISHEYE_FLAGS = (getattr(cv2, 'CALIB_RECOMPUTE_EXTRINSIC', 0) |
+                 getattr(cv2, 'CALIB_CHECK_COND', 0) |
+                 getattr(cv2, 'CALIB_FIX_SKEW', 0))
+
+# calibrateCamera needs a well conditioned homography per view.
+MIN_CHARUCO_CORNERS = 6
+
+
+# --- IMAGE CONVERSION ---
+# cv_bridge is skipped on purpose: its compiled extension in /opt/ros is built
+# against NumPy 1.x and aborts the process under the installed NumPy 2.x.
+_ENCODING_DTYPES = {
+    'mono8': (np.uint8, 1), '8UC1': (np.uint8, 1),
+    'bgr8': (np.uint8, 3), '8UC3': (np.uint8, 3), 'rgb8': (np.uint8, 3),
+    'bgra8': (np.uint8, 4), '8UC4': (np.uint8, 4), 'rgba8': (np.uint8, 4),
+    'mono16': (np.uint16, 1), '16UC1': (np.uint16, 1),
+}
+
+
+def imgmsg_to_bgr(msg):
+    """Convert a sensor_msgs/Image into a contiguous BGR8 numpy array."""
+    encoding = msg.encoding.lower()
+    if encoding in ('yuv422', 'yuv422_yuy2', 'yuyv'):
+        raw = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 2)
+        code = cv2.COLOR_YUV2BGR_UYVY if encoding == 'yuv422' else cv2.COLOR_YUV2BGR_YUY2
+        return cv2.cvtColor(raw, code)
+
+    if encoding not in _ENCODING_DTYPES:
+        raise ValueError(f"Unsupported image encoding '{msg.encoding}'")
+
+    dtype, channels = _ENCODING_DTYPES[encoding]
+    dtype = np.dtype(dtype).newbyteorder('>' if msg.is_bigendian else '<')
+
+    img = np.frombuffer(msg.data, dtype=dtype)
+    # step may include row padding, so index by row stride and then crop.
+    img = img.reshape(msg.height, msg.step // dtype.itemsize)[:, :msg.width * channels]
+    img = img.reshape(msg.height, msg.width, channels)
+
+    if dtype.itemsize == 2:
+        img = cv2.convertScaleAbs(img, alpha=255.0 / 65535.0)
+
+    if channels == 1:
+        return cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    if channels == 4:
+        return cv2.cvtColor(img, cv2.COLOR_BGRA2BGR if encoding.startswith('bgra') or encoding == '8UC4'
+                            else cv2.COLOR_RGBA2BGR)
+    if encoding == 'rgb8':
+        return cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    return np.ascontiguousarray(img)
+
+
 # --- ROS 2 NODE ---
 class CalibrationRosNode(Node):
     def __init__(self):
         super().__init__('calibration_backend_node')
-        self.bridge = CvBridge()
         self.latest_image = None
         self.latest_pc_msg = None
         self.img_sub = None
@@ -49,17 +106,19 @@ class CalibrationRosNode(Node):
         if self.img_sub is not None:
             self.destroy_subscription(self.img_sub)
         self.latest_image = None
-        self.img_sub = self.create_subscription(Image, topic_name, self.image_cb, 10)
+        self.img_sub = self.create_subscription(Image, topic_name, self.image_cb,
+                                                qos_profile_sensor_data)
 
     def update_lidar_sub(self, topic_name):
         if self.lidar_sub is not None:
             self.destroy_subscription(self.lidar_sub)
         self.latest_pc_msg = None
-        self.lidar_sub = self.create_subscription(PointCloud2, topic_name, self.lidar_cb, 10)
+        self.lidar_sub = self.create_subscription(PointCloud2, topic_name, self.lidar_cb,
+                                                  qos_profile_sensor_data)
 
     def image_cb(self, msg):
         try:
-            self.latest_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+            self.latest_image = imgmsg_to_bgr(msg)
         except Exception as e:
             self.get_logger().error(f"Image Error: {e}")
 
@@ -182,12 +241,14 @@ class CalibrationTool(QMainWindow):
         self.sb_cols = QSpinBox()
         self.sb_cols.setRange(3, 30)
         self.sb_cols.setValue(8)
-        form_layout.addRow("Columns (Inner):", self.sb_cols)
+        self.lbl_cols = QLabel("Columns (Inner):")
+        form_layout.addRow(self.lbl_cols, self.sb_cols)
 
         self.sb_rows = QSpinBox()
         self.sb_rows.setRange(3, 30)
         self.sb_rows.setValue(6)
-        form_layout.addRow("Rows (Inner):", self.sb_rows)
+        self.lbl_rows = QLabel("Rows (Inner):")
+        form_layout.addRow(self.lbl_rows, self.sb_rows)
 
         self.sb_square = QDoubleSpinBox()
         self.sb_square.setRange(0.001, 1.0)
@@ -327,6 +388,9 @@ class CalibrationTool(QMainWindow):
         self.sb_marker.setVisible(is_charuco)
         self.lbl_dict.setVisible(is_charuco)
         self.cb_dict.setVisible(is_charuco)
+        # A ChArUco board is defined by its square count, a chessboard by its inner corners.
+        self.lbl_cols.setText("Columns (Squares):" if is_charuco else "Columns (Inner):")
+        self.lbl_rows.setText("Rows (Squares):" if is_charuco else "Rows (Inner):")
 
     def apply_pattern_settings(self):
         self.reset_intrinsics() 
@@ -348,12 +412,27 @@ class CalibrationTool(QMainWindow):
 
             dict_id = ARUCO_DICTS[self.cb_dict.currentText()]
             self.aruco_dict = cv2.aruco.getPredefinedDictionary(dict_id)
-            
+
             self.board = cv2.aruco.CharucoBoard((cols, rows), square, marker, self.aruco_dict)
-            params = cv2.aruco.DetectorParameters()
-            self.detector = cv2.aruco.ArucoDetector(self.aruco_dict, params)
-            
+            # OpenCV 5 dropped interpolateCornersCharuco(); CharucoDetector replaces it
+            # and returns the marker detections in the same call.
+            self.detector = cv2.aruco.CharucoDetector(self.board)
+
         self.node.get_logger().info(f"Applied settings for {ptype}: {cols}x{rows}")
+
+    def detect_charuco(self, gray):
+        """Run the ChArUco detector, normalising the output to (N, 1, ...) shapes.
+
+        OpenCV 5 returns flat (N, 2) corners / (N,) ids, which the drawing helpers
+        reject, so reshape once here for every consumer.
+        """
+        charuco_corners, charuco_ids, corners, ids = self.detector.detectBoard(gray)
+        if charuco_corners is not None and len(charuco_corners) > 0:
+            charuco_corners = charuco_corners.reshape(-1, 1, 2)
+            charuco_ids = charuco_ids.reshape(-1, 1)
+        else:
+            charuco_corners, charuco_ids = None, None
+        return charuco_corners, charuco_ids, corners, ids
 
     # --- UI UPDATE LOOP ---
     def update_ui(self):
@@ -371,12 +450,11 @@ class CalibrationTool(QMainWindow):
                 if ret: cv2.drawChessboardCorners(frame, (self.sb_cols.value(), self.sb_rows.value()), corners, ret)
             
             elif ptype == "ChArUco" and self.detector is not None:
-                corners, ids, _ = self.detector.detectMarkers(gray)
+                charuco_corners, charuco_ids, corners, ids = self.detect_charuco(gray)
                 if ids is not None and len(ids) > 0:
                     cv2.aruco.drawDetectedMarkers(frame, corners, ids)
-                    ret, charuco_corners, charuco_ids = cv2.aruco.interpolateCornersCharuco(corners, ids, gray, self.board)
-                    if charuco_corners is not None and len(charuco_corners) > 0:
-                        cv2.aruco.drawDetectedCornersCharuco(frame, charuco_corners, charuco_ids, (0, 255, 0))
+                if charuco_corners is not None and len(charuco_corners) > 0:
+                    cv2.aruco.drawDetectedCornersCharuco(frame, charuco_corners, charuco_ids, (0, 255, 0))
 
             self.display_image(frame, self.int_image_label)
             
@@ -390,7 +468,8 @@ class CalibrationTool(QMainWindow):
         rgb_image = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb_image.shape
         bytes_per_line = ch * w
-        q_img = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        # tobytes() hands Qt a buffer it owns, so the numpy array can be freed freely.
+        q_img = QImage(rgb_image.tobytes(), w, h, bytes_per_line, QImage.Format_RGB888)
         label.setPixmap(QPixmap.fromImage(q_img).scaled(label.width(), label.height(), Qt.KeepAspectRatio))
 
     # --- INTRINSIC CAPTURE & CALIBRATION ---
@@ -410,21 +489,31 @@ class CalibrationTool(QMainWindow):
                 QMessageBox.warning(self, "Capture Failed", "Chessboard not completely visible.")
 
         elif ptype == "ChArUco":
-            corners, ids, _ = self.detector.detectMarkers(gray)
-            if ids is not None and len(ids) > 0:
-                ret, charuco_corners, charuco_ids = cv2.aruco.interpolateCornersCharuco(corners, ids, gray, self.board)
-                if charuco_corners is not None and len(charuco_corners) >= 4:
-                    self.all_charuco_corners.append(charuco_corners)
-                    self.all_charuco_ids.append(charuco_ids)
-                    self.increment_capture()
-                else:
-                    QMessageBox.warning(self, "Capture Failed", "Not enough ChArUco corners detected (need at least 4).")
-            else:
+            if self.detector is None:
+                QMessageBox.warning(self, "Capture Failed", "Apply the ChArUco settings first.")
+                return
+            charuco_corners, charuco_ids, _, ids = self.detect_charuco(gray)
+            if ids is None or len(ids) == 0:
                 QMessageBox.warning(self, "Capture Failed", "No ArUco markers found.")
+            elif charuco_corners is not None and len(charuco_corners) >= MIN_CHARUCO_CORNERS:
+                self.all_charuco_corners.append(charuco_corners)
+                self.all_charuco_ids.append(charuco_ids)
+                self.increment_capture()
+            else:
+                QMessageBox.warning(self, "Capture Failed",
+                                    f"Not enough ChArUco corners detected (need at least {MIN_CHARUCO_CORNERS}).")
 
     def increment_capture(self):
         self.captured_count += 1
         self.lbl_cap_count.setText(f"Captured Frames: {self.captured_count}")
+
+    def charuco_point_pairs(self):
+        """Yield (object_points, image_points) per captured ChArUco view."""
+        for corners, ids in zip(self.all_charuco_corners, self.all_charuco_ids):
+            objp, imgp = self.board.matchImagePoints(corners, ids)
+            if objp is None or len(objp) < MIN_CHARUCO_CORNERS:
+                continue
+            yield objp.astype(np.float32), imgp.astype(np.float32)
 
     def calculate_intrinsics(self):
         if self.captured_count < 10:
@@ -440,35 +529,40 @@ class CalibrationTool(QMainWindow):
 
         try:
             if is_fisheye_calc:
-                # Fisheye logic expects specific shapes: objpoints (N, 1, 3), imgpoints (N, 1, 2)
+                # OpenCV 5's fisheye solver only accepts the row-vector layout:
+                # objpoints (1, N, 3), imgpoints (1, N, 2). The (N, 1, ...) layout
+                # that calibrateCamera() takes fails its internal size check.
                 fs_objpoints = []
                 fs_imgpoints = []
 
                 if ptype == "Chessboard":
-                    fs_objpoints = [p.reshape(-1, 1, 3) for p in self.objpoints]
-                    fs_imgpoints = [p.reshape(-1, 1, 2) for p in self.imgpoints]
+                    fs_objpoints = [p.reshape(1, -1, 3).astype(np.float64) for p in self.objpoints]
+                    fs_imgpoints = [p.reshape(1, -1, 2).astype(np.float64) for p in self.imgpoints]
                 elif ptype == "ChArUco":
-                    board_obj_pts = self.board.getChessboardCorners()
-                    for corners, ids in zip(self.all_charuco_corners, self.all_charuco_ids):
-                        objp = np.array([board_obj_pts[i[0]] for i in ids], dtype=np.float32)
-                        fs_objpoints.append(objp.reshape(-1, 1, 3))
-                        fs_imgpoints.append(corners.reshape(-1, 1, 2))
+                    for objp, imgp in self.charuco_point_pairs():
+                        fs_objpoints.append(objp.reshape(1, -1, 3).astype(np.float64))
+                        fs_imgpoints.append(imgp.reshape(1, -1, 2).astype(np.float64))
 
-                flags = cv2.fisheye.CALIB_RECOMPUTE_EXTRINSIC | cv2.fisheye.CALIB_CHECK_COND | cv2.fisheye.CALIB_FIX_SKEW
                 K = np.zeros((3, 3))
                 D = np.zeros((4, 1))
                 ret, mtx, dist, _, _ = cv2.fisheye.calibrate(
-                    fs_objpoints, fs_imgpoints, gray_shape, K, D, flags=flags, criteria=FISHEYE_CRITERIA
+                    fs_objpoints, fs_imgpoints, gray_shape, K, D,
+                    flags=FISHEYE_FLAGS, criteria=FISHEYE_CRITERIA
                 )
                 self.is_fisheye = True
 
             else:
                 # Standard Pinhole Logic
                 if ptype == "Chessboard":
-                    ret, mtx, dist, _, _ = cv2.calibrateCamera(self.objpoints, self.imgpoints, gray_shape, None, None)
+                    objpoints, imgpoints = self.objpoints, self.imgpoints
                 elif ptype == "ChArUco":
-                    ret, mtx, dist, _, _ = cv2.aruco.calibrateCameraCharuco(
-                        self.all_charuco_corners, self.all_charuco_ids, self.board, gray_shape, None, None)
+                    # OpenCV 5 dropped calibrateCameraCharuco(); the board itself maps
+                    # detected corners to their 3D model points for calibrateCamera().
+                    pairs = list(self.charuco_point_pairs())
+                    objpoints = [p[0] for p in pairs]
+                    imgpoints = [p[1] for p in pairs]
+
+                ret, mtx, dist, _, _ = cv2.calibrateCamera(objpoints, imgpoints, gray_shape, None, None)
                 self.is_fisheye = False
 
         except Exception as e:
@@ -570,10 +664,12 @@ class CalibrationTool(QMainWindow):
         tvec_zero = np.zeros((3, 1), dtype=np.float64)
 
         if self.is_fisheye:
-            pts_opt_fs = pts_opt.reshape(-1, 1, 3).astype(np.float64)
-            pts_2d, _ = cv2.fisheye.projectPoints(pts_opt_fs, rvec_zero, tvec_zero, self.mtx, self.dist)
+            pts_opt_fs = pts_opt.reshape(1, -1, 3).astype(np.float64)
+            dist_fs = np.asarray(self.dist, dtype=np.float64).reshape(4, 1)
+            pts_2d, _ = cv2.fisheye.projectPoints(pts_opt_fs, rvec_zero, tvec_zero, self.mtx, dist_fs)
         else:
-            pts_2d, _ = cv2.projectPoints(pts_opt.astype(np.float64), rvec_zero, tvec_zero, self.mtx, self.dist)
+            pts_2d, _ = cv2.projectPoints(pts_opt.astype(np.float64), rvec_zero, tvec_zero,
+                                          self.mtx, np.asarray(self.dist, dtype=np.float64).reshape(1, -1))
         
         pts_2d = pts_2d.reshape(-1, 2)
 

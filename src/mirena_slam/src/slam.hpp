@@ -23,7 +23,10 @@ namespace mirena
     struct Landmark
     {
         double x, y;
-        std::string color;
+        /// What perception could tell about the cone without reading its colour,
+        /// which in a colourless pipeline is its size: `cone_big_orange` for the
+        /// cones marking the start line, `unknown_cone` for the rest.
+        std::string type;
         double confidence;
         std::array<double, 4> covariance; // [00, 01, 10, 11] -> [xx, xy, yx, yy]
     };
@@ -85,19 +88,26 @@ namespace mirena
                                    const std::vector<Landmark> &observations,
                                    const gtsam::SharedNoiseModel &meas_noise);
 
-        /// Accumulated colour evidence for one landmark. Colour used to be a
-        /// max-confidence latch, so a single confident misclassification flipped
-        /// a cone permanently -- a bad trade when left/right boundary is the
-        /// whole point of the map.
-        struct ColorVote
+        /// Accumulated type evidence for one landmark: how often each type was
+        /// reported, and which won.
+        ///
+        /// Unweighted, because a colourless detector has nothing graded to say --
+        /// a cluster is tall enough to be a big cone or it is not, and it reports
+        /// the same confidence either way. Counting is also what makes a single
+        /// misread cost one vote rather than latching the landmark, which matters
+        /// because the big cones are what the planner roots the track on.
+        struct TypeVote
         {
-            std::map<std::string, double> votes;
+            std::map<std::string, int> counts;
             std::string best;
-            double best_score = 0.0;
-            double total = 0.0;
+            int best_count = 0;
+            int total = 0;
 
-            void add(const std::string &color, double confidence);
-            double confidence() const { return total > 0.0 ? best_score / total : 0.0; }
+            void add(const std::string &type);
+            double confidence() const
+            {
+                return total > 0 ? static_cast<double>(best_count) / total : 0.0;
+            }
         };
 
         struct LandmarkRecord
@@ -110,7 +120,7 @@ namespace mirena
             /// update budget.
             gtsam::Matrix2 covariance = gtsam::Matrix2::Identity() * 0.1;
             long cov_step = -1;
-            ColorVote colors;
+            TypeVote types;
         };
 
         gtsam::ISAM2 isam_;

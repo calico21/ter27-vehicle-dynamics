@@ -34,7 +34,7 @@
 #define REPORT_PERIOD 100ms
 #define DIST_THRESH 0.5    // Meters moved before creating a keyframe
 #define ANGLE_THRESH 0.3   // Radians turned before creating a keyframe
-#define MAX_SYNC_DELTA_MS 50.0 // Pose/detection pairs further apart are dropped
+#define MAX_SYNC_DELTA_MS 10.0 // Pose/detection pairs further apart are dropped
 #define REPORT_STALE_AFTER_S 1.0
 
 using namespace std::chrono_literals;
@@ -282,7 +282,7 @@ private:
             mirena_common::msg::Entity e;
             e.position.x = l.x;
             e.position.y = l.y;
-            e.type = l.color;
+            e.type = l.type;
             e.confidence = l.confidence;
             map_msg->entities.push_back(e);
         }

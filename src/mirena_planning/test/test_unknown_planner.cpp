@@ -1,35 +1,42 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <optional>
 #include <vector>
 
-#include "mirena_planning/unknown_planner.hpp"
+#include "mirena_planning/unknown/unknown_planner.hpp"
 
 using namespace mirena::planning;  // NOLINT(build/namespaces)
 
 namespace
 {
 
-constexpr double kRadius = 15.0;
+constexpr double kRadius = 35.0;
 constexpr double kWidth = 3.0;
+/// Cones are set out further apart than the track is wide, which is how tracks
+/// are actually pegged out and what the sim's generator does. It matters here:
+/// at a spacing equal to the width, an edge running down a boundary is exactly
+/// as long as a gate, and no planner working from lengths alone can tell them
+/// apart.
+constexpr double kSpacing = 4.0;
 
 /// A closed circuit driven anticlockwise from the map origin.
 ///
 /// The map frame is the pose the car started from, so the start gate sits at
-/// the origin with the car facing +x. Blue is on the driver's left, which on an
-/// anticlockwise lap is the inside of the circle.
-std::vector<Observation> ovalTrack(double from_angle = 0.0, double to_angle = 2.0 * M_PI)
+/// the origin with the car facing +x, and the circuit curves away to the left.
+std::vector<Observation> ovalTrack(
+  double from_angle = 0.0, double to_angle = 2.0 * M_PI, double radius = kRadius)
 {
-  const Vec2 centre{0.0, kRadius};
+  const Vec2 centre{0.0, radius};
   std::vector<Observation> cones{
-    {{0.0, kWidth / 2.0}, Cone::BigOrange, 1.0},
-    {{0.0, -kWidth / 2.0}, Cone::BigOrange, 1.0}};
+    {{0.0, kWidth / 2.0}, ConeSize::Big, 1.0},
+    {{0.0, -kWidth / 2.0}, ConeSize::Big, 1.0}};
 
-  const double step = 3.0 / kRadius;
+  const double step = kSpacing / radius;
   for (double a = from_angle + step; a < to_angle; a += step) {
     const Vec2 radial{std::sin(a), -std::cos(a)};
-    cones.push_back({centre + radial * (kRadius - kWidth / 2.0), Cone::Blue, 1.0});
-    cones.push_back({centre + radial * (kRadius + kWidth / 2.0), Cone::Yellow, 1.0});
+    cones.push_back({centre + radial * (radius - kWidth / 2.0), ConeSize::Small, 1.0});
+    cones.push_back({centre + radial * (radius + kWidth / 2.0), ConeSize::Small, 1.0});
   }
   return cones;
 }
@@ -39,14 +46,14 @@ std::vector<Observation> ovalTrack(double from_angle = 0.0, double to_angle = 2.
 std::vector<Observation> straightTrack()
 {
   std::vector<Observation> cones{
-    {{0.0, kWidth / 2.0}, Cone::BigOrange, 1.0},
-    {{0.0, -kWidth / 2.0}, Cone::BigOrange, 1.0},
-    {{60.0, kWidth / 2.0}, Cone::BigOrange, 1.0},
-    {{60.0, -kWidth / 2.0}, Cone::BigOrange, 1.0}};
+    {{0.0, kWidth / 2.0}, ConeSize::Big, 1.0},
+    {{0.0, -kWidth / 2.0}, ConeSize::Big, 1.0},
+    {{60.0, kWidth / 2.0}, ConeSize::Big, 1.0},
+    {{60.0, -kWidth / 2.0}, ConeSize::Big, 1.0}};
 
-  for (double x = 3.0; x <= 57.0; x += 3.0) {
-    cones.push_back({{x, kWidth / 2.0}, Cone::Blue, 1.0});
-    cones.push_back({{x, -kWidth / 2.0}, Cone::Yellow, 1.0});
+  for (double x = kSpacing; x <= 57.0; x += kSpacing) {
+    cones.push_back({{x, kWidth / 2.0}, ConeSize::Small, 1.0});
+    cones.push_back({{x, -kWidth / 2.0}, ConeSize::Small, 1.0});
   }
   return cones;
 }
@@ -62,8 +69,11 @@ TEST(UnknownPlanner, TracesTheCentrelineOfAClosedCircuit)
 
   const Vec2 centre{0.0, kRadius};
   for (const Gate & gate : plan->gates) {
-    // Every gate should sit on the centreline circle, to within the sampling.
-    EXPECT_NEAR(distance(gate.p, centre), kRadius, 0.35);
+    // Inside the cones, which is the promise the controller depends on. Not
+    // tighter: a diagonal gate's midpoint sits off the centre of the track, and
+    // diagonals are kept because where a cone is missing they are the only gate
+    // there is.
+    EXPECT_NEAR(distance(gate.p, centre), kRadius, kWidth / 2.0);
   }
 }
 
@@ -111,6 +121,135 @@ TEST(UnknownPlanner, HoldsTheClosedFlagUntilTheDetectionIsStable)
   EXPECT_NEAR(distance(settled->start, settled->finish), 0.0, 1e-9);
 }
 
+/// The whole point of searching instead of walking: neither of these has an
+/// intact corridor, and a greedy tracer resolves the first ambiguity by
+/// committing to it.
+TEST(UnknownPlanner, TracesOnThroughGapsInABoundary)
+{
+  // Perception misses cones at range as a matter of course, so a tracer that
+  // needs both sides of the track intact loses the track constantly.
+  std::vector<Observation> cones;
+  int index = 0;
+  for (const Observation & cone : ovalTrack()) {
+    // Drop every third cone of the outer boundary, keeping the inner one.
+    const bool outer = distance(cone.p, Vec2{0.0, kRadius}) > kRadius;
+    if (outer && cone.size == ConeSize::Small && (index++ % 3) == 0) {continue;}
+    cones.push_back(cone);
+  }
+
+  UnknownPlanner planner;
+  const auto plan = planner.plan(cones, nullptr);
+  ASSERT_TRUE(plan.has_value());
+  EXPECT_GT(plan->gates.size(), 20u);
+  for (const Gate & gate : plan->gates) {
+    EXPECT_NEAR(distance(gate.p, Vec2{0.0, kRadius}), kRadius, kWidth / 2.0);
+  }
+}
+
+/// The gate a missing cone leaves behind is a long diagonal, and it is still a
+/// gate: it reaches the full width of the track, and its midpoint is on the
+/// centreline. Only its *length* is unusual, and all of that extra length is
+/// along the track rather than across it.
+///
+/// This is the case a squareness test gets wrong, and gets wrong in the worst
+/// possible way -- the diagonal is exactly as skewed as it is long, so the
+/// hungrier perception is for cones the more certainly the gate bridging the
+/// hole is thrown out, and the trace stops dead at the first dropout. Judged on
+/// how far it reaches across the track instead, it is simply a way through.
+TEST(UnknownPlanner, BridgesAMissingConeWithTheDiagonalThatReplacesIt)
+{
+  std::vector<Observation> cones;
+  for (const Observation & cone : straightTrack()) {
+    // One cone, one side, a third of the way down an otherwise perfect corridor.
+    if (cone.size == ConeSize::Small && std::abs(cone.p.x - 20.0) < 0.1 && cone.p.y < 0.0) {
+      continue;
+    }
+    cones.push_back(cone);
+  }
+
+  UnknownPlanner planner;
+  const auto plan = planner.plan(cones, nullptr);
+  ASSERT_TRUE(plan.has_value());
+  EXPECT_GT(plan->gates.back().p.x, 50.0) << "the trace stopped at the hole";
+  for (const Gate & gate : plan->gates) {
+    EXPECT_NEAR(gate.p.y, 0.0, 0.5) << "wandered off the centreline at x = " << gate.p.x;
+  }
+}
+
+TEST(UnknownPlanner, IsNotDraggedOffTheTrackByStrayCones)
+{
+  // Cones that are not track boundary: knocked over, carried off, or a cluster
+  // the detector invented. They triangulate together with the real ones.
+  std::vector<Observation> cones = ovalTrack();
+  for (const double angle : {0.6, 1.4, 2.5, 4.0}) {
+    const Vec2 radial{std::sin(angle), -std::cos(angle)};
+    cones.push_back({Vec2{0.0, kRadius} + radial * (kRadius + 5.0), ConeSize::Small, 1.0});
+    cones.push_back({Vec2{0.0, kRadius} + radial * (kRadius - 5.5), ConeSize::Small, 1.0});
+  }
+
+  UnknownPlanner planner;
+  const auto plan = planner.plan(cones, nullptr);
+  ASSERT_TRUE(plan.has_value());
+  EXPECT_GT(plan->gates.size(), 20u);
+  for (const Gate & gate : plan->gates) {
+    EXPECT_NEAR(distance(gate.p, Vec2{0.0, kRadius}), kRadius, kWidth / 2.0);
+  }
+}
+
+/// Closure asks whether the path is much longer than the ground it covered, not
+/// how many metres long it is, so it says the same thing about a circuit of any
+/// size. Nothing here knows what a lap is supposed to measure, and a tracer that
+/// did would refuse to close a test loop pegged out on a car park.
+TEST(UnknownPlanner, ClosesACircuitOfAnySize)
+{
+  for (const double radius : {12.0, kRadius}) {
+    UnknownPlanner planner;
+    const auto cones = ovalTrack(0.0, 2.0 * M_PI, radius);
+    std::optional<Plan> plan;
+    for (int i = 0; i < 8; ++i) {plan = planner.plan(cones, nullptr);}
+    ASSERT_TRUE(plan.has_value()) << "radius " << radius;
+    EXPECT_TRUE(plan->closed) << "radius " << radius;
+  }
+}
+
+/// D 1.1.10 caps the car's turning circle at 9 m diameter, and the track is laid
+/// out to respect it. So is the centreline: a kink tighter than that is the
+/// tracer stepping off the track and back, and the controller cannot follow it
+/// whether or not it is where the cones are.
+TEST(UnknownPlanner, NeverAsksForACornerTighterThanTheCarCanTake)
+{
+  // The awkward cases, not the clean one: missing boundary cones and strays both
+  // put gate midpoints off the centreline, which is where zigzags come from.
+  std::vector<Observation> cones;
+  int index = 0;
+  for (const Observation & cone : ovalTrack()) {
+    const bool outer = distance(cone.p, Vec2{0.0, kRadius}) > kRadius;
+    if (outer && cone.size == ConeSize::Small && (index++ % 3) == 0) {continue;}
+    cones.push_back(cone);
+  }
+  for (const double angle : {0.6, 1.4, 2.5, 4.0}) {
+    const Vec2 radial{std::sin(angle), -std::cos(angle)};
+    cones.push_back({Vec2{0.0, kRadius} + radial * (kRadius + 5.0), ConeSize::Small, 1.0});
+    cones.push_back({Vec2{0.0, kRadius} + radial * (kRadius - 5.5), ConeSize::Small, 1.0});
+  }
+
+  UnknownPlanner planner;
+  const auto plan = planner.plan(cones, nullptr);
+  ASSERT_TRUE(plan.has_value());
+  ASSERT_GT(plan->gates.size(), 20u);
+
+  // Stated as a multiple of the track's own width, because that is the only
+  // length the planner knows: it is never told 3 m, it measures it at the start
+  // line and re-measures it at every gate.
+  for (std::size_t i = 1; i + 1 < plan->gates.size(); ++i) {
+    const Vec2 heading = normalized(plan->gates[i].p - plan->gates[i - 1].p);
+    const double radius = turnRadius(plan->gates[i].p, heading, plan->gates[i + 1].p);
+    EXPECT_GE(radius, kWidth)
+      << "gate " << i << " turns at " << radius << " m radius, on a "
+      << kWidth << " m track";
+  }
+}
+
 TEST(UnknownPlanner, LeavesAPartialLapOpen)
 {
   UnknownPlanner planner;
@@ -146,23 +285,33 @@ TEST(UnknownPlanner, HeadsForwardFromTheStartLine)
   EXPECT_NEAR(plan->gates[1].psi, 0.0, 0.2);
 }
 
-TEST(UnknownPlanner, DeclinesToPlanWithoutAStartGate)
+TEST(UnknownPlanner, RootsTheTrackAtTheOriginUntilTheBigConesAreMapped)
 {
+  // The big cones are the track root, but they are not a precondition: the map
+  // frame is the pose the car started from and the car starts on the line, so
+  // the origin is the same point until they have been seen. Refusing to plan
+  // here would leave the car with no path for the first stretch of its first
+  // lap, which is exactly when it is driving towards cones it has not mapped.
   UnknownPlanner planner;
   std::vector<Observation> cones;
   for (double x = 3.0; x <= 30.0; x += 3.0) {
-    cones.push_back({{x, kWidth / 2.0}, Cone::Blue, 1.0});
-    cones.push_back({{x, -kWidth / 2.0}, Cone::Yellow, 1.0});
+    cones.push_back({{x, kWidth / 2.0}, ConeSize::Small, 1.0});
+    cones.push_back({{x, -kWidth / 2.0}, ConeSize::Small, 1.0});
   }
-  EXPECT_FALSE(planner.plan(cones, nullptr).has_value());
+
+  const auto plan = planner.plan(cones, nullptr);
+  ASSERT_TRUE(plan.has_value());
+  EXPECT_NEAR(plan->start.x, 0.0, 1e-9);
+  EXPECT_NEAR(plan->start.y, 0.0, 1e-9);
+  EXPECT_GT(plan->gates.back().p.x, 25.0);
 }
 
 TEST(UnknownPlanner, DeclinesToPlanWithoutBoundaries)
 {
   UnknownPlanner planner;
   const std::vector<Observation> cones{
-    {{0.0, 1.5}, Cone::BigOrange, 1.0},
-    {{0.0, -1.5}, Cone::BigOrange, 1.0}};
+    {{0.0, 1.5}, ConeSize::Big, 1.0},
+    {{0.0, -1.5}, ConeSize::Big, 1.0}};
   EXPECT_FALSE(planner.plan(cones, nullptr).has_value());
 }
 

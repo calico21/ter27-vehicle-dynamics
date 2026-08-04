@@ -42,9 +42,9 @@
 #include "mirena_common/msg/heartbeat.hpp"
 #include "mirena_common/msg/track.hpp"
 
-#include "mirena_planning/known_planner.hpp"
+#include "mirena_planning/known/known_planner.hpp"
 #include "mirena_planning/planner.hpp"
-#include "mirena_planning/track_template.hpp"
+#include "mirena_planning/known/track_template.hpp"
 
 namespace mirena::planning
 {
@@ -81,15 +81,12 @@ std_msgs::msg::ColorRGBA toColor(Rgba c)
   return out;
 }
 
-Rgba coneColor(Cone c)
+/// Nothing here reads cone colour, so the marker colour says the one thing that
+/// is actually known: orange for the big cones of the start line, grey for the
+/// rest.
+Rgba coneColor(ConeSize s)
 {
-  switch (c) {
-    case Cone::Blue: return {0.1f, 0.3f, 1.0f, 0.9f};
-    case Cone::Yellow: return {0.95f, 0.9f, 0.1f, 0.9f};
-    case Cone::Orange: return {1.0f, 0.5f, 0.0f, 0.9f};
-    case Cone::BigOrange: return {1.0f, 0.35f, 0.0f, 0.9f};
-    default: return kGrey;
-  }
+  return s == ConeSize::Big ? Rgba{1.0f, 0.35f, 0.0f, 0.9f} : kGrey;
 }
 
 Marker makeMarker(
@@ -281,10 +278,12 @@ private:
     std::vector<Observation> observations;
     observations.reserve(map->entities.size());
     for (const auto & entity : map->entities) {
-      const Cone color = coneFromString(entity.type);
-      if (color == Cone::Unknown || entity.confidence < min_confidence_) {continue;}
+      // Every cone counts. A colourless pipeline never reports a colour, so
+      // discarding cones that fail to name one would discard all of them.
+      if (entity.confidence < min_confidence_) {continue;}
+      const ConeSize size = coneSizeFromString(entity.type);
       observations.push_back(
-        Observation{{entity.position.x, entity.position.y}, color, entity.confidence});
+        Observation{{entity.position.x, entity.position.y}, size, entity.confidence});
     }
 
     std_msgs::msg::Header header = map->header;
@@ -362,7 +361,7 @@ private:
     Marker cones = makeMarker(header, "template", Marker::SPHERE_LIST, 0.35, kWhite);
     for (const Observation & cone : debug.fitted_template) {
       cones.points.push_back(toPoint(cone.p));
-      cones.colors.push_back(toColor(coneColor(cone.color)));
+      cones.colors.push_back(toColor(coneColor(cone.size)));
     }
     array.markers.push_back(std::move(cones));
 

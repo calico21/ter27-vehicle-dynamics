@@ -46,27 +46,35 @@ Circumcircle circumcircle(Vec2 a, Vec2 b, Vec2 c)
 
 }  // namespace
 
-// --------------------------------------------------------------------- cones
+// ------------------------------------------------------------------- vectors
 
-Cone coneFromString(std::string_view type)
+double turnRadius(Vec2 from, Vec2 heading, Vec2 to)
 {
-  if (containsIgnoreCase(type, "blue")) {return Cone::Blue;}
-  if (containsIgnoreCase(type, "yellow")) {return Cone::Yellow;}
-  // Tested before the plain orange: `cone_big_orange` contains both.
-  if (containsIgnoreCase(type, "big_orange")) {return Cone::BigOrange;}
-  if (containsIgnoreCase(type, "orange")) {return Cone::Orange;}
-  return Cone::Unknown;
+  const Vec2 chord = to - from;
+  const double d = norm(chord);
+  const Vec2 h = normalized(heading);
+  if (d < 1e-9 || squaredNorm(h) < 0.5) {return std::numeric_limits<double>::infinity();}
+
+  // Tangent-chord angle: a chord subtending angle theta to the tangent spans
+  // 2 * radius * sin(theta) of the circle. So the radius falls straight out of
+  // the sine, which is the cross product of the two unit vectors.
+  const double sin_theta = std::abs(cross(h, chord)) / d;
+  if (sin_theta < 1e-9) {
+    return dot(h, chord) > 0.0 ? std::numeric_limits<double>::infinity() : 0.0;
+  }
+  return d / (2.0 * sin_theta);
 }
 
-const char * coneName(Cone c)
+// --------------------------------------------------------------------- cones
+
+ConeSize coneSizeFromString(std::string_view type)
 {
-  switch (c) {
-    case Cone::Blue: return "cone_blue";
-    case Cone::Yellow: return "cone_yellow";
-    case Cone::Orange: return "cone_orange";
-    case Cone::BigOrange: return "cone_big_orange";
-    default: return "unknown_cone";
-  }
+  return containsIgnoreCase(type, "big") ? ConeSize::Big : ConeSize::Small;
+}
+
+const char * coneSizeName(ConeSize s)
+{
+  return s == ConeSize::Big ? "cone_big_orange" : "unknown_cone";
 }
 
 // ---------------------------------------------------------------- transforms

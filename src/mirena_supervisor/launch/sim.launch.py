@@ -26,7 +26,6 @@ def generate_launch_description():
         Node(
             package='mirena_sim',
             executable='mirena_sim',
-            name='mirena_sim',
             parameters=[{'use_sim_time': True}],
         ),
 

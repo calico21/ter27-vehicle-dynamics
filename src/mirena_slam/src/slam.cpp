@@ -108,19 +108,18 @@ namespace mirena
         }
     } // namespace
 
-    void Slam::ColorVote::add(const std::string &color, double confidence)
+    void Slam::TypeVote::add(const std::string &type)
     {
-        if (color.empty())
+        if (type.empty())
             return;
 
-        const double weight = confidence > 0.0 ? confidence : 1.0;
-        const double score = (votes[color] += weight);
-        total += weight;
+        const int count = ++counts[type];
+        ++total;
 
-        if (score > best_score)
+        if (count > best_count)
         {
-            best_score = score;
-            best = color;
+            best_count = count;
+            best = type;
         }
     }
 
@@ -226,7 +225,7 @@ namespace mirena
                 ++last_matched_count_;
             }
 
-            landmarks_.at(id).colors.add(o.color, o.confidence);
+            landmarks_.at(id).types.add(o.type);
 
             const gtsam::Expression<gtsam::Point2> l_(gtsam::Symbol('l', id));
             new_factors_.add(gtsam::ExpressionFactor<gtsam::Point2>(
@@ -300,11 +299,12 @@ namespace mirena
             cost[i][m + i] = mahalanobis_threshold_;
             const gtsam::Point2 local(observations[i].x, observations[i].y);
 
-            // Colour deliberately takes no part: perception misreads cone colour
-            // often enough that forbidding the match just spawns a duplicate on
-            // top of the real cone wearing the wrong label -- roughly one extra
-            // cone per real cone at a 10 percent error rate. Colour accumulates as
-            // votes on the landmark instead, where a misread costs one vote.
+            // Association is geometry and nothing else. The cone's reported type
+            // takes no part even though one is carried: gating on it would spawn
+            // a duplicate on top of a real cone whenever a detection disagreed,
+            // and a big cone that reads as small for one frame is a misread, not
+            // a second cone half a metre away. Types accumulate as votes on the
+            // landmark instead, where a misread costs one vote.
             for (size_t j = 0; j < m; ++j)
             {
                 const LandmarkRecord &record = landmarks_.at(ids[j]);
@@ -386,11 +386,11 @@ namespace mirena
             if (current_estimate_.exists(l_key))
                 record.position = current_estimate_.at<gtsam::Point2>(l_key);
 
-            // Colour and confidence come from accumulated evidence, not from a
+            // Type and confidence come from accumulated evidence, not from a
             // hardcoded 1.0, so planning can tell a well-observed cone from a
             // contested one.
             this->last_map_.push_back({record.position.x(), record.position.y(),
-                                       record.colors.best, record.colors.confidence(), {}});
+                                       record.types.best, record.types.confidence(), {}});
         }
     }
 

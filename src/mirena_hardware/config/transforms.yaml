@@ -21,9 +21,8 @@ transforms:
   
 - parent_frame_id: car/lidar
   child_frame_id: car/camera
-  translation: [0.17, 0.17, 0.0]
+  translation: [0.09, 0.05, -0.11999999999999998]
   rotation: [0.0, 0.0, 0.0, 1.0]
-
 - parent_frame_id: car/camera
   child_frame_id: camera_optical_frame
   translation: [0.0, 0.0, 0.0]

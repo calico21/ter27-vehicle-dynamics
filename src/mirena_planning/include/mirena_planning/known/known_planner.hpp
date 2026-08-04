@@ -4,21 +4,20 @@
 
 #pragma once
 
-#include <array>
 #include <optional>
 #include <random>
 #include <vector>
 
 #include "mirena_planning/planner.hpp"
-#include "mirena_planning/track_template.hpp"
+#include "mirena_planning/known/track_template.hpp"
 
 namespace mirena::planning
 {
 
 struct KnownPlannerParams
 {
-  /// A mapped cone within this of a template cone of the same colour is an
-  /// inlier. Sized for SLAM's landmark error, not for survey precision.
+  /// A mapped cone within this of any template cone is an inlier. Sized for
+  /// SLAM's landmark error, not for survey precision.
   double inlier_distance{0.6};
   /// Fraction of the matchable cones that must be inliers to accept a fit.
   double min_score{0.6};
@@ -63,9 +62,10 @@ private:
     int iterations{0};
   };
 
-  /// Nearest template cone of the same colour to a point already expressed in
-  /// the template frame, or -1.
-  int match(Vec2 point, Cone color) const;
+  /// Nearest template cone to a point already expressed in the template frame,
+  /// or -1. The fit is purely geometric: a cone is a cone, and which one it is
+  /// falls out of the registration rather than being asserted per cone.
+  int match(Vec2 point) const;
 
   Fit evaluate(const std::vector<Observation> & observations, Transform2 guess) const;
   Fit refine(const std::vector<Observation> & observations, Transform2 seed) const;
@@ -76,11 +76,8 @@ private:
   TrackTemplate track_;
   KnownPlannerParams params_;
 
-  /// One grid per cone colour, plus the map back to template cone indices:
-  /// correspondences are colour gated, so searching per colour costs nothing
-  /// and removes every cross-colour match by construction.
-  std::array<Grid, kConeCount> grids_;
-  std::array<std::vector<int>, kConeCount> grid_index_;
+  /// Every template cone, in template order, so a grid index is a cone index.
+  Grid grid_;
 
   /// Template cone pairs sorted by separation. Two-point RANSAC looks up the
   /// pairs that are the same length as a sampled observation pair, which is

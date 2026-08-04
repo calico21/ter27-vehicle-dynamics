@@ -15,7 +15,7 @@ namespace mirena::planning
 struct Observation
 {
   Vec2 p{};
-  Cone color{Cone::Unknown};
+  ConeSize size{ConeSize::Small};
   double confidence{1.0};
 };
 
