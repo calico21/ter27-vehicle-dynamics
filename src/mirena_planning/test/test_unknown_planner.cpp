@@ -29,14 +29,14 @@ std::vector<Observation> ovalTrack(
 {
   const Vec2 centre{0.0, radius};
   std::vector<Observation> cones{
-    {{0.0, kWidth / 2.0}, ConeSize::Big, 1.0},
-    {{0.0, -kWidth / 2.0}, ConeSize::Big, 1.0}};
+    {{0.0, kWidth / 2.0}, ConeSize::Big},
+    {{0.0, -kWidth / 2.0}, ConeSize::Big}};
 
   const double step = kSpacing / radius;
   for (double a = from_angle + step; a < to_angle; a += step) {
     const Vec2 radial{std::sin(a), -std::cos(a)};
-    cones.push_back({centre + radial * (radius - kWidth / 2.0), ConeSize::Small, 1.0});
-    cones.push_back({centre + radial * (radius + kWidth / 2.0), ConeSize::Small, 1.0});
+    cones.push_back({centre + radial * (radius - kWidth / 2.0), ConeSize::Small});
+    cones.push_back({centre + radial * (radius + kWidth / 2.0), ConeSize::Small});
   }
   return cones;
 }
@@ -46,14 +46,14 @@ std::vector<Observation> ovalTrack(
 std::vector<Observation> straightTrack()
 {
   std::vector<Observation> cones{
-    {{0.0, kWidth / 2.0}, ConeSize::Big, 1.0},
-    {{0.0, -kWidth / 2.0}, ConeSize::Big, 1.0},
-    {{60.0, kWidth / 2.0}, ConeSize::Big, 1.0},
-    {{60.0, -kWidth / 2.0}, ConeSize::Big, 1.0}};
+    {{0.0, kWidth / 2.0}, ConeSize::Big},
+    {{0.0, -kWidth / 2.0}, ConeSize::Big},
+    {{60.0, kWidth / 2.0}, ConeSize::Big},
+    {{60.0, -kWidth / 2.0}, ConeSize::Big}};
 
   for (double x = kSpacing; x <= 57.0; x += kSpacing) {
-    cones.push_back({{x, kWidth / 2.0}, ConeSize::Small, 1.0});
-    cones.push_back({{x, -kWidth / 2.0}, ConeSize::Small, 1.0});
+    cones.push_back({{x, kWidth / 2.0}, ConeSize::Small});
+    cones.push_back({{x, -kWidth / 2.0}, ConeSize::Small});
   }
   return cones;
 }
@@ -183,8 +183,8 @@ TEST(UnknownPlanner, IsNotDraggedOffTheTrackByStrayCones)
   std::vector<Observation> cones = ovalTrack();
   for (const double angle : {0.6, 1.4, 2.5, 4.0}) {
     const Vec2 radial{std::sin(angle), -std::cos(angle)};
-    cones.push_back({Vec2{0.0, kRadius} + radial * (kRadius + 5.0), ConeSize::Small, 1.0});
-    cones.push_back({Vec2{0.0, kRadius} + radial * (kRadius - 5.5), ConeSize::Small, 1.0});
+    cones.push_back({Vec2{0.0, kRadius} + radial * (kRadius + 5.0), ConeSize::Small});
+    cones.push_back({Vec2{0.0, kRadius} + radial * (kRadius - 5.5), ConeSize::Small});
   }
 
   UnknownPlanner planner;
@@ -229,8 +229,8 @@ TEST(UnknownPlanner, NeverAsksForACornerTighterThanTheCarCanTake)
   }
   for (const double angle : {0.6, 1.4, 2.5, 4.0}) {
     const Vec2 radial{std::sin(angle), -std::cos(angle)};
-    cones.push_back({Vec2{0.0, kRadius} + radial * (kRadius + 5.0), ConeSize::Small, 1.0});
-    cones.push_back({Vec2{0.0, kRadius} + radial * (kRadius - 5.5), ConeSize::Small, 1.0});
+    cones.push_back({Vec2{0.0, kRadius} + radial * (kRadius + 5.0), ConeSize::Small});
+    cones.push_back({Vec2{0.0, kRadius} + radial * (kRadius - 5.5), ConeSize::Small});
   }
 
   UnknownPlanner planner;
@@ -295,8 +295,8 @@ TEST(UnknownPlanner, RootsTheTrackAtTheOriginUntilTheBigConesAreMapped)
   UnknownPlanner planner;
   std::vector<Observation> cones;
   for (double x = 3.0; x <= 30.0; x += 3.0) {
-    cones.push_back({{x, kWidth / 2.0}, ConeSize::Small, 1.0});
-    cones.push_back({{x, -kWidth / 2.0}, ConeSize::Small, 1.0});
+    cones.push_back({{x, kWidth / 2.0}, ConeSize::Small});
+    cones.push_back({{x, -kWidth / 2.0}, ConeSize::Small});
   }
 
   const auto plan = planner.plan(cones, nullptr);
@@ -310,8 +310,8 @@ TEST(UnknownPlanner, DeclinesToPlanWithoutBoundaries)
 {
   UnknownPlanner planner;
   const std::vector<Observation> cones{
-    {{0.0, 1.5}, ConeSize::Big, 1.0},
-    {{0.0, -1.5}, ConeSize::Big, 1.0}};
+    {{0.0, 1.5}, ConeSize::Big},
+    {{0.0, -1.5}, ConeSize::Big}};
   EXPECT_FALSE(planner.plan(cones, nullptr).has_value());
 }
 

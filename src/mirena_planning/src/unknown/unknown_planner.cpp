@@ -60,9 +60,8 @@ std::optional<Plan> UnknownPlanner::plan(
   const std::vector<Observation> & observations, PlanDebug * debug)
 {
   std::vector<Vec2> cones;
-  for (const Observation & o : observations) {
-    if (o.confidence >= params_.min_confidence) {cones.push_back(o.p);}
-  }
+  cones.reserve(observations.size());
+  for (const Observation & o : observations) {cones.push_back(o.p);}
   if (cones.size() < 3) {return std::nullopt;}
 
   const Vec2 start = startGate(observations);
@@ -110,8 +109,7 @@ Vec2 UnknownPlanner::startGate(const std::vector<Observation> & observations) co
   Vec2 sum{};
   int count = 0;
   for (const Observation & o : observations) {
-    if (o.size != ConeSize::Big || o.confidence < params_.min_confidence) {continue;}
-    if (norm(o.p) > params_.start_gate_radius) {continue;}
+    if (o.size != ConeSize::Big || norm(o.p) > params_.start_gate_radius) {continue;}
     sum = sum + o.p;
     ++count;
   }

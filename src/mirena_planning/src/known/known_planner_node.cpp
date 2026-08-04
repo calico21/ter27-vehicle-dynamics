@@ -144,7 +144,6 @@ public:
     }
 
     republish_tolerance_ = get_parameter("republish_tolerance").as_double();
-    min_confidence_ = get_parameter("min_cone_confidence").as_double();
     fallback_frame_ = get_parameter("fallback_frame").as_string();
     publish_debug_ = get_parameter("publish_debug").as_bool();
 
@@ -213,7 +212,6 @@ private:
     declare_parameter<std::string>("fallback_frame", "map");
     declare_parameter<double>("plan_period", 0.1);
     declare_parameter<double>("heartbeat_period", 0.1);
-    declare_parameter<double>("min_cone_confidence", 0.0);
     declare_parameter<bool>("publish_debug", true);
     // Below this the centreline has not meaningfully moved, so republishing it
     // would only make the controller re-fit its spline and shift the arc length
@@ -239,7 +237,6 @@ private:
     p.ransac_iterations = static_cast<int>(get_parameter("ransac_iterations").as_int());
     p.max_position_drift = get_parameter("max_position_drift").as_double();
     p.max_heading_drift = get_parameter("max_heading_drift").as_double();
-    p.min_confidence = min_confidence_;
 
     // One template per mission, installed with the package.
     const std::string path = ament_index_cpp::get_package_share_directory("mirena_planning") +
@@ -280,10 +277,9 @@ private:
     for (const auto & entity : map->entities) {
       // Every cone counts. A colourless pipeline never reports a colour, so
       // discarding cones that fail to name one would discard all of them.
-      if (entity.confidence < min_confidence_) {continue;}
       const ConeSize size = coneSizeFromString(entity.type);
       observations.push_back(
-        Observation{{entity.position.x, entity.position.y}, size, entity.confidence});
+        Observation{{entity.position.x, entity.position.y}, size});
     }
 
     std_msgs::msg::Header header = map->header;
@@ -430,7 +426,6 @@ private:
   std::string mission_;
   std::string fallback_frame_{"map"};
   double republish_tolerance_{0.25};
-  double min_confidence_{0.0};
   bool publish_debug_{true};
 
   std::unique_ptr<Planner> planner_;

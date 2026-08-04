@@ -1,6 +1,7 @@
 #ifndef MIRENA_PERCEPTION_CONE_DETECTOR_HPP
 #define MIRENA_PERCEPTION_CONE_DETECTOR_HPP
 
+#include <array>
 #include <memory>
 #include <vector>
 
@@ -220,6 +221,35 @@ namespace mirena
         /// times the frontal area of a small one. Zero disables the test.
         double expected_points_min_ratio = 0.33;
         double expected_points_max_ratio = 4.0;
+
+        // -- How well a detection is located ------------------------------------
+        //
+        // A LiDAR does not know a cone equally well in every direction. Along the
+        // beam it measures a range directly and gets it right to a few
+        // centimetres whatever the distance. Across the beam it has only the
+        // angle the beam was pointing at, so the error there is that angle times
+        // the range -- small nearby, and the dominant term by far at the end of
+        // the field of view.
+        //
+        // Reporting that honestly is what lets SLAM stop treating a cone at 25 m
+        // like one at 3 m. It matters more than it sounds: a distant cone has the
+        // longest lever arm on heading, so over-trusting one turns its own
+        // measurement error into a pose correction.
+
+        /// Radial (along-beam) standard deviation, metres. Roughly the sensor's
+        /// own range accuracy, plus the fact that only the near face of the cone
+        /// is ever seen, so the centroid sits a little short of the true centre.
+        double range_sigma = 0.05;
+        /// Angular standard deviation, radians, turned into a cross-beam
+        /// distance by multiplying by range. Rather more than one beam width: it
+        /// stands for where on the cone the returns happened to land, not for the
+        /// sensor's pointing precision.
+        double bearing_sigma = 0.006;
+        /// How far apart the points of one cluster are spread, metres. Averaging
+        /// n of them locates the centroid to about this over sqrt(n), which is
+        /// what makes a three-point cluster at range properly uncertain and a
+        /// fifty-point cluster up close properly trusted.
+        double cluster_spread = 0.15;
         /// Rejects the barriers, marshals and spectators that flank the track.
         double max_lateral_offset = 10.0;
     };
@@ -232,6 +262,9 @@ namespace mirena
         /// Tall enough to be one of the big orange cones on the start line.
         /// Colour is not measured here; height is.
         bool big;
+        /// How well this position is known, as a 2x2 row-major covariance in the
+        /// sensor frame: [xx, xy, yx, yy]. See ConeDetectorParams for the model.
+        std::array<double, 4> covariance;
     };
 
     /// Colourless, geometry-only cone detector: Patchwork++ takes the ground out,
@@ -289,6 +322,11 @@ namespace mirena
         bool is_cone(const ClusterBounds &cluster) const;
         /// Height of a cluster above the track under it.
         float height_above_ground(const ClusterBounds &cluster) const;
+        std::array<double, 4> position_covariance(const Eigen::Vector3f &centroid, int num_points) const;
+
+        /// Where the LiDAR sits in the car frame, so a detection's bearing can be
+        /// measured from the sensor that saw it.
+        Eigen::Vector2f sensor_xy_ = Eigen::Vector2f::Zero();
         /// Returns inside a cluster's box, counted on the cloud as it was before
         /// downsampling, against what the sensor could put on a cone that far off.
         bool has_plausible_return_count(const ClusterBounds &cluster) const;

@@ -113,8 +113,6 @@ struct UnknownPlannerParams
   /// The map frame is anchored at the car's start pose, so the line is at the
   /// origin; this is what stops an autocross finish gate being averaged in.
   double start_gate_radius{10.0};
-  /// Cones below this confidence are ignored.
-  double min_confidence{0.0};
 };
 
 /// Colourless centreline finder: Delaunay-triangulate the cones, then drive

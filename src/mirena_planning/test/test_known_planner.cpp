@@ -27,7 +27,7 @@ std::vector<Observation> observe(
   std::vector<Observation> observations;
   for (const Observation & cone : track.cones) {
     const Vec2 p = truth * cone.p;
-    observations.push_back({{p.x + jitter(rng), p.y + jitter(rng)}, cone.size, 1.0});
+    observations.push_back({{p.x + jitter(rng), p.y + jitter(rng)}, cone.size});
   }
   return observations;
 }
@@ -135,7 +135,7 @@ TEST(KnownPlanner, PublishesNothingForAnUnrelatedMap)
   std::uniform_real_distribution<double> spread(-30.0, 30.0);
   for (int i = 0; i < 40; ++i) {
     noise.push_back(
-      {{spread(rng), spread(rng)}, ConeSize::Small, 1.0});
+      {{spread(rng), spread(rng)}, ConeSize::Small});
   }
   EXPECT_FALSE(planner.plan(noise, nullptr).has_value());
 }

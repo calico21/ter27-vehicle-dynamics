@@ -72,10 +72,6 @@ ConeSize coneSizeFromString(std::string_view type)
   return containsIgnoreCase(type, "big") ? ConeSize::Big : ConeSize::Small;
 }
 
-const char * coneSizeName(ConeSize s)
-{
-  return s == ConeSize::Big ? "cone_big_orange" : "unknown_cone";
-}
 
 // ---------------------------------------------------------------- transforms
 

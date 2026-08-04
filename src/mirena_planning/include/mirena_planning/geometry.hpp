@@ -35,7 +35,6 @@ inline double cross(Vec2 a, Vec2 b) {return a.x * b.y - a.y * b.x;}
 inline double squaredNorm(Vec2 v) {return v.x * v.x + v.y * v.y;}
 inline double norm(Vec2 v) {return std::hypot(v.x, v.y);}
 inline double distance(Vec2 a, Vec2 b) {return norm(a - b);}
-inline Vec2 perp(Vec2 v) {return {-v.y, v.x};}          // rotate +90 degrees
 
 inline Vec2 normalized(Vec2 v)
 {
@@ -106,9 +105,6 @@ Transform2 rigidFit(const std::vector<Vec2> & src, const std::vector<Vec2> & dst
 /// worth carrying is the big cone. The four of those on the start line are what
 /// the unknown-track planner roots the track on.
 enum class ConeSize : std::uint8_t {Small = 0, Big};
-inline constexpr std::size_t kConeSizeCount = 2;
-
-inline std::size_t coneSizeIndex(ConeSize s) {return static_cast<std::size_t>(s);}
 
 /// Maps the perception/SLAM `Entity.type` strings onto the enum. Matching is
 /// case insensitive and by substring, so `cone_big_orange`, `BIG_ORANGE` and
@@ -116,7 +112,6 @@ inline std::size_t coneSizeIndex(ConeSize s) {return static_cast<std::size_t>(s)
 /// Nothing is rejected -- an unrecognised type is still a cone, and a colourless
 /// pipeline has no business discarding a cone for not naming a colour.
 ConeSize coneSizeFromString(std::string_view type);
-const char * coneSizeName(ConeSize s);
 
 // ---------------------------------------------------------------------- grid
 

@@ -360,6 +360,9 @@ private:
             // A cluster either passes the geometric filter or is dropped, so there
             // is no graded score to report.
             entity.confidence = 1.0;
+            // How well the cone is located, which is mostly a question of how far
+            // away it is. SLAM weights the measurement by this.
+            entity.covariance = detection.covariance;
             cones.entities.push_back(entity);
         }
         _cone_pub->publish(cones);

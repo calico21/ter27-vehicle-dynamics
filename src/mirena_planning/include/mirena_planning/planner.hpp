@@ -16,7 +16,6 @@ struct Observation
 {
   Vec2 p{};
   ConeSize size{ConeSize::Small};
-  double confidence{1.0};
 };
 
 /// A centreline sample: position plus the tangent heading at that point.

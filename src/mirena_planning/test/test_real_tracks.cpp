@@ -50,7 +50,7 @@ std::vector<Observation> perceived(
   std::vector<Observation> out;
   for (const Observation & cone : track.cones) {
     if (cone.size != ConeSize::Big && uniform(rng) < dropout) {continue;}
-    out.push_back({{cone.p.x + jitter(rng), cone.p.y + jitter(rng)}, cone.size, 1.0});
+    out.push_back({{cone.p.x + jitter(rng), cone.p.y + jitter(rng)}, cone.size});
   }
   return out;
 }

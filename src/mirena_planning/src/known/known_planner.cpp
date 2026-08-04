@@ -168,21 +168,13 @@ bool KnownPlanner::plausible(const Fit & fit) const
 std::optional<Plan> KnownPlanner::plan(
   const std::vector<Observation> & observations, PlanDebug * debug)
 {
-  std::vector<Observation> usable;
-  usable.reserve(observations.size());
-  for (const Observation & o : observations) {
-    if (o.confidence >= params_.min_confidence) {
-      usable.push_back(o);
-    }
-  }
-
   // Start from what the geometry already tells us: the nominal transform on the
   // first attempt, the previous solution afterwards. RANSAC is the recovery
   // path, not the primary one.
-  Fit fit = refine(usable, locked_ ? last_fit_ : track_.map_from_template);
+  Fit fit = refine(observations, locked_ ? last_fit_ : track_.map_from_template);
   bool from_ransac = false;
   if (!plausible(fit)) {
-    const Fit recovered = recover(usable);
+    const Fit recovered = recover(observations);
     if (recovered.score > fit.score) {
       fit = recovered;
       from_ransac = true;
@@ -199,7 +191,7 @@ std::optional<Plan> KnownPlanner::plan(
 
   if (debug && debug->verbose) {
     const Transform2 to_template = fit.map_from_template.inverse();
-    for (const Observation & o : usable) {
+    for (const Observation & o : observations) {
       const int m = match(to_template * o.p);
       if (m >= 0) {
         debug->correspondences.emplace_back(o.p, fit.map_from_template * track_.cones[m].p);
@@ -209,7 +201,7 @@ std::optional<Plan> KnownPlanner::plan(
     }
     for (const Observation & cone : track_.cones) {
       debug->fitted_template.push_back(
-        Observation{fit.map_from_template * cone.p, cone.size, 1.0});
+        Observation{fit.map_from_template * cone.p, cone.size});
     }
     for (const Vec2 & p : track_.path) {
       debug->fitted_path.push_back(fit.map_from_template * p);

@@ -3,8 +3,7 @@
 namespace mirena
 {
 
-  DebugEntityListDisplay::DebugEntityListDisplay() : _tf_buffer(std::make_shared<tf2_ros::Buffer>(rclcpp::Clock::make_shared())),
-                                           _tf_listener(std::make_shared<tf2_ros::TransformListener>(*_tf_buffer))
+  DebugEntityListDisplay::DebugEntityListDisplay()
   {
     this->_enable_color_override_p = new rviz_common::properties::BoolProperty("Enable Color Override", false, "meow", this);
     this->_color_override_p = new rviz_common::properties::ColorProperty("Entity Color Override", QColor(0, 0, 0, 1), "meowmeow", this, SLOT(update_color_override()));
@@ -69,26 +68,16 @@ namespace mirena
 
   void DebugEntityListDisplay::update_transform(const std_msgs::msg::Header &header)
   {
-    geometry_msgs::msg::TransformStamped transform;
-    try
+    // See EntityListDisplay: the frame manager's buffer is the one that gets
+    // cleared when sim time restarts at zero, a display-owned one is not.
+    Ogre::Vector3 position;
+    Ogre::Quaternion orientation;
+    if (!this->context_->getFrameManager()->getTransform(header, position, orientation))
     {
-      transform = this->_tf_buffer->lookupTransform(this->fixed_frame_.toStdString(), header.frame_id, header.stamp);
-    }
-    catch (tf2::TransformException &ex)
-    {
-      RCLCPP_WARN(rclcpp::get_logger("EntityListDisplay"), "Transform failed: %s", ex.what());
-      setStatus(rviz_common::properties::StatusProperty::Error, "Transform", ex.what());
+      setMissingTransformToFixedFrame(header.frame_id);
       return;
     }
-
-    Ogre::Vector3 position(transform.transform.translation.x,
-                           transform.transform.translation.y,
-                           transform.transform.translation.z);
-
-    Ogre::Quaternion orientation(transform.transform.rotation.w,
-                                 transform.transform.rotation.x,
-                                 transform.transform.rotation.y,
-                                 transform.transform.rotation.z);
+    setTransformOk();
 
     this->_parent_node->setPosition(position);
     this->_parent_node->setOrientation(orientation);

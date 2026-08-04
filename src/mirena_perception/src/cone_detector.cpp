@@ -250,6 +250,7 @@ namespace mirena
     {
         const auto started = std::chrono::steady_clock::now();
 
+        sensor_xy_ = car_from_lidar.translation().head<2>();
         detections_.clear();
         labels_.clear();
         nonground_->clear();
@@ -417,7 +418,8 @@ namespace mirena
 
             const int label = static_cast<int>(detections_.size());
             detections_.push_back({bounds.centroid(), bounds.count,
-                                   height_above_ground(bounds) >= params_.big_cone_min_height});
+                                   height_above_ground(bounds) >= params_.big_cone_min_height,
+                                   position_covariance(bounds.centroid(), bounds.count)});
             for (const auto index : cluster.indices)
             {
                 labels_[static_cast<size_t>(index)] = label;
@@ -427,6 +429,51 @@ namespace mirena
         stage_.accept_ms = elapsed_ms(mark);
         total_ms_ = elapsed_ms(started);
         return detections_;
+    }
+
+    /// How well a cluster's centroid locates the cone, as a 2x2 row-major
+    /// covariance in the sensor frame.
+    ///
+    /// Built in the sensor's own polar frame, where the two errors are
+    /// independent and mean different things -- one along the beam, one across
+    /// it -- and then rotated into x-y. That rotation is the whole reason this
+    /// returns a matrix rather than a pair of numbers: a cone off to one side is
+    /// uncertain diagonally, and a diagonal ellipse is not something two
+    /// variances can express.
+    std::array<double, 4> ConeDetector::position_covariance(
+        const Eigen::Vector3f &centroid, int num_points) const
+    {
+        // Measured from the sensor, not from the car. Clustering runs on a cloud
+        // already placed in the car frame, so "along the beam" is the direction
+        // from where the LiDAR actually sits -- a metre or two forward of the
+        // origin these coordinates are written in.
+        const double x = centroid.x() - sensor_xy_.x();
+        const double y = centroid.y() - sensor_xy_.y();
+        const double range = std::hypot(x, y);
+        // Straight overhead there is no meaningful bearing; the fallback keeps
+        // the maths finite and the case cannot arise for a cone anyway.
+        if (range < 1e-3)
+        {
+            const double s = params_.range_sigma * params_.range_sigma;
+            return {s, 0.0, 0.0, s};
+        }
+
+        // Averaging n points over a cluster of this spread locates the centroid
+        // to about spread/sqrt(n), in every direction.
+        const double centroid_sigma =
+            params_.cluster_spread / std::sqrt(static_cast<double>(std::max(num_points, 1)));
+
+        const double var_along = params_.range_sigma * params_.range_sigma +
+                                 centroid_sigma * centroid_sigma;
+        const double var_across = std::pow(params_.bearing_sigma * range, 2.0) +
+                                  centroid_sigma * centroid_sigma;
+
+        // Rotate diag(var_along, var_across) from the beam direction into x-y.
+        const double c = x / range, s = y / range;
+        const double xx = c * c * var_along + s * s * var_across;
+        const double yy = s * s * var_along + c * c * var_across;
+        const double xy = c * s * (var_along - var_across);
+        return {xx, xy, xy, yy};
     }
 
     /// Is this cluster the right size, and in the right place, to be a cone?

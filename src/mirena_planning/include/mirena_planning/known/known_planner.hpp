@@ -39,7 +39,6 @@ struct KnownPlannerParams
   /// error; anything larger means the fit slid down the track.
   double max_position_drift{5.0};
   double max_heading_drift{0.6};
-  double min_confidence{0.0};
 };
 
 class KnownPlanner : public Planner
