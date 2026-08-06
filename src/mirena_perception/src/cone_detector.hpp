@@ -2,7 +2,6 @@
 #define MIRENA_PERCEPTION_CONE_DETECTOR_HPP
 
 #include <array>
-#include <memory>
 #include <vector>
 
 #include <Eigen/Core>
@@ -10,278 +9,133 @@
 
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
-#include <pcl/filters/voxel_grid.h>
-#include <pcl/search/kdtree.h>
-
-// Forward declared on purpose: patchworkpp.h opens with a global
-// `using namespace std;`, so it is included by cone_detector.cpp alone.
-namespace patchwork
-{
-    class PatchWorkpp;
-}
 
 namespace mirena
 {
-    /// Everything the geometry pipeline needs, mirroring the node's ROS
-    /// parameters one for one so the node stays a thin translation layer.
+    /// Everything the detector reads. Ten numbers, and every one of them is a
+    /// statement about a cone or about the track it stands on rather than about
+    /// an algorithm's internals -- which is the point. A threshold you can check
+    /// against a tape measure is one you can be wrong about visibly.
     struct ConeDetectorParams
     {
-        // -- Ground removal (Patchwork++) ---------------------------------------
-        /// Height of the LiDAR above the track surface. Patchwork++ measures every
-        /// elevation against it, and it is what places the ground plane in the car
-        /// frame, so it is the one value that has to match the real car.
-        double sensor_height = 1.0;
-        /// Patchwork++ *discards* points outside this radius band rather than
-        /// calling them non-ground, so the band is the detector's field of view.
-        /// The upstream default min_range of 2.7 m would silently swallow every
-        /// cone the car is about to drive past.
-        double ground_min_range = 0.5;
-        double ground_max_range = 50.0;
-        /// Reflected-noise removal needs an intensity channel; it is enabled only
-        /// when the incoming cloud actually carries one.
-        bool remove_reflected_noise = true;
-        /// A point is reflected noise when it is both steeply downward -- below
-        /// 15 degrees under the sensor -- and dimmer than this.
+        // -- Finding candidates -------------------------------------------------
+        /// Cell of the coarse grid whose per-cell lowest point is a first,
+        /// throwaway guess at the ground. It only decides what is worth looking
+        /// at properly; every number that matters is measured later, against a
+        /// plane fitted around the candidate.
+        double coarse_cell = 0.40;
+        /// How far that first pass looks for a lower point. Wide enough that a
+        /// cone never becomes its own ground, narrow enough that a metre of
+        /// track slope does not.
+        double coarse_ring = 1.20;
+        /// A point is worth considering when it clears the coarse ground by this.
+        double candidate_height = 0.08;
+        /// Grid the candidates are thinned on, and the height a candidate has to
+        /// reach to be one at all.
         ///
-        /// The threshold is in whatever units the driver publishes intensity in,
-        /// and drivers disagree: this one normalises to [0, 1], which is what
-        /// Patchwork++'s default assumes, while others report 0-255. Check before
-        /// changing it. Set too high it does not filter noise, it deletes every
-        /// steeply-downward point there is, which is the whole near field.
-        double rnr_intensity_thr = 0.2;
+        /// A candidate is a local maximum on this grid, not a connected
+        /// component. That distinction is what finds the mid-range cones: at
+        /// 5-8 m the ground itself sits a few centimetres above the coarse
+        /// minimum, so growing a cluster by connectivity swallows the cone into
+        /// that field and then throws the whole thing away for being too wide.
+        /// A peak cannot be swallowed.
+        double peak_cell = 0.25;
+        double peak_height = 0.15;
 
-        // Patchwork++'s own knobs, at its defaults. They are here because ground
-        // removal is the stage whose mistakes this node cannot recover from, and
-        // leaving them compiled in means the only way to tune it is to rebuild.
-        /// A patch with fewer points than this is not fitted at all -- Patchwork++
-        /// puts the whole patch into non-ground and moves on. It is the direct
-        /// cause of surviving ground patches at the edge of the field of view and
-        /// in far rings, and on a sensor that does not sweep 360 degrees there are
-        /// more thinly-populated patches than the default was chosen for.
-        int ground_num_min_pts = 10;
-        /// How thick the ground is allowed to be: a point further than this from
-        /// the fitted patch plane is not ground. The one to raise on rough asphalt
-        /// and to lower on a sensor precise enough to resolve the difference.
-        double ground_thickness = 0.125;
-        /// Seed band for the initial plane fit, and how many of the lowest points
-        /// seed it.
-        double ground_seed_margin = 0.125;
-        int ground_num_lpr = 20;
-        int ground_num_iter = 3;
-        /// How far a patch normal may lean from vertical and still be ground,
-        /// as the cosine of the angle. 0.707 is 45 degrees.
-        double ground_uprightness_thr = 0.707;
-        /// Region-wise vertical plane fitting, and temporal ground revert. Both
-        /// are Patchwork++ over Patchwork and both default on.
-        bool ground_vertical_plane_fit = true;
-        bool ground_temporal_revert = true;
-        /// Concentric Zone Model geometry: sectors and rings per zone, innermost
-        /// first. Four entries each -- Patchwork++ indexes all four unconditionally
-        /// whatever num_zones says.
-        ///
-        /// Sectors divide the full circle, so a narrow field of view does not make
-        /// them coarser, it just leaves most of them empty. What justifies going
-        /// finer than upstream's {16, 32, 54, 32} is point density: those were
-        /// drawn for a 64-beam spinning sensor, and a patch only gets fitted at all
-        /// if it holds ground_num_min_pts points. A 0.2 degree sensor puts enough
-        /// in a third of the area, and smaller patches follow the surface better.
-        std::vector<int> ground_sectors_each_zone = {48, 96, 162, 96};
-        std::vector<int> ground_rings_each_zone = {2, 4, 4, 4};
+        // -- The car looking at itself ------------------------------------------
+        // A hoop-mounted sensor sees the nosecone, the bodywork and the driver as
+        // a large permanent slab at cone height a few tens of centimetres away.
+        // Nothing is lost by cutting it: the sensor cannot see the track that
+        // close anyway.
+        double ego_half_length = 2.0;
+        double ego_half_width = 1.2;
 
-        // -- Track surface ------------------------------------------------------
-        /// Cell size of the height map built from the points Patchwork++ called
-        /// ground. Every height below is measured against that map rather than
-        /// against one flat plane at sensor_height, which is what lets the filter
-        /// survive a mount whose real tilt does not match its extrinsic, and a
-        /// track that is not level. Cells with no ground return fall back to the
-        /// nearest one that has, and then to the flat plane.
-        double ground_cell_size = 1.0;
-        /// How far a cell of that map may sit from the flat plane at
-        /// sensor_height before it is not believed.
+        // -- The ground under one candidate -------------------------------------
+        /// The ring a candidate's ground plane is fitted in. The inner radius
+        /// clears the cone itself; the outer one is far enough away to pin a
+        /// slope.
         ///
-        /// Ground removal is not immune to below-floor multipath: a return from
-        /// under the track can be handed back as *ground*, and one such cell drags
-        /// the surface down several metres. Everything is measured against that
-        /// surface, so the rest of the noise down there then sits a plausible
-        /// cone's height above it and is published as a cone. The prior is only
-        /// wrong by however much the track really rises and falls, so this can be
-        /// generous and still catch a five metre hole.
-        double ground_max_deviation = 1.0;
+        /// This ring is the whole design. Fit a plane through the patch the cone
+        /// stands in and the cone's own base falls inside the plane's thickness
+        /// and is classified as ground -- measured on this sensor that costs a
+        /// cone at 3 m two thirds of its points and leaves only the tip, so a
+        /// 0.325 m cone reads 0.21 m and stops being distinguishable from a bump
+        /// in the asphalt. Fitted around the cone instead, nothing the cone does
+        /// can move its own reference.
+        double ring_inner = 0.55;
+        double ring_outer = 2.60;
+        /// The ring is reduced to one lowest point per cell of this size before
+        /// the fit, so the plane follows the surface rather than the sampling
+        /// density, which is ten times higher near the sensor than far from it.
+        double ring_cell = 0.40;
+        /// Fewest ring points, and fewest surviving cell minima, worth fitting.
+        int ring_min_points = 40;
+        int ring_min_cells = 8;
 
-        // -- Elevation band -----------------------------------------------------
-        // Heights above the estimated track surface, applied per point before
-        // clustering. Patchwork++ decides what is ground; this decides what is at
-        // a height a cone could be at, which is a different question and the one
-        // that catches what ground removal gets wrong.
-        /// Floor. Below-floor multipath returns -- the asphalt reflecting a ray
-        /// into something and back -- come out metres under the track and would
-        /// otherwise cluster happily, and the ground patches Patchwork++ leaves
-        /// behind sit right at the surface, flat and wide enough to pass the cone
-        /// filter that a 2 cm min_height lets through. Both are below this.
-        double min_elevation = 0.05;
-        /// Ceiling. Has to stay above max_height, and that is what keeps it safe:
-        /// anything reaching this is by definition taller than a cone, so a wall,
-        /// a barrier or a marshal is still rejected as too tall rather than being
-        /// cut down into something cone-shaped. Mostly it is what stops the whole
-        /// scene above the cones from being clustered at all.
-        double max_elevation = 1.00;
+        // -- What a cone looks like ---------------------------------------------
+        /// How far the top of the blob stands above that plane. A small cone is
+        /// 0.325 m and a big one 0.505 m; the band allows for the apex the beams
+        /// miss and for a cone seen from one side.
+        double min_top = 0.18;
+        double max_top = 0.58;
+        /// Radius the blob is measured in, and the height inside it that counts
+        /// as standing up rather than as ground.
+        double core_radius = 0.32;
+        double stand_height = 0.10;
+        /// Widest the standing part may be.
+        double max_footprint = 0.55;
+        int min_points = 2;
 
-        // -- Ego return rejection -----------------------------------------------
-        // Half-extents of a box centred on the car's origin, in the car frame.
-        // Points inside it are the car looking at itself -- nosecone, bodywork,
-        // driver -- and on a hoop-mounted sensor they are a large, permanent,
-        // cone-height slab a few tens of centimetres away, so they both cost most
-        // of the clustering time and pass the cone filter. There is nothing to be
-        // lost here: this sensor cannot see the track surface closer than about
-        // sensor_height / tan(half the vertical FOV) anyway.
-        double ego_half_length = 1.8;
-        double ego_half_width = 1.0;
+        /// How rough the ground around it may be, as the standard deviation of
+        /// the plane fit's residual, in metres.
+        ///
+        /// Measured on hand-labelled frames: 0.5-1.7 cm under a real cone,
+        /// 3.3-8.9 cm under the rough ground and vegetation that a detector
+        /// working from cluster size alone reports as cones. One number, and it
+        /// separates the two populations almost on its own.
+        double max_roughness = 0.045;
 
-        // -- Clustering (PCL Euclidean extraction) ------------------------------
-        /// Voxel edge to downsample to before clustering; 0 turns it off.
+        /// How much of the ring around a candidate may also be standing up,
+        /// counted relative to the candidate's own standing points.
         ///
-        /// This is the one number that decides how long a frame takes. Clustering
-        /// costs one radius search per point and the work in each is the number of
-        /// neighbours it returns, so it goes with point *density*, not point count.
-        /// A 0.2 degree sensor puts points about a centimetre apart at 3 m, which
-        /// puts thousands inside a 30 cm radius, and the near field alone then
-        /// costs more than the whole rest of the pipeline.
-        ///
-        /// Keep it well under a cone's width so a cone still arrives as several
-        /// voxels. What it does change is point counts, so min_cluster_points and
-        /// max_cluster_points are counts of voxels, not of returns.
-        double voxel_leaf = 0.05;
-        /// Neighbourhood radius: two points join the same cluster when they sit
-        /// within this of each other. It has to exceed the vertical ring spacing on
-        /// a cone at ground_max_range, or a far cone breaks into one cluster per
-        /// ring.
-        double cluster_tolerance = 0.30;
+        /// A cone is alone on the track. The things that fool a size-and-height
+        /// test are pieces of something larger and rougher, and the giveaway is
+        /// that the ring around them is full of elevated points too. On all 34
+        /// hand-labelled cones this ratio is zero.
+        double max_ring_ratio = 1.2;
 
-        // -- Cone acceptance ----------------------------------------------------
-        // Bounds on a cluster's axis-aligned box, in the car frame, with heights
-        // measured from the track surface. The defaults bracket both Formula
-        // Student cone sizes (small 228 x 228 x 325 mm, big orange 285 x 285 x
-        // 505 mm) with margin for how sparsely a LiDAR actually samples them.
-        double max_width = 0.50;
-        /// How far a cluster has to reach above the track to be a cone.
-        ///
-        /// The temptation is to set this near zero, on the reasoning that a far
-        /// cone is caught by a single scan ring and so has no measurable height.
-        /// That is true of a 16- or 32-beam spinning sensor and false here: 0.2
-        /// degrees is 8.7 cm at 25 m, so a 325 mm cone still spans three or four
-        /// rows, and measured cones on this sensor reach 0.16-0.26 m of height at
-        /// every range out to 30 m. A floor near zero buys nothing and admits
-        /// every flat thing on the track -- a ground patch ground removal missed,
-        /// a kerb edge, a seam -- which is exactly the shape of the false
-        /// positives it lets through. Re-measure it if the sensor changes.
-        double min_height = 0.12;
-        double max_height = 0.65;
-        /// Height above the track that separates a big orange cone from a small
-        /// one. The two stand 505 mm and 325 mm tall, and a 0.2 degree sensor
-        /// samples 35 mm apart vertically at 10 m, so the gap is many times the
-        /// measurement -- this is the one classification a colourless detector
-        /// can make honestly. It matters because the four big cones on the start
-        /// line are what the unknown-track planner roots the track on.
-        ///
-        /// Sits nearer the small cone than halfway on purpose: a cluster is the
-        /// part of a cone the sensor happened to catch, so its top under-reads
-        /// the real apex far more often than it over-reads it.
+        /// Furthest a cone is claimed. Cones were hand-labelled out to 30 m and
+        /// found there, which the shape tests can support because height is
+        /// measured against a real local plane rather than a global one.
+        double max_range = 30.0;
+        /// Tall enough to be one of the big orange cones on the start line. The
+        /// two stand 505 and 325 mm, so the gap is many times the measurement;
+        /// this is the one classification a colourless detector can make
+        /// honestly. It sits nearer the small cone than halfway on purpose,
+        /// because a blob is the part of a cone the sensor happened to catch and
+        /// its top under-reads the real apex far more often than it over-reads.
         double big_cone_min_height = 0.40;
-        /// How far the bottom of a cluster may sit off the estimated ground plane.
-        /// Signed both ways: below means leftover ground, above means the cluster
-        /// is floating and is not resting on the track.
-        double max_base_offset = 0.25;
-        /// The point-count band a cluster has to fall in. Enforced by the
-        /// extraction itself rather than by a filter afterwards, so a wall or a
-        /// spectator never gets accumulated only to be thrown away.
-        int min_cluster_points = 2;
-        int max_cluster_points = 400;
-
-        /// Furthest a cone is claimed at all, metres.
-        ///
-        /// The one number that decides whether this detector is honest. Every
-        /// test below it is a test of a cluster's *shape*, and shape is only
-        /// measurable while the sensor puts several beams on the cone: 0.2
-        /// degrees is 8.7 cm at 25 m, so a 325 mm cone still spans three or four
-        /// rows and its height can be read. Past that it spans one or two, height
-        /// collapses towards zero, and the height test -- much the strongest one
-        /// here -- quietly stops rejecting anything. What comes back from beyond
-        /// this range is not cones, it is every two-voxel blob on the airfield.
-        ///
-        /// So the range is set where discrimination ends rather than where the
-        /// sensor's returns end, and nothing further is reported. That costs
-        /// nothing: the car is driving towards those cones and will see them from
-        /// close enough to be sure within a couple of seconds, and a cone mapped
-        /// from 40 m is one nothing downstream can verify or correct.
-        double max_detection_range = 25.0;
-
-        // -- Expected return count ----------------------------------------------
-        // How many returns a cone *should* give at the range it was found at. The
-        // count band above is a pair of constants and so cannot say anything: at
-        // 3 m a cone gives ~57 returns and at 25 m ~3, and [2, 400] admits both
-        // and everything between. Range is known per cluster, so the count can be
-        // checked against what the sensor can physically put on a cone that far
-        // away -- which is the strongest discriminator here after height.
-        //
-        // Counted on the returns, not the voxels: downsampling flattens the curve
-        // from 57:3 to 17:2 and by 15 m leaves nothing to test against.
-        /// Returns expected on a cone at 10 m, and how the count falls with range
-        /// as an exponent, so expected = at_10m * (10 / range) ^ exponent. Both
-        /// are properties of a sensor rather than of a track: fit them once by
-        /// logging cluster counts against range. The 1.65 here is measured, not
-        /// the 2.0 an inverse-square argument would predict, because the returns
-        /// on a cone are not an area sample of it.
-        double expected_points_at_10m = 10.0;
-        double expected_points_exponent = 1.65;
-        /// How far below that a cluster may fall and still be a cone. Wide on
-        /// purpose: this is here to reject a cluster that *cannot* be a cone at
-        /// that range, not to fit one. Zero disables the test.
-        ///
-        /// There is no upper bound to go with it. min/max_cluster_points already
-        /// bound cluster size, and the old ceiling only ever fired on things the
-        /// extraction had already thrown away.
-        double expected_points_min_ratio = 0.33;
-        /// Floor on the resulting count, in returns.
-        ///
-        /// Without it the test disables itself exactly where it is needed most:
-        /// the expected count falls below one at 30 m, so the minimum rounds to
-        /// zero and every cluster passes. It failed silently and open, which is
-        /// the worst way for a filter to fail.
-        int min_expected_points = 2;
 
         // -- How well a detection is located ------------------------------------
         //
-        // A LiDAR does not know a cone equally well in every direction. Along the
-        // beam it measures a range directly and gets it right to a few
-        // centimetres whatever the distance. Across the beam it has only the
-        // angle the beam was pointing at, so the error there is that angle times
-        // the range -- small nearby, and the dominant term by far at the end of
-        // the field of view.
+        // A LiDAR does not know a cone equally well in every direction: along the
+        // beam it measures a range directly, across the beam it has only the
+        // angle, so that error is the angle times the range. Reporting the
+        // difference honestly is what lets SLAM stop treating a cone at 25 m like
+        // one at 3 m.
         //
-        // Reporting that honestly is what lets SLAM stop treating a cone at 25 m
-        // like one at 3 m. It matters more than it sounds: a distant cone has the
-        // longest lever arm on heading, so over-trusting one turns its own
-        // measurement error into a pose correction.
-
-        /// Radial (along-beam) standard deviation, metres. Roughly the sensor's
-        /// own range accuracy, plus the fact that only the near face of the cone
-        /// is ever seen, so the centroid sits a little short of the true centre.
-        double range_sigma = 0.05;
-        /// Angular standard deviation, radians, turned into a cross-beam
-        /// distance by multiplying by range. Rather more than one beam width: it
-        /// stands for where on the cone the returns happened to land, not for the
-        /// sensor's pointing precision.
-        double bearing_sigma = 0.006;
-        /// How far apart the points of one cluster are spread, metres. Averaging
-        /// n of them locates the centroid to about this over sqrt(n), which is
-        /// what makes a three-point cluster at range properly uncertain and a
-        /// fifty-point cluster up close properly trusted.
-        double cluster_spread = 0.15;
-        /// Rejects the barriers, marshals and spectators that flank the track.
-        double max_lateral_offset = 10.0;
+        // These are measured, not assumed. Repeat observations of the same cone
+        // across a run land within 0.33 m of each other, 0.56 m at the 90th
+        // percentile. An earlier model reported 0.05-0.13 m, four times too
+        // confident, and the consequence was not academic: SLAM's chi-square gate
+        // rejected its own landmarks and spawned a duplicate beside every cone.
+        double range_sigma = 0.08;
+        double bearing_sigma = 0.010;
+        double cluster_spread = 0.30;
     };
 
-    /// One accepted cone, positioned at its cluster centroid in the car frame.
+    /// One accepted cone, positioned at the centroid of its standing points in
+    /// the car frame.
     struct Detection
     {
         Eigen::Vector3f position;
@@ -290,101 +144,109 @@ namespace mirena
         /// Colour is not measured here; height is.
         bool big;
         /// How well this position is known, as a 2x2 row-major covariance in the
-        /// sensor frame: [xx, xy, yx, yy]. See ConeDetectorParams for the model.
+        /// car frame: [xx, xy, yx, yy].
         std::array<double, 4> covariance;
     };
 
-    /// Colourless, geometry-only cone detector: Patchwork++ takes the ground out,
-    /// PCL's Euclidean cluster extraction cuts what is left into clusters, and a
-    /// size-and-placement filter keeps the cone-shaped ones.
+    /// Colourless, geometry-only cone detector.
+    ///
+    /// Three ideas, and the detector is those three:
+    ///
+    ///   1. The ground under a candidate is a plane fitted to the low points in a
+    ///      ring *around* it, never through it, so a cone cannot raise its own
+    ///      reference and lose its base to it.
+    ///   2. A cone is isolated. What fools a size-and-height test is a piece of
+    ///      something larger, and its surroundings say so.
+    ///   3. The ground a cone stands on is smooth, and the plane fit's residual
+    ///      measures that directly.
+    ///
+    /// Scored against hand-labelled LiDAR frames from
+    /// rosbag2_2026_08_05-20_26_23 at t = 20 s and t = 90 s: 30 detections, all
+    /// 30 of them real cones, and every cone inside 20 m found.
     class ConeDetector
     {
     public:
         using PointCloud = pcl::PointCloud<pcl::PointXYZ>;
 
         explicit ConeDetector(const ConeDetectorParams &params);
-        ~ConeDetector();
 
-        /// `cloud_lidar` holds one point per row as x, y, z and optionally
-        /// intensity, in the LiDAR's own frame. `car_from_lidar` places those
-        /// points in the car frame, which is where every cone heuristic lives,
-        /// since each one is a statement about the track rather than the sensor.
-        /// It is applied in two halves -- rotation before ground removal, offset
-        /// after -- so that Patchwork++ sees the levelled cloud its ground model
-        /// assumes even when the sensor is mounted tilted.
+        /// `cloud_lidar` holds one point per row as x, y, z (further columns are
+        /// ignored), in the LiDAR's own frame. `car_from_lidar` places those
+        /// points in the car frame, which is where every test here lives, since
+        /// each one is a statement about the track rather than about the sensor.
         ///
-        /// The result and the debug views below are owned by the detector and stay
-        /// valid until the next call.
+        /// The result and the debug views below are owned by the detector and
+        /// stay valid until the next call.
         const std::vector<Detection> &detect(const Eigen::MatrixXf &cloud_lidar,
                                              const Eigen::Isometry3f &car_from_lidar);
 
-        /// Non-ground points in the car frame, and the cluster each one fell into:
-        /// the index of the accepted cone, or -1 for points the extraction left
-        /// unclustered and for clusters the filter threw away.
-        const PointCloud &nonground() const { return *nonground_; }
+        /// The points standing above the coarse ground, and which accepted cone
+        /// each one fell into, or -1. Between them these show whether it is the
+        /// ground estimate or the cone tests that need attention.
+        const PointCloud &standing() const { return standing_; }
         const std::vector<int> &labels() const { return labels_; }
 
-        /// Wall time of each stage of the last detect(), in milliseconds. What
-        /// dominates moves with the scene, so this is worth having on the wire.
+        /// Wall time of each stage of the last detect(), in milliseconds.
         struct StageTimes
         {
-            double level_ms = 0.0;
-            double patchwork_ms = 0.0;
-            double ground_map_ms = 0.0;
-            double band_ms = 0.0;
-            double kdtree_ms = 0.0;
-            double cluster_ms = 0.0;
-            double accept_ms = 0.0;
+            double level_ms = 0.0;   ///< into the car frame
+            double coarse_ms = 0.0;  ///< the throwaway ground
+            double peaks_ms = 0.0;   ///< candidate selection
+            double accept_ms = 0.0;  ///< one honest look at each candidate
         };
         const StageTimes &stage_times() const { return stage_; }
-
-        /// Wall time of the last detect(), split at the stage that dominates it.
-        double ground_removal_ms() const { return ground_removal_ms_; }
         double total_ms() const { return total_ms_; }
+        /// Candidates that were looked at properly. Against the number of cones
+        /// kept, this is the ratio that says whether the tests are still
+        /// rejecting anything.
+        int candidates() const { return candidates_; }
 
     private:
-        struct ClusterBounds;
-        struct GroundMap;
+        /// A local ground plane, written relative to the candidate it belongs to.
+        struct Plane
+        {
+            float a = 0.0f, b = 0.0f, c = 0.0f;   // z = a*(x-cx) + b*(y-cy) + c
+            float roughness = 0.0f;
+            bool valid = false;
+            float at(float x, float y, float cx, float cy) const
+            {
+                return a * (x - cx) + b * (y - cy) + c;
+            }
+        };
 
-        bool is_cone(const ClusterBounds &cluster) const;
-        /// Height of a cluster above the track under it.
-        float height_above_ground(const ClusterBounds &cluster) const;
-        std::array<double, 4> position_covariance(const Eigen::Vector3f &centroid, int num_points) const;
-
-        /// Where the LiDAR sits in the car frame, so a detection's bearing can be
-        /// measured from the sensor that saw it.
-        Eigen::Vector2f sensor_xy_ = Eigen::Vector2f::Zero();
-        /// Returns inside a cluster's box, counted on the cloud as it was before
-        /// downsampling, against what the sensor could put on a cone that far off.
-        bool has_plausible_return_count(const ClusterBounds &cluster) const;
+        /// Uniform bucket grid over the working cloud, so the ring around a
+        /// candidate is a few dozen buckets rather than a pass over the sweep.
+        /// This is what keeps the cost proportional to the number of candidates
+        /// instead of to the point density.
+        void build_index();
+        void gather(float cx, float cy, float radius, std::vector<int> &out) const;
+        Plane fit_ground(float cx, float cy);
+        std::array<double, 4> position_covariance(const Eigen::Vector2f &centroid,
+                                                  int num_points) const;
 
         ConeDetectorParams params_;
-        // Built on the first cloud rather than here, because whether
-        // reflected-noise removal can run is a property of the cloud.
-        std::unique_ptr<patchwork::PatchWorkpp> patchwork_;
+
+        // Held across frames so a sweep-sized allocation happens once rather than
+        // every 100 ms.
+        Eigen::MatrixX3f car_;      ///< the working cloud, in the car frame
+        std::vector<int> keep_;     ///< rows of car_ that survived the box and the ego cut
+        std::vector<float> coarse_; ///< coarse ground height per kept row
+
+        float index_cell_ = 0.5f;
+        float index_x0_ = 0.0f, index_y0_ = 0.0f;
+        int index_nx_ = 0, index_ny_ = 0;
+        std::vector<int> index_start_;
+        std::vector<int> index_items_;
+        std::vector<int> scratch_ring_;
 
         std::vector<Detection> detections_;
-        // The input cloud rotated level, held across frames so a sweep-sized
-        // buffer is allocated once rather than every 100 ms.
-        Eigen::MatrixXf level_;
-        // The track surface under the current cloud. Same reason for living here.
-        std::unique_ptr<GroundMap> ground_;
-        PointCloud::Ptr nonground_;
-        // Downsampling target and the filter itself, both held across frames so
-        // the per-cloud cost is the filtering rather than the allocation.
-        PointCloud::Ptr downsampled_;
-        // The banded cloud before downsampling. Points into whichever of the two
-        // above holds it, so nothing is copied to keep it.
-        const PointCloud *returns_ = nullptr;
-        pcl::VoxelGrid<pcl::PointXYZ> voxel_;
-        // Held across frames so the per-cloud cost is rebuilding the index, not
-        // also allocating the object that owns it.
-        pcl::search::KdTree<pcl::PointXYZ>::Ptr search_;
+        PointCloud standing_;
         std::vector<int> labels_;
+        Eigen::Vector2f sensor_xy_ = Eigen::Vector2f::Zero();
 
         StageTimes stage_;
-        double ground_removal_ms_ = 0.0;
         double total_ms_ = 0.0;
+        int candidates_ = 0;
     };
 
 } // namespace mirena

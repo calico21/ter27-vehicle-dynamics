@@ -1,12 +1,11 @@
 #include "pointcloud_builder.hpp"
-#include "rclcpp/rclcpp.hpp"
 #include <cstring>
 #include <cmath>
 #include <arpa/inet.h>
 
-// Global optimization for the whole file
+// Global optimization for the whole file. -ffast-math is already on from
+// CMakeLists; unroll-loops is what this adds.
 #pragma GCC optimize("unroll-loops")
-#pragma GCC optimize("-ffast-math")
 
 #define NUM_CHANNELS 5
 #define NUM_DATA_BLOCKS 25
@@ -19,6 +18,11 @@ struct alignas(4) LidarPoint
 {
     float x, y, z, intensity;
 };
+
+namespace {
+constexpr size_t kPointSize = sizeof(LidarPoint);
+constexpr size_t kBytesPerPacket = NUM_DATA_BLOCKS * NUM_CHANNELS * kPointSize;
+} // namespace
 
 Timestamp parse_timestamp(const uint8_t timestamp[10])
 {
@@ -38,7 +42,17 @@ Timestamp parse_timestamp(const uint8_t timestamp[10])
 
     return ts;
 }
-// Switching return type to unique_ptr for Zero-Copy
+
+void PointcloudBuilder::start_frame(const StampedMSOPPacket &stamped_packet,
+                                    const Timestamp &packet_timestamp)
+{
+    product = this->make_new_pointcloud(stamped_packet.timestamp);
+    frame_start_time = packet_timestamp;
+    frame_start_ros = stamped_packet.timestamp.seconds();
+    frame_start_theta = deskew_enabled_ ? imu_.angle_at(frame_start_ros) : 0.0;
+    compensated_ = true;
+}
+
 std::unique_ptr<sensor_msgs::msg::PointCloud2> PointcloudBuilder::process_packet(const StampedMSOPPacket &stamped_packet)
 {
     // Header check
@@ -53,10 +67,7 @@ std::unique_ptr<sensor_msgs::msg::PointCloud2> PointcloudBuilder::process_packet
 
     if (product == nullptr)
     {
-        product = this->make_new_pointcloud(stamped_packet.timestamp);
-        frame_start_time = packet_timestamp;
-        total_integrated_time = 0;
-        accumulated_error_azimuth = 0;
+        start_frame(stamped_packet, packet_timestamp);
     }
 
     uint16_t seq_number = ntohs(packet->header.pkt_psn);
@@ -71,25 +82,46 @@ std::unique_ptr<sensor_msgs::msg::PointCloud2> PointcloudBuilder::process_packet
             product->row_step = product->data.size();
             ret = std::move(product); // Transfer ownership
         }
-        product = this->make_new_pointcloud(stamped_packet.timestamp);
-        frame_start_time = packet_timestamp;
-        total_integrated_time = 0;
-        accumulated_error_azimuth = 0;
+        start_frame(stamped_packet, packet_timestamp);
     }
     last_sequence_number = seq_number;
 
     size_t current_offset = product->data.size();
-    product->data.resize(current_offset + (NUM_DATA_BLOCKS * NUM_CHANNELS * 16));
+    product->data.resize(current_offset + kBytesPerPacket);
     uint8_t *write_ptr = &product->data[current_offset];
     size_t bytes_written = 0;
 
-    double base_block_frame_offset = packet_timestamp.diff_seconds(frame_start_time);
+    // Offset of this packet from the frame start, on the lidar's own clock.
+    const double packet_frame_offset = packet_timestamp.diff_seconds(frame_start_time);
+
+    // De-skew rotation, resolved once per packet rather than 25 times. The
+    // blocks inside a packet span at most 255 us, far too short for the yaw
+    // rate to change, so the angle is carried across them linearly from the
+    // rate at the packet's own instant -- one interpolation plus a
+    // multiply-add per block.
+    ImuHistory::State at_packet{0.0, 0.0};
+    double packet_theta = 0.0;
+    if (deskew_enabled_)
+    {
+        bool covered = false;
+        at_packet = imu_.state_at(frame_start_ros + packet_frame_offset, &covered);
+        packet_theta = at_packet.theta - frame_start_theta;
+        if (!covered) compensated_ = false;
+    }
+
     for (int block_n = 0; block_n < NUM_DATA_BLOCKS; block_n++)
     {
         const lidar::MSOPDataBlock *block = &packet->blocks[block_n];
-        double block_frame_offset = base_block_frame_offset + ((double)(block->time_offset & 0x00111111)) * 1e-6;
-        accumulated_error_azimuth += angular_vel_z * (block_frame_offset - total_integrated_time);
-        total_integrated_time = block_frame_offset;
+        // time_offset is a uint8_t: microseconds of this block within the
+        // packet, 0-255. It used to be masked with 0x00111111, which against a
+        // byte reduces to 0x11 and leaves only the values {0, 1, 16, 17} -- a
+        // hex literal where a bit pattern was meant. The whole term is bounded
+        // by 255 us either way, so the bug was worth about 0.03 deg of de-skew
+        // at 2 rad/s; the full byte is the reading that makes physical sense,
+        // but confirm against the datasheet if the top bits are flags.
+        const double block_offset_s = static_cast<double>(block->time_offset) * 1e-6;
+        const float block_azimuth_fix =
+            static_cast<float>(packet_theta + at_packet.omega * block_offset_s);
 
 // Explicitly helping the compiler vectorize this loop
 #pragma GCC ivdep
@@ -103,7 +135,7 @@ std::unique_ptr<sensor_msgs::msg::PointCloud2> PointcloudBuilder::process_packet
 
             float elevation = (float)((src->elevation[0] << 8 | src->elevation[1]) - 32768) * ANG_RES;
             float azimuth = (float)((src->azimuth[0] << 8 | src->azimuth[1]) - 32768) * ANG_RES;
-            azimuth += accumulated_error_azimuth;
+            azimuth += block_azimuth_fix;
 
             // Using sincosf for Jetson hardware acceleration
             float s_el, c_el, s_az, c_az;
@@ -118,9 +150,9 @@ std::unique_ptr<sensor_msgs::msg::PointCloud2> PointcloudBuilder::process_packet
             p.z = radius * s_el;
             p.intensity = (float)src->intensity / 255.0f;
 
-            std::memcpy(write_ptr, &p, 16);
-            write_ptr += 16;
-            bytes_written += 16;
+            std::memcpy(write_ptr, &p, kPointSize);
+            write_ptr += kPointSize;
+            bytes_written += kPointSize;
         }
     }
 
@@ -134,7 +166,12 @@ std::unique_ptr<sensor_msgs::msg::PointCloud2> PointcloudBuilder::make_new_point
     msg->header.frame_id = frame_id;
     msg->header.stamp = stamp;
     msg->height = 1;
-    msg->point_step = 16;
+    msg->point_step = kPointSize;
+    msg->is_bigendian = false;
+    // Returns below 0.4 m are skipped rather than written as NaN, so the cloud
+    // holds no invalid points. Left false, every PCL consumer runs a
+    // removeNaNFromPointCloud pass over 78k points for nothing.
+    msg->is_dense = true;
     msg->fields.resize(4);
     const char *names[] = {"x", "y", "z", "intensity"};
     for (int i = 0; i < 4; i++)
@@ -145,6 +182,6 @@ std::unique_ptr<sensor_msgs::msg::PointCloud2> PointcloudBuilder::make_new_point
         msg->fields[i].count = 1;
     }
 
-    msg->data.reserve(max_seq_num * NUM_DATA_BLOCKS * NUM_CHANNELS * 16);
+    msg->data.reserve(max_seq_num * kBytesPerPacket);
     return msg;
 }

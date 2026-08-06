@@ -1,9 +1,11 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <ctime>
 #include <exception>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -16,9 +18,9 @@
 
 #include "imu_wrapper.hpp"
 #include "imu_pipeline.hpp"
+#include "stamp_estimator.hpp"
 
 #include <vectornav/Interface/Sensor.hpp>
-#include <vectornav/Interface/Registers.hpp>
 
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
@@ -26,24 +28,28 @@
 
 using namespace std::chrono_literals;
 
-/// VectorNav INS mode, as reported in insStatus.
-enum class InsMode
+namespace
 {
-    NotTracking, ///< no solution
-    Aligning,    ///< filter running but not yet converged with GNSS
-    Tracking,    ///< converged
-    GpsLoss      ///< was tracking, now dead reckoning
-};
+    /// Frame names. Constants rather than parameters because nothing in this
+    /// workspace has ever overridden them and the nodes on the other end of
+    /// these topics hard-code the same strings (mirena_lidar's "car/lidar",
+    /// mirena_perception's CAR_FRAME). Parameters that only ever take their
+    /// default are configuration in appearance only.
+    const mirena::IMU::Frames kFrames{"odom", "car/cog", "car/lidar", "car/gnss"};
+    constexpr const char *kImuFrame = "car/imu";
 
-/// Where a measurement's timestamp came from. Worth naming because a silent
-/// change of source is a silent jump in the clock of a 100 Hz sensor.
-enum class StampSource
-{
-    None,
-    GpsHardware,
-    SdkReception,
-    PublishTime
-};
+    /// VN-300 base IMU rate. Fixed by the hardware, not a choice.
+    constexpr int kBaseRateHz = 400;
+
+    constexpr auto kReconnectDelay = 1s;
+
+    /// GPS epoch (Jan 6 1980) as UNIX nanoseconds, and the leap seconds GPS
+    /// time does not count. Only used to report how far the host clock has
+    /// drifted; a stale leap count would move that report by a second and
+    /// change no stamp.
+    constexpr int64_t kGpsToUnixNs = 315'964'800LL * 1'000'000'000LL;
+    constexpr int64_t kLeapSecondsNs = 18LL * 1'000'000'000LL;
+} // namespace
 
 class ImuNode : public rclcpp::Node
 {
@@ -54,51 +60,28 @@ public:
           tf_buffer_(this->get_clock()),
           tf_listener_(tf_buffer_)
     {
-        // ---- Parameters (everything tunable is exposed here) ----
         imu_dev_path_ = this->declare_parameter<std::string>("imu_device", "/dev/ter_IMU");
+        imu_output_rate_hz_ = this->declare_parameter<int>("imu_output_rate_hz", 100);
 
-        // Antenna geometry (metres). Defaults match the legacy hard-coded values.
+        // Antenna geometry (metres). The only genuinely per-car settings here:
+        // they describe where the antennas are bolted, and the onboard filter
+        // is wrong without them.
         antenna_a_offset_ = this->declare_parameter<std::vector<double>>("antenna_a_offset", {-0.11, 0.0, 0.52});
         gnss_baseline_ = this->declare_parameter<std::vector<double>>("gnss_compass_baseline", {1.50, 0.0, -0.36});
         gnss_baseline_unc_ = this->declare_parameter<std::vector<double>>("gnss_compass_uncertainty", {0.04, 0.04, 0.04});
-
-        // GPS->UNIX leap-second offset (18 since Dec 2016). Exposed so it can be
-        // bumped without a rebuild if a future leap second is announced.
-        gps_leap_seconds_ns_ =
-            static_cast<int64_t>(this->declare_parameter<int>("gps_leap_seconds", 18)) * 1'000'000'000LL;
-
-        // Output rate: the binary message is streamed at base_rate / divisor.
-        // VN-300 base IMU rate is 400 Hz; VN-200/100 is 800 Hz.
-        imu_base_rate_hz_ = this->declare_parameter<int>("imu_base_rate_hz", 400);
-        imu_output_rate_hz_ = this->declare_parameter<int>("imu_output_rate_hz", 100);
-
-        reconnect_delay_s_ = this->declare_parameter<double>("reconnect_delay_sec", 1.0);
-
-        // QoS: IMU is high-rate sensor data, best-effort by default.
-        use_sensor_qos_ = this->declare_parameter<bool>("use_sensor_data_qos", true);
-        qos_depth_ = this->declare_parameter<int>("qos_depth", 10);
-
-        frames_.lidar = this->declare_parameter<std::string>("lidar_frame", "car/lidar");
-        frames_.odom = this->declare_parameter<std::string>("odom_frame", "odom");
-        frames_.cog = this->declare_parameter<std::string>("base_frame", "car/cog");
-        frames_.gnss = this->declare_parameter<std::string>("gnss_frame", "car/gnss");
-        imu_frame_ = this->declare_parameter<std::string>("imu_frame", "car/imu");
-
         if (antenna_a_offset_.size() != 3 || gnss_baseline_.size() != 3 || gnss_baseline_unc_.size() != 3)
         {
             RCLCPP_FATAL(get_logger(), "antenna_a_offset / gnss_compass_baseline / gnss_compass_uncertainty must each have 3 elements.");
             throw std::runtime_error("invalid antenna geometry parameters");
         }
 
-        rclcpp::QoS qos = use_sensor_qos_
-                              ? rclcpp::QoS(rclcpp::SensorDataQoS())
-                              : rclcpp::QoS(rclcpp::KeepLast(static_cast<size_t>(qos_depth_)));
-
-        RCLCPP_INFO(get_logger(), "Initializing IMU bridge on %s (output %d Hz)", imu_dev_path_.c_str(), imu_output_rate_hz_);
+        RCLCPP_INFO(get_logger(), "Initializing IMU bridge on %s (output %d Hz)",
+                    imu_dev_path_.c_str(), imu_output_rate_hz_);
 
         // Sensor-layer outputs only: raw IMU streams, the onboard INS solution
         // as odometry, and the GNSS fix. State fusion (/state/car) and health
         // reporting are the pipeline's job (mirena_state), not the driver's.
+        const rclcpp::QoS qos = rclcpp::SensorDataQoS();
         imu_in_lidar_pub_ = this->create_publisher<sensor_msgs::msg::Imu>("/sensors/lidar/imu", qos);
         imu_in_cog_pub_ = this->create_publisher<sensor_msgs::msg::Imu>("/sensors/imu", qos);
         odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("/sensors/imu/odom", qos);
@@ -126,25 +109,15 @@ public:
     }
 
 private:
-    // ---- Parameters ----
     std::string imu_dev_path_;
+    int imu_output_rate_hz_;
     std::vector<double> antenna_a_offset_;
     std::vector<double> gnss_baseline_;
     std::vector<double> gnss_baseline_unc_;
-    int64_t gps_leap_seconds_ns_;
-    int imu_base_rate_hz_;
-    int imu_output_rate_hz_;
-    double reconnect_delay_s_;
-    bool use_sensor_qos_;
-    int qos_depth_;
-    mirena::IMU::Frames frames_;
-    std::string imu_frame_;
-
-    // ---- State ----
-    StampSource stamp_source_ = StampSource::None;
 
     mirena::IMU::Wrapper imu_;
     mirena::IMU::Pipeline pipeline_;
+    mirena::IMU::StampEstimator stamp_estimator_;
 
     tf2_ros::Buffer tf_buffer_;
     tf2_ros::TransformListener tf_listener_;
@@ -168,76 +141,74 @@ private:
     std::thread publish_thread_;
     std::atomic<bool> keep_running_{false};
 
-    // ==========================================
-    // Hardware Timestamp (camera-style approach)
-    // ==========================================
+    /// The measurement instant, in the clock domain the rest of the stack uses.
+    ///
+    /// The sensor knows *when* far better than this process does: timeStartup
+    /// is stamped at the sample, inside the VN-300, before the serial link and
+    /// the SDK's reader thread add their 10 ms of jitter. What the sensor does
+    /// not know is ROS time. StampEstimator holds the two together.
     rclcpp::Time get_measurement_stamp(const VN::Sensor::CompositeDataQueueReturn &msg)
     {
-        // Priority 1: GPS hardware timestamp — absolute wall-clock (sub-µs accuracy)
-        if (msg->time.timeStatus.has_value() && msg->time.timeGps.has_value() &&
-            msg->time.timeStatus.value().towValid)
+        // Read first: this bounds when the sample was taken, and every
+        // microsecond spent before reading it is bias handed to the estimator.
+        const rclcpp::Time arrival = this->now();
+
+        if (!msg->time.timeStartup.has_value())
         {
-            // GPS epoch = Jan 6 1980 = 315,964,800 s after UNIX epoch.
-            // GPS time does not count leap seconds; subtract the configured offset.
-            constexpr int64_t GPS_TO_UNIX_NS = 315'964'800LL * 1'000'000'000LL;
-            const int64_t unix_ns = static_cast<int64_t>(msg->time.timeGps.value().nanoseconds()) +
-                                    GPS_TO_UNIX_NS - gps_leap_seconds_ns_;
-            note_stamp_source(StampSource::GpsHardware);
-            return rclcpp::Time(unix_ns, RCL_SYSTEM_TIME);
+            // Requested explicitly in BinaryOutput1, so its absence means the
+            // sensor is not streaming what it was configured to. Better to say
+            // so and drop the measurement than to quietly stamp it with a
+            // worse clock for the rest of the session.
+            throw std::runtime_error("measurement has no timeStartup");
         }
 
-        // Priority 2: SDK packet reception time — steady_clock → CLOCK_REALTIME offset
-        using tp = std::chrono::steady_clock::time_point;
-        if (msg->timestamp != tp{})
-        {
-            struct timespec ts_mono, ts_real;
-            clock_gettime(CLOCK_MONOTONIC, &ts_mono);
-            clock_gettime(CLOCK_REALTIME, &ts_real);
-            const int64_t mono_ns = static_cast<int64_t>(ts_mono.tv_sec) * 1'000'000'000LL + ts_mono.tv_nsec;
-            const int64_t real_ns = static_cast<int64_t>(ts_real.tv_sec) * 1'000'000'000LL + ts_real.tv_nsec;
-            const int64_t sdk_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                       msg->timestamp.time_since_epoch())
-                                       .count();
-            note_stamp_source(StampSource::SdkReception);
-            return rclcpp::Time(sdk_ns + (real_ns - mono_ns), RCL_SYSTEM_TIME);
-        }
-
-        note_stamp_source(StampSource::PublishTime);
-        return this->get_clock()->now();
+        return rclcpp::Time(
+            stamp_estimator_.stamp(static_cast<int64_t>(msg->time.timeStartup.value().nanoseconds()),
+                                   arrival.nanoseconds()),
+            arrival.get_clock_type());
     }
 
-    /// Log every *change* of timestamp source, not just the first one.
+    /// Report how far the host clock has drifted from GPS UTC.
     ///
-    /// This used to latch after the first measurement, so losing towValid
-    /// mid-session swapped GPS time for the host clock in silence. Those two
-    /// agree only if the host is disciplined to GPS; if it is not, every
-    /// stamp downstream steps by the difference with nothing in the log to
-    /// say why.
-    void note_stamp_source(StampSource source)
+    /// This is the number that used to leak into the stamps. It does not stop
+    /// existing just because they no longer carry it: it is still the offset
+    /// every bag has to be retimed by (tools/retime_bag.py) and the reason
+    /// absolute times in the logs cannot be trusted. Measured against
+    /// CLOCK_REALTIME rather than now() so it means the same thing under
+    /// use_sim_time, and reported rather than corrected -- the fix is gpsd +
+    /// chrony on the Jetson, not arithmetic in a driver.
+    void report_clock_skew(const VN::Sensor::CompositeDataQueueReturn &msg)
     {
-        if (source == stamp_source_)
+        if (!msg->time.timeGps.has_value() || !msg->time.timeStatus.has_value() ||
+            !msg->time.timeStatus.value().towValid)
         {
             return;
         }
-        const char *name = source == StampSource::GpsHardware  ? "GPS hardware time (sub-us)"
-                           : source == StampSource::SdkReception ? "SDK reception time (no GPS fix)"
-                                                                 : "publish time (no SDK timestamp)";
-        if (stamp_source_ == StampSource::None)
+
+        struct timespec ts_real;
+        clock_gettime(CLOCK_REALTIME, &ts_real);
+        const int64_t host_ns = static_cast<int64_t>(ts_real.tv_sec) * 1'000'000'000LL + ts_real.tv_nsec;
+        const int64_t gps_ns = static_cast<int64_t>(msg->time.timeGps.value().nanoseconds()) +
+                               kGpsToUnixNs - kLeapSecondsNs;
+        const double skew_s = static_cast<double>(host_ns - gps_ns) * 1e-9;
+
+        // 0.1 s is already an order of magnitude past what any time alignment
+        // in this stack tolerates.
+        if (std::abs(skew_s) > 0.1)
         {
-            RCLCPP_INFO(get_logger(), "IMU timestamp source: %s", name);
+            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 30000,
+                                 "Host clock is %.3f s %s GPS UTC. Stamps are in ROS time so the stack "
+                                 "stays consistent, but absolute times and bag arrival times carry this "
+                                 "error (discipline the clock with gpsd + chrony; retime existing bags).",
+                                 std::abs(skew_s), skew_s > 0 ? "ahead of" : "behind");
         }
-        else
-        {
-            RCLCPP_WARN(get_logger(), "IMU timestamp source CHANGED to %s — expect a step in the stamps.", name);
-        }
-        stamp_source_ = source;
     }
 
     /// Look the mounting geometry up once, at whatever time TF has it for.
     ///
     /// Deliberately TimePointZero rather than the measurement stamp: these are
-    /// static transforms, and asking for them at a GPS-derived wall-clock time
-    /// only invites a clock-domain mismatch with the buffer for no benefit.
+    /// static transforms, and asking for them at a specific time only invites a
+    /// mismatch with the buffer for no benefit.
     bool ensure_mounting()
     {
         if (have_mounting_)
@@ -246,9 +217,9 @@ private:
         }
         try
         {
-            tf2::fromMsg(tf_buffer_.lookupTransform(frames_.cog, imu_frame_, tf2::TimePointZero).transform,
+            tf2::fromMsg(tf_buffer_.lookupTransform(kFrames.cog, kImuFrame, tf2::TimePointZero).transform,
                          cog_from_imu_);
-            tf2::fromMsg(tf_buffer_.lookupTransform(frames_.lidar, imu_frame_, tf2::TimePointZero).transform,
+            tf2::fromMsg(tf_buffer_.lookupTransform(kFrames.lidar, kImuFrame, tf2::TimePointZero).transform,
                          lidar_from_imu_);
         }
         catch (const tf2::TransformException &e)
@@ -260,7 +231,7 @@ private:
 
         const tf2::Vector3 &arm = cog_from_imu_.getOrigin();
         RCLCPP_INFO(get_logger(), "Mounting geometry latched: IMU sits at (%.3f, %.3f, %.3f) in %s.",
-                    arm.x(), arm.y(), arm.z(), frames_.cog.c_str());
+                    arm.x(), arm.y(), arm.z(), kFrames.cog.c_str());
         have_mounting_ = true;
         return true;
     }
@@ -272,10 +243,10 @@ private:
             if (!imu_.is_connected())
             {
                 imu_.connect_and_config(imu_dev_path_.c_str(), antenna_a_offset_, gnss_baseline_,
-                                        gnss_baseline_unc_, compute_rate_divisor());
+                                        gnss_baseline_unc_, rate_divisor());
                 if (!imu_.is_connected())
                 {
-                    std::this_thread::sleep_for(std::chrono::duration<double>(reconnect_delay_s_));
+                    std::this_thread::sleep_for(kReconnectDelay);
                     continue;
                 }
             }
@@ -285,7 +256,10 @@ private:
             {
                 RCLCPP_ERROR(get_logger(), "IMU read timeout — assuming dead, disconnecting.");
                 imu_.disconnect();
-                stamp_source_ = StampSource::None; // re-log the source on the next session
+                // It may come back power-cycled, with timeStartup restarted at
+                // zero. The estimator detects that itself, but there is nothing
+                // worth keeping across a reconnect either way.
+                stamp_estimator_.reset();
                 continue;
             }
 
@@ -297,13 +271,14 @@ private:
             try
             {
                 const rclcpp::Time stamp = get_measurement_stamp(msg);
+                report_clock_skew(msg);
 
                 // Only a *converged* INS gets to speak. Aligning means the
                 // onboard filter has not agreed with GNSS yet, and mirena_state
                 // seeds its EKF from the first odometry it sees -- so accepting
                 // one of those pins the whole run's origin on a position the
                 // sensor itself does not stand behind.
-                const bool ins_active = read_mode(msg) == InsMode::Tracking;
+                const bool ins_active = ins_tracking(msg);
                 if (!ins_active)
                 {
                     RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000,
@@ -311,7 +286,7 @@ private:
                 }
 
                 mirena::IMU::Output out = pipeline_.process(
-                    frames_, stamp, msg, cog_from_imu_, lidar_from_imu_, ins_active);
+                    kFrames, stamp, msg, cog_from_imu_, lidar_from_imu_, ins_active);
 
                 imu_in_lidar_pub_->publish(out.lidar_imu);
                 imu_in_cog_pub_->publish(out.cog_imu);
@@ -332,38 +307,27 @@ private:
         }
     }
 
-    uint16_t compute_rate_divisor()
+    /// The binary message streams at kBaseRateHz / divisor.
+    uint16_t rate_divisor()
     {
         const int rate = std::max(1, imu_output_rate_hz_);
-        const int divisor = std::max(1, imu_base_rate_hz_ / rate);
-        const int actual = imu_base_rate_hz_ / divisor;
+        const int divisor = std::max(1, kBaseRateHz / rate);
+        const int actual = kBaseRateHz / divisor;
         if (actual != rate)
         {
             RCLCPP_WARN(get_logger(),
-                        "imu_output_rate_hz=%d does not divide imu_base_rate_hz=%d; streaming at %d Hz instead.",
-                        rate, imu_base_rate_hz_, actual);
+                        "imu_output_rate_hz=%d does not divide the %d Hz base rate; streaming at %d Hz instead.",
+                        rate, kBaseRateHz, actual);
         }
         return static_cast<uint16_t>(divisor);
     }
 
-    static InsMode read_mode(const VN::Sensor::CompositeDataQueueReturn &msg)
+    /// VectorNav INS mode 2 is "tracking"; 0, 1 and 3 are no solution,
+    /// aligning and dead reckoning after GPS loss. Nothing here needs to tell
+    /// those three apart -- none of them may publish odometry.
+    static bool ins_tracking(const VN::Sensor::CompositeDataQueueReturn &msg)
     {
-        if (!msg->ins.insStatus.has_value())
-        {
-            return InsMode::NotTracking;
-        }
-        // VectorNav INS mode field: 0=NotTracking, 1=Aligning, 2=Tracking, 3=GpsLoss
-        switch (msg->ins.insStatus.value().mode)
-        {
-        case 1:
-            return InsMode::Aligning;
-        case 2:
-            return InsMode::Tracking;
-        case 3:
-            return InsMode::GpsLoss;
-        default:
-            return InsMode::NotTracking;
-        }
+        return msg->ins.insStatus.has_value() && msg->ins.insStatus.value().mode == 2;
     }
 };
 

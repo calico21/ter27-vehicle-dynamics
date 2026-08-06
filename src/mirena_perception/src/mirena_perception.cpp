@@ -12,10 +12,12 @@
  * big cones on the start line are what the unknown-track planner uses to find
  * the start of the track.
  *
- * The pipeline is three steps, each doing one thing: Patchwork++ removes the
- * ground, PCL's Euclidean cluster extraction clusters what is left, and a
- * size-and-placement filter keeps the clusters that look like cones. All three
- * live in cone_detector.hpp; this file is the ROS shell around them.
+ * The detector is three ideas: the ground under a candidate is a plane fitted to
+ * a ring around it rather than through it, a cone is isolated, and the ground a
+ * cone stands on is smooth. They live in cone_detector.hpp, with no ROS in them,
+ * so the heuristics can be read and tuned without reading this file. This file is
+ * the ROS shell: subscriptions, TF, the EntityList, the debug clouds, the
+ * heartbeat.
  */
 
 #include <chrono>
@@ -49,7 +51,7 @@
 #define CLOUD_SUB_TOPIC "/sensors/lidar/points"
 #define ENTITY_LIST_PUB_TOPIC "/perception/cones"
 #define DEBUG_PC_PUB_TOPIC "/perception/debug/clustered_points"
-#define DEBUG_NONGROUND_PUB_TOPIC "/perception/debug/nonground_points"
+#define DEBUG_STANDING_PUB_TOPIC "/perception/debug/standing_points"
 #define HEALTH_PUB_TOPIC "health"
 
 #define CAR_FRAME "car/cog"
@@ -149,10 +151,10 @@ namespace
         point.b = static_cast<uint8_t>(96 + ((hash >> 16) & 0x7Fu));
     }
 
-    /// Builds an XYZRGB cloud of the labelled points, coloured by cluster. With
-    /// `cones_only` it carries just the points that survived the cone filter;
-    /// without it, the whole non-ground cloud, which is what shows whether ground
-    /// removal or the filter is the thing that needs tuning.
+    /// Builds an XYZRGB cloud of the labelled points, coloured per cone. With
+    /// `cones_only` it carries just the points that became cones; without it,
+    /// everything standing above the ground, which is what shows whether the
+    /// ground estimate or the cone tests need attention.
     sensor_msgs::msg::PointCloud2 build_debug_cloud(const mirena::ConeDetector::PointCloud &points,
                                                    const std::vector<int> &labels,
                                                    bool cones_only,
@@ -198,7 +200,7 @@ class MirenaPerception : public rclcpp::Node
 
     rclcpp::Publisher<mirena_common::msg::EntityList>::SharedPtr _cone_pub;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr _debug_cluster_pub;
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr _debug_nonground_pub;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr _debug_standing_pub;
     rclcpp::Publisher<mirena_common::msg::Heartbeat>::SharedPtr _report_pub;
     rclcpp::TimerBase::SharedPtr _report_timer;
 
@@ -214,8 +216,8 @@ class MirenaPerception : public rclcpp::Node
     uint64_t _dropped_no_transform = 0;
     int _cones_last_frame = 0;
     int _big_cones_last_frame = 0;
-    int _nonground_last_frame = 0;
-    double _ground_removal_ms = 0.0;
+    int _standing_last_frame = 0;
+    int _candidates = 0;
     mirena::ConeDetector::StageTimes _stage;
     double _total_ms = 0.0;
     rclcpp::Time _last_frame_at;
@@ -237,7 +239,7 @@ public:
 
         _cone_pub = this->create_publisher<mirena_common::msg::EntityList>(ENTITY_LIST_PUB_TOPIC, 10);
         _debug_cluster_pub = this->create_publisher<sensor_msgs::msg::PointCloud2>(DEBUG_PC_PUB_TOPIC, 1);
-        _debug_nonground_pub = this->create_publisher<sensor_msgs::msg::PointCloud2>(DEBUG_NONGROUND_PUB_TOPIC, 1);
+        _debug_standing_pub = this->create_publisher<sensor_msgs::msg::PointCloud2>(DEBUG_STANDING_PUB_TOPIC, 1);
 
         auto cloud_options = rclcpp::SubscriptionOptions();
         cloud_options.callback_group = _cloud_cb_group;
@@ -263,65 +265,34 @@ private:
         return qos;
     }
 
-    /// One of the two Concentric Zone Model vectors. Patchwork++ reads all four
-    /// entries of each whatever its num_zones says, so anything but four would be
-    /// read off the end of the vector; a wrong length keeps the default and says
-    /// so rather than taking the node down over a tuning parameter.
-    std::vector<int> declare_zone_param(const std::string &name, const std::vector<int> &fallback)
-    {
-        const std::vector<int64_t> wide(fallback.begin(), fallback.end());
-        const auto value = this->declare_parameter(name, wide);
-        if (value.size() != 4)
-        {
-            RCLCPP_ERROR(this->get_logger(),
-                         "%s needs exactly 4 entries, one per Patchwork++ zone, but got %zu; "
-                         "keeping the default", name.c_str(), value.size());
-            return fallback;
-        }
-        return std::vector<int>(value.begin(), value.end());
-    }
-
-    /// Declares every tuning knob, using the defaults in ConeDetectorParams as the
-    /// ROS defaults so the two cannot drift apart.
+    /// Declares every tuning knob, using the defaults in ConeDetectorParams as
+    /// the ROS defaults so the two cannot drift apart.
     mirena::ConeDetectorParams declare_detector_params()
     {
         mirena::ConeDetectorParams p;
-        p.sensor_height = this->declare_parameter("sensor_height", p.sensor_height);
-        p.ground_min_range = this->declare_parameter("ground_min_range", p.ground_min_range);
-        p.ground_max_range = this->declare_parameter("ground_max_range", p.ground_max_range);
-        p.remove_reflected_noise = this->declare_parameter("remove_reflected_noise", p.remove_reflected_noise);
-        p.rnr_intensity_thr = this->declare_parameter("rnr_intensity_thr", p.rnr_intensity_thr);
-        p.ground_num_min_pts = this->declare_parameter("ground_num_min_pts", p.ground_num_min_pts);
-        p.ground_thickness = this->declare_parameter("ground_thickness", p.ground_thickness);
-        p.ground_seed_margin = this->declare_parameter("ground_seed_margin", p.ground_seed_margin);
-        p.ground_num_lpr = this->declare_parameter("ground_num_lpr", p.ground_num_lpr);
-        p.ground_num_iter = this->declare_parameter("ground_num_iter", p.ground_num_iter);
-        p.ground_uprightness_thr = this->declare_parameter("ground_uprightness_thr", p.ground_uprightness_thr);
-        p.ground_vertical_plane_fit = this->declare_parameter("ground_vertical_plane_fit", p.ground_vertical_plane_fit);
-        p.ground_temporal_revert = this->declare_parameter("ground_temporal_revert", p.ground_temporal_revert);
-        p.ground_sectors_each_zone = declare_zone_param("ground_sectors_each_zone", p.ground_sectors_each_zone);
-        p.ground_rings_each_zone = declare_zone_param("ground_rings_each_zone", p.ground_rings_each_zone);
-        p.ground_cell_size = this->declare_parameter("ground_cell_size", p.ground_cell_size);
-        p.ground_max_deviation = this->declare_parameter("ground_max_deviation", p.ground_max_deviation);
-        p.min_elevation = this->declare_parameter("min_elevation", p.min_elevation);
-        p.max_elevation = this->declare_parameter("max_elevation", p.max_elevation);
+        p.coarse_cell = this->declare_parameter("coarse_cell", p.coarse_cell);
+        p.coarse_ring = this->declare_parameter("coarse_ring", p.coarse_ring);
+        p.candidate_height = this->declare_parameter("candidate_height", p.candidate_height);
+        p.peak_cell = this->declare_parameter("peak_cell", p.peak_cell);
+        p.peak_height = this->declare_parameter("peak_height", p.peak_height);
         p.ego_half_length = this->declare_parameter("ego_half_length", p.ego_half_length);
         p.ego_half_width = this->declare_parameter("ego_half_width", p.ego_half_width);
-        p.voxel_leaf = this->declare_parameter("voxel_leaf", p.voxel_leaf);
-        p.cluster_tolerance = this->declare_parameter("cluster_tolerance", p.cluster_tolerance);
-        p.max_width = this->declare_parameter("max_width", p.max_width);
-        p.min_height = this->declare_parameter("min_height", p.min_height);
-        p.max_height = this->declare_parameter("max_height", p.max_height);
+        p.ring_inner = this->declare_parameter("ring_inner", p.ring_inner);
+        p.ring_outer = this->declare_parameter("ring_outer", p.ring_outer);
+        p.ring_cell = this->declare_parameter("ring_cell", p.ring_cell);
+        p.min_top = this->declare_parameter("min_top", p.min_top);
+        p.max_top = this->declare_parameter("max_top", p.max_top);
+        p.core_radius = this->declare_parameter("core_radius", p.core_radius);
+        p.stand_height = this->declare_parameter("stand_height", p.stand_height);
+        p.max_footprint = this->declare_parameter("max_footprint", p.max_footprint);
+        p.min_points = this->declare_parameter("min_points", p.min_points);
+        p.max_roughness = this->declare_parameter("max_roughness", p.max_roughness);
+        p.max_ring_ratio = this->declare_parameter("max_ring_ratio", p.max_ring_ratio);
+        p.max_range = this->declare_parameter("max_range", p.max_range);
         p.big_cone_min_height = this->declare_parameter("big_cone_min_height", p.big_cone_min_height);
-        p.max_base_offset = this->declare_parameter("max_base_offset", p.max_base_offset);
-        p.min_cluster_points = this->declare_parameter("min_cluster_points", p.min_cluster_points);
-        p.max_cluster_points = this->declare_parameter("max_cluster_points", p.max_cluster_points);
-        p.expected_points_at_10m = this->declare_parameter("expected_points_at_10m", p.expected_points_at_10m);
-        p.expected_points_exponent = this->declare_parameter("expected_points_exponent", p.expected_points_exponent);
-        p.expected_points_min_ratio = this->declare_parameter("expected_points_min_ratio", p.expected_points_min_ratio);
-        p.min_expected_points = this->declare_parameter("min_expected_points", p.min_expected_points);
-        p.max_detection_range = this->declare_parameter("max_detection_range", p.max_detection_range);
-        p.max_lateral_offset = this->declare_parameter("max_lateral_offset", p.max_lateral_offset);
+        p.range_sigma = this->declare_parameter("range_sigma", p.range_sigma);
+        p.bearing_sigma = this->declare_parameter("bearing_sigma", p.bearing_sigma);
+        p.cluster_spread = this->declare_parameter("cluster_spread", p.cluster_spread);
         return p;
     }
 
@@ -382,8 +353,8 @@ private:
             {
                 _big_cones_last_frame += detection.big ? 1 : 0;
             }
-            _nonground_last_frame = static_cast<int>(_detector->nonground().size());
-            _ground_removal_ms = _detector->ground_removal_ms();
+            _standing_last_frame = static_cast<int>(_detector->standing().size());
+            _candidates = _detector->candidates();
             _stage = _detector->stage_times();
             _total_ms = _detector->total_ms();
             _last_frame_at = this->now();
@@ -413,16 +384,16 @@ private:
         // Everything downstream of ground removal lives in the car frame.
         header.frame_id = CAR_FRAME;
 
-        const auto &points = _detector->nonground();
+        const auto &points = _detector->standing();
         const auto &labels = _detector->labels();
 
         if (_debug_cluster_pub->get_subscription_count() > 0)
         {
             _debug_cluster_pub->publish(build_debug_cloud(points, labels, /*cones_only=*/true, header));
         }
-        if (_debug_nonground_pub->get_subscription_count() > 0)
+        if (_debug_standing_pub->get_subscription_count() > 0)
         {
-            _debug_nonground_pub->publish(build_debug_cloud(points, labels, /*cones_only=*/false, header));
+            _debug_standing_pub->publish(build_debug_cloud(points, labels, /*cones_only=*/false, header));
         }
     }
 
@@ -448,21 +419,19 @@ private:
             report["big_cones_last_frame"] = _big_cones_last_frame;
             report["seconds_since_frame"] = _has_frame ? since_frame : -1.0;
 
-            // How many points ground removal handed on. Near zero means
-            // sensor_height is wrong and the cones are being called ground; a large
-            // fraction of the sweep means the opposite.
-            report["nonground_last_frame"] = _nonground_last_frame;
-            report["ground_removal_ms"] = _ground_removal_ms;
+            // How many points stand above the coarse ground at all, and how many
+            // of those became candidates worth a proper look. Candidates against
+            // cones kept is the ratio that says whether the tests are still
+            // rejecting anything.
+            report["standing_last_frame"] = _standing_last_frame;
+            report["candidates_last_frame"] = _candidates;
             report["total_ms"] = _total_ms;
 
             // Which stage dominates moves with the scene, so the split is on the
             // wire rather than something to rebuild the node to find out.
             report["level_ms"] = _stage.level_ms;
-            report["patchwork_ms"] = _stage.patchwork_ms;
-            report["ground_map_ms"] = _stage.ground_map_ms;
-            report["band_ms"] = _stage.band_ms;
-            report["kdtree_ms"] = _stage.kdtree_ms;
-            report["cluster_ms"] = _stage.cluster_ms;
+            report["coarse_ms"] = _stage.coarse_ms;
+            report["peaks_ms"] = _stage.peaks_ms;
             report["accept_ms"] = _stage.accept_ms;
             report["dropped_no_transform"] = _dropped_no_transform;
         }

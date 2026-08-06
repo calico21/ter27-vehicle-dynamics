@@ -1,9 +1,9 @@
-cmake_minimum_required(VERSION 3.18)  # FetchContent SOURCE_SUBDIR
+cmake_minimum_required(VERSION 3.16)
 project(mirena_perception)
 
-# Patchwork++ and PCL are both heavily templated and both run per cloud at
-# sensor rate. An unoptimised build does not keep up, so default to Release
-# rather than inheriting CMake's empty build type.
+# The detector runs per cloud at sensor rate and is templated Eigen throughout.
+# An unoptimised build does not keep up, so default to Release rather than
+# inheriting CMake's empty build type.
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
@@ -22,24 +22,11 @@ find_package(tf2_eigen REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(mirena_common REQUIRED)
 
-# Only the components this node actually uses: pulling in all of PCL would drag
-# in visualization and its VTK dependency for nothing.
-find_package(PCL 1.12 REQUIRED COMPONENTS common kdtree search segmentation)
+# Only what the debug clouds need. The detector itself is Eigen and a grid; it
+# has no k-d tree, no voxel grid and no clustering, so PCL is down to `common`
+# and the conversion helpers, and nothing is vendored at configure time.
+find_package(PCL 1.12 REQUIRED COMPONENTS common)
 find_package(pcl_conversions REQUIRED)
-
-# Patchwork++ has no package anywhere, and it is one static library's worth of
-# source, so it is vendored at configure time. Pinned to a release tag: the
-# ground segmentation is the part of this node whose behaviour must not change
-# under us between builds.
-include(FetchContent)
-set(USE_SYSTEM_EIGEN3 ON CACHE BOOL "Patchwork++ shares our Eigen" FORCE)
-FetchContent_Declare(patchworkpp
-  GIT_REPOSITORY https://github.com/url-kaist/patchwork-plusplus.git
-  GIT_TAG v1.4.1
-  GIT_SHALLOW TRUE
-  SOURCE_SUBDIR cpp
-)
-FetchContent_MakeAvailable(patchworkpp)
 
 add_executable(mirena_perception
   src/mirena_perception.cpp
@@ -71,10 +58,7 @@ ament_target_dependencies(mirena_perception
   mirena_common
 )
 
-target_link_libraries(mirena_perception
-  patchworkpp::ground_seg_cores
-  ${PCL_LIBRARIES}
-)
+target_link_libraries(mirena_perception ${PCL_LIBRARIES})
 
 install(TARGETS mirena_perception DESTINATION lib/${PROJECT_NAME})
 

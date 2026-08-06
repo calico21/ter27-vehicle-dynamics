@@ -108,18 +108,20 @@ class UDPListener
             //std::cout << "readin" << std::endl;
             if (result < 0)
             {
-                std::cout << "errn: " << errno << std::endl;
-                // Check for fatal errors that indicate the socket is dead
+                // No printing from here. This runs once per packet -- thousands
+                // of times a second -- and the two std::cout traces that used to
+                // live here ("errn: <n>" on every EAGAIN and "muerlto" on socket
+                // death) went to stdout rather than the ROS log, so they were
+                // invisible in a launch and unbounded in a terminal. The caller
+                // learns what it needs from the return value and is_open().
                 if (errno == EBADF ||      // Socket descriptor is invalid
                     errno == ENOTSOCK ||   // FD doesn't reference a socket
                     errno == EINVAL ||     // Invalid arguments (socket might be corrupted)
                     errno == ENOTCONN)     // Socket not connected (UDP normally doesn't get this, but handle anyway)
                 {
                     close_sock();  // This sets _open = false and closes the FD
-                    std::cout << "muerlto" << std::endl;
-                    
                 }
-                // For EAGAIN/EWOULDBLOCK (no data available), EINTR (interrupted), 
+                // For EAGAIN/EWOULDBLOCK (no data available), EINTR (interrupted),
                 // or other transient errors, keep the socket open
                 return -1;
             }

@@ -137,12 +137,11 @@ class MirenaMapping : public rclcpp::Node
     std::mutex _slam_mutex;
     std::unique_ptr<mirena::Slam> _slam;
     gtsam::Pose2 _last_keyframe_raw_odom;
+    /// Stamp of the last keyframe, from the /state/car header rather than the
+    /// wall clock: make_odometry_noise integrates the estimator's velocity
+    /// uncertainty over this interval.
     rclcpp::Time _last_keyframe_time;
     bool _is_initialized = false;
-
-    // Absolute pose covariance at the last keyframe, used to derive the
-    // *relative* covariance of the next odometry delta.
-    double _last_kf_cov[3] = {0.0, 0.0, 0.0};
 
 public:
     MirenaMapping() : rclcpp::Node("mirena_mapping") {
@@ -234,10 +233,7 @@ private:
         if (!_is_initialized) {
             _slam = std::make_unique<mirena::Slam>(current_raw);
             _last_keyframe_raw_odom = current_raw;
-            _last_kf_cov[0] = car_msg->covariance[0];
-            _last_kf_cov[1] = car_msg->covariance[7];
-            _last_kf_cov[2] = car_msg->covariance[14];
-            _last_keyframe_time = this->now();
+            _last_keyframe_time = car_msg->header.stamp;
             _is_initialized = true;
             RCLCPP_INFO(this->get_logger(), "SLAM Engine Initialized at (%.2f, %.2f)", car_msg->x, car_msg->y);
             publish_snapshot(car_msg->header.stamp);
@@ -270,14 +266,18 @@ private:
         // Standing still is a state to keep observing, not one to fall silent
         // in: the cones in front of the car are still being seen, and the graph
         // should keep taking them.
-        const bool overdue =
-            (this->now() - _last_keyframe_time).seconds() >= KEYFRAME_MAX_INTERVAL_S;
+        // Measured against the message stamps, not now(): the interval is a
+        // property of the data, and it is what the odometry noise below
+        // integrates over. Mixing a wall reading into that would make the
+        // factor weights depend on how busy this node happened to be.
+        const double interval_s = (car_stamp - _last_keyframe_time).seconds();
+        const bool overdue = interval_s >= KEYFRAME_MAX_INTERVAL_S;
         if (first_keyframe || overdue || delta.translation().norm() >= DIST_THRESH ||
             std::abs(delta.theta()) >= ANGLE_THRESH)
         {
-            _slam->add_keyframe(make_odometry_noise(*car_msg, delta), sink);
+            _slam->add_keyframe(make_odometry_noise(*car_msg, delta, interval_s), sink);
             _last_keyframe_raw_odom = current_raw;
-            _last_keyframe_time = this->now();
+            _last_keyframe_time = car_stamp;
 
             {
                 std::lock_guard<std::mutex> lock(_report_mutex);
@@ -305,36 +305,54 @@ private:
 
     /// Noise for the odometry *delta*, not for the absolute pose.
     ///
-    /// The message carries the covariance of the absolute pose in odom, which
-    /// grows monotonically as the car drives; feeding it straight into a
-    /// BetweenFactor made the odometry weaker and weaker for no physical reason,
-    /// and the old 0.5 m^2 floor meant a 0.5 m keyframe step was constrained by
-    /// a sigma of 0.71 m -- effectively no constraint at all. What a relative
-    /// factor deserves is the growth since the last keyframe, floored by a motion
-    /// model so a reset or an over-confident estimator cannot lock the graph.
+    /// This used to difference the absolute position covariance across the
+    /// keyframe interval. That cannot work: a converged filter's absolute
+    /// covariance is flat -- measured at 0.173 m sigma, varying by under a
+    /// millimetre between keyframes -- so the difference was always ~0 and the
+    /// message covariance never once influenced a factor. Every odometry
+    /// constraint in the graph came from the motion model below, silently.
+    ///
+    /// What a relative factor actually deserves is the uncertainty accumulated
+    /// by integrating the estimator's *velocity* over the interval. Velocity
+    /// error out of an INS is bias-like over these timescales, so it integrates
+    /// as sigma_v * dt rather than sqrt(dt), and unlike the absolute position
+    /// covariance it does grow when the estimator loses its corrections.
+    ///
+    /// The motion model stays as a floor and still governs normal driving: it
+    /// covers scale and lever-arm error the filter does not model, and it stops
+    /// an over-confident estimator from locking the graph. Replayed over
+    /// rosbag2_2026_08_05-20_26_23 (2780 keyframes) the median is unchanged at
+    /// 0.030 m and the velocity term overrides the model on 2.0% of keyframes --
+    /// the INS dropouts, where sigma_u rises from 0.12 to 0.88 m/s and this
+    /// factor loosens to 0.071 m, 2.4x the model. That is the whole intent: no
+    /// change when the odometry is healthy, a real loosening when it is not.
+    ///
+    /// Note this moves the position term only. sigma_omega out of the filter is
+    /// ~0.01 rad/s, so over a 0.07 s keyframe the heading drift term is 0.0007
+    /// rad against the model's 0.012, and heading stays motion-model governed on
+    /// every keyframe in that bag. If the heading weight ever needs to respond
+    /// to filter confidence, gyro_meas_var in mirena_state is what sets it.
+    ///
     /// Caller must hold _slam_mutex.
     gtsam::SharedNoiseModel make_odometry_noise(const mirena_common::msg::Car &car,
-                                                const gtsam::Pose2 &delta)
+                                                const gtsam::Pose2 &delta,
+                                                double interval_s)
     {
-        const double cov_now[3] = {car.covariance[0], car.covariance[7], car.covariance[14]};
+        // Car covariance is row-major 6x6 over [x, y, psi, u, v, omega], so the
+        // velocity block sits on the diagonal at 21, 28 and 35.
+        const double dt = std::clamp(interval_s, 0.0, KEYFRAME_MAX_INTERVAL_S);
+        const double drift_x = std::sqrt(std::max(0.0, car.covariance[21])) * dt;
+        const double drift_y = std::sqrt(std::max(0.0, car.covariance[28])) * dt;
+        const double drift_th = std::sqrt(std::max(0.0, car.covariance[35])) * dt;
 
         const double dist = delta.translation().norm();
         const double turn = std::abs(delta.theta());
         const double model_xy = 0.05 * dist + 0.10 * turn;
         const double model_th = 0.02 * dist + 0.05 * turn;
 
-        auto sigma_from = [](double increment, double model, double floor) {
-            const double from_msg = increment > 0.0 ? std::sqrt(increment) : 0.0;
-            return std::max({from_msg, model, floor});
-        };
-
-        const double sx = sigma_from(cov_now[0] - _last_kf_cov[0], model_xy, 0.02);
-        const double sy = sigma_from(cov_now[1] - _last_kf_cov[1], model_xy, 0.02);
-        const double st = sigma_from(cov_now[2] - _last_kf_cov[2], model_th, 0.005);
-
-        _last_kf_cov[0] = cov_now[0];
-        _last_kf_cov[1] = cov_now[1];
-        _last_kf_cov[2] = cov_now[2];
+        const double sx = std::max({drift_x, model_xy, 0.02});
+        const double sy = std::max({drift_y, model_xy, 0.02});
+        const double st = std::max({drift_th, model_th, 0.005});
 
         return gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector3(sx, sy, st));
     }

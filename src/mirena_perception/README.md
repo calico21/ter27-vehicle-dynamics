@@ -1,23 +1,50 @@
 # mirena_perception
 
-Colourless cone detection from the LiDAR alone. The cloud is levelled, Patchwork++
-takes the ground out, what is left is cut down to the band of heights a cone can
-occupy, PCL's Euclidean cluster extraction clusters it, and a size-and-placement
-filter keeps the clusters shaped like Formula Student cones. Every height is
-measured against a ground map built from that same frame, not against a plane.
+Colourless cone detection from the LiDAR alone.
 
-Written as a drop-in replacement for `mirena_perception`: same input cloud, same
-`/perception/cones`, same heartbeat. Swap them by changing which package the
-mission launch file names.
+The car does not read cone colour. What survives is *size*, because that is
+geometry too: a blob tall enough to be a big orange cone comes out as
+`cone_big_orange` and everything else as `unknown_cone`. That single distinction
+is load bearing — the four big cones on the start line are what the unknown-track
+planner roots the track on.
 
-```python
-Node(
-    package='mirena_perception',
-    executable='mirena_perception',
-    name='mirena_perception',
-    parameters=[{'use_sim_time': use_sim_time}],
-),
-```
+## How it works
+
+Three ideas, and the detector is those three.
+
+**The ground under a candidate is fitted around it, never through it.** A plane
+is fitted to the lowest point per cell in a ring from 0.55 to 2.6 m, with the
+candidate itself outside the ring. Every height is then measured against that
+plane.
+
+This is the part worth understanding, because the obvious alternative quietly
+destroys the measurement. Fit a plane through the patch a cone stands in — which
+is what any ground-segmentation algorithm does — and the cone's own base falls
+inside the plane's thickness and is classified as ground. Measured on this
+sensor, that costs a cone at 3 m two thirds of its points and leaves only the
+tip, so a 0.325 m cone reports 0.21 m. At that point "height above ground" no
+longer separates a cone from a bump in the asphalt, and no amount of tuning
+downstream will recover it. Fitted around the cone instead, nothing the cone does
+can move its own reference: the same cones measure 0.32–0.34 m.
+
+**A cone is isolated.** What fools a size-and-height test is not usually a
+cone-shaped object; it is a piece of something larger — rough ground, gravel,
+vegetation, a bank — which any clustering with a fixed radius chops into
+cone-sized pieces. The giveaway is the surroundings: count the points standing up
+in a ring from 0.45 to 1.1 m, relative to the candidate's own. On all 34
+hand-labelled cones that ratio is zero.
+
+**The ground a cone stands on is smooth.** The standard deviation of the plane
+fit's residual is 0.5–1.7 cm under a real cone and 3.3–8.9 cm under the rough
+stuff, which separates the two populations almost on its own.
+
+Candidates are local maxima on a 0.25 m grid, not connected components. At 5–8 m
+the ground itself sits a few centimetres above a coarse minimum, so growing a
+cluster by connectivity swallows the cone into that field and then rejects the
+whole thing for being too wide. A peak cannot be swallowed.
+
+There is no ground/non-ground classifier, no voxel grid, no k-d tree, no
+Euclidean clustering and no return-count model.
 
 ## Interface
 
@@ -26,112 +53,83 @@ Node(
 | in | `/sensors/lidar/points` | `sensor_msgs/PointCloud2` |
 | out | `/perception/cones` | `mirena_common/EntityList` in `car/cog` |
 | out | `health` | `mirena_common/Heartbeat` at 10 Hz |
-| debug | `/perception/debug/clustered_points` | accepted cone points, coloured per cone |
-| debug | `/perception/debug/nonground_points` | all non-ground points; grey means rejected |
+| debug | `/perception/debug/clustered_points` | points that became cones, coloured per cone |
+| debug | `/perception/debug/standing_points` | everything standing above the ground; grey means rejected |
 
-Both debug topics are published only when something is subscribed, and only when
+Both debug topics are published only when something is subscribed and
 `enable_debug` is true.
 
-### Differences from `mirena_perception`
+Detections carry a 2×2 position covariance, anisotropic and range-dependent:
+along the beam a LiDAR measures a range directly, across it there is only the
+pointing angle, so that error grows with distance. The numbers are measured
+rather than assumed — repeat observations of the same cone land within 0.33 m of
+each other, 0.56 m at the 90th percentile — and reporting them honestly is what
+lets SLAM stop treating a cone at 25 m like one at 3 m.
 
-- **No colour.** Every cone comes out as `unknown_cone` with confidence `1.0`. A
-  cluster either passes the geometric filter or is dropped, so there is no graded
-  score to report, and SLAM's colour vote has nothing to accumulate. Planning
-  that relies on left/right colour will not work off this node alone.
-- **No camera.** Neither `/sensors/camera/*` nor a GPU is touched, so there is no
-  time synchroniser and nothing to wait for at startup.
-- **The sensor's field of view, not the camera's.** Whatever the LiDAR sees, out
-  to `ground_max_range`, is a candidate. On the RoboSense M1 that is the forward
-  120° × 25°, so this is not a 360° detector; on a spinning sensor it would be.
-  Either way there is a near blind spot: a sensor at height `h` tilted down by
-  `t` degrees first sees the track surface at about `h / tan(t + half the
-  vertical FOV)`, roughly 2.5 m for the M1 as mounted.
-- Debug clouds are in `car/cog`, not the LiDAR frame, because that is where
-  everything downstream of ground removal happens.
+Colour is never measured, so `confidence` is always `1.0`: a blob either passes
+the tests or is dropped, and there is no graded score to invent.
+
+## Ground truth
+
+The thresholds are not guesses. Two LiDAR frames from
+`rosbag2_2026_08_05-20_26_23`, at t = 20 s and t = 90 s, were hand-labelled cone
+by cone from the raw points — 34 cones between them. Against those labels:
+
+| | published | real cones | precision | recall |
+| --- | --- | --- | --- | --- |
+| this detector | 30 | 30 | 100% | 30/34 |
+
+Every cone inside 20 m was found. The four misses are all beyond 21 m, where a
+cone is a handful of returns.
+
+Re-measure this when the sensor or its mounting changes, and re-label rather than
+re-tune by eye: the failure mode of a geometric detector is that a threshold
+stops discriminating without ever failing loudly.
 
 ## Parameters
 
-The two that have to match the real car:
+The two to check first:
 
 | Parameter | Default | |
 | --- | --- | --- |
-| `sensor_height` | `1.0` | LiDAR height above the track, in metres. Patchwork++ measures every elevation against it. Getting it wrong is the first thing to check when nothing is detected. |
-| `ground_max_range` | `50.0` | Detection radius. Patchwork++ *discards* points outside `[ground_min_range, ground_max_range]` rather than calling them non-ground, so this band is the node's field of view. |
+| `max_range` | `30.0` | Furthest a cone is claimed, metres. |
+| `ego_half_length` / `ego_half_width` | `2.0` / `1.2` | Half-extents of the box that is the car looking at itself. On a hoop-mounted sensor that is a large permanent slab at cone height; nothing is lost by cutting it, because the sensor cannot see the track that close anyway. |
 
-Ground removal: `ground_min_range` (`0.5`), `remove_reflected_noise` (`true`,
-needs an intensity channel and is skipped without one), `rnr_intensity_thr`
-(`0.2`). That last one is in whatever units the driver publishes intensity in:
-drivers disagree. The RoboSense driver here normalises to `[0, 1]`, which is what
-Patchwork++'s default assumes; others report `0-255`. Check yours before changing
-it — set too high, it stops being a noise filter and simply deletes every
-steeply-downward point, which is the whole near field.
+The two that do the discriminating, and the ones to reach for if the detector is
+either flooding or going quiet:
 
-Patchwork++'s own knobs, all at its defaults except the sector counts:
-`ground_num_min_pts` (`10`), `ground_thickness` (`0.125`), `ground_seed_margin`
-(`0.125`), `ground_num_lpr` (`20`), `ground_num_iter` (`3`),
-`ground_uprightness_thr` (`0.707`), `ground_vertical_plane_fit` (`true`),
-`ground_temporal_revert` (`true`), `ground_sectors_each_zone`
-(`[48, 96, 162, 96]`) and `ground_rings_each_zone` (`[2, 4, 4, 4]`).
+| Parameter | Default | |
+| --- | --- | --- |
+| `max_roughness` | `0.045` | How rough the ground around a candidate may be, as the plane fit's residual in metres. Lower it if rough ground is being reported as cones. |
+| `max_ring_ratio` | `1.2` | How much of the ring around a candidate may also be standing up, relative to the candidate itself. Same lever, from the other direction. |
 
-`ground_num_min_pts` is the one to reach for when ground survives into the
-detections: a patch holding fewer points than this is not fitted at all, and
-Patchwork++ hands the whole patch on as non-ground. `ground_thickness` is how far
-a point may sit off its patch plane and still be ground. The two zone vectors
-must have exactly four entries, innermost zone first, because Patchwork++ indexes
-all four regardless of what its `num_zones` says; a wrong length is logged and
-ignored. Sectors divide the full circle, so a narrow field of view does not make
-them coarser, it just leaves most of them empty — the counts here are finer than
-upstream's `[16, 32, 54, 32]` because those were drawn for a 64-beam spinning
-sensor and a 0.2° one puts enough points in a third of the area.
+Shape, all measured against the fitted local plane: `min_top` (`0.18`),
+`max_top` (`0.58`), `core_radius` (`0.32`), `stand_height` (`0.10`),
+`max_footprint` (`0.55`), `min_points` (`2`), `big_cone_min_height` (`0.40`).
+The defaults bracket both cone sizes — small 228 × 228 × 325 mm, big orange
+285 × 285 × 505 mm — with margin for how sparsely a LiDAR samples them.
+`big_cone_min_height` sits nearer the small cone than halfway on purpose: a blob
+is the part of a cone the sensor happened to catch, and its top under-reads the
+real apex far more often than it over-reads it.
 
-Track surface: `ground_cell_size` (`1.0`). Heights are measured against a map
-built each frame from the points Patchwork++ called ground, cell by cell, rather
-than against one flat plane. Where a cell has no ground return at all — the
-shadow behind a barrier, a stretch the vertical field of view skips — it
-extrapolates along the nearest patch plane Patchwork++ fitted, from
-`getCenters()` and `getNormals()`, so the local slope is carried rather than
-assumed flat. See [Mounting](#mounting) for why that matters.
+Candidate finding, which only decides what is worth a proper look: `coarse_cell`
+(`0.40`), `coarse_ring` (`1.20`), `candidate_height` (`0.08`), `peak_cell`
+(`0.25`), `peak_height` (`0.15`). The ground plane: `ring_inner` (`0.55`),
+`ring_outer` (`2.60`), `ring_cell` (`0.40`).
 
-Elevation band and ego box, applied per point before clustering: `min_elevation`
-(`0.05`), `max_elevation` (`1.00`), `ego_half_length` (`1.8`), `ego_half_width`
-(`1.0`). The floor is what removes below-floor multipath and the ground patches
-ground removal leaves behind; both would otherwise cluster into perfectly
-cone-shaped detections. The ceiling has to stay above `max_height`, and that is
-what keeps it safe: anything reaching it is by definition taller than a cone, so
-a barrier is still rejected as too tall rather than cut down into something
-cone-sized. The ego box is the car looking at itself, which on a hoop-mounted
-sensor is a large permanent slab at cone height a few tens of centimetres away —
-half the surviving cloud on the test bag.
+How well a cone is located: `range_sigma` (`0.08`), `bearing_sigma` (`0.010`),
+`cluster_spread` (`0.30`). Under-reporting these is not a cosmetic error — a
+gate built from covariances four times too tight rejects its own landmarks and
+spawns a duplicate beside every real cone.
 
-Clustering: `voxel_leaf` (`0.05`), `cluster_tolerance` (`0.30`). Two points join
-the same cluster when they sit within `cluster_tolerance` of each other, so it
-has to exceed the vertical ring spacing on a cone at `ground_max_range`, or a far
-cone breaks into one cluster per ring. `voxel_leaf` downsamples before clustering
-and is the single biggest lever on frame time — see
-[Performance](#performance). It also means `min_cluster_points` and
-`max_cluster_points` count voxels rather than returns.
+Plus `enable_debug` (`true`).
 
-Cone acceptance, all bounds on a cluster's axis-aligned box in the car frame with
-heights measured from the track surface: `max_width` (`0.50`), `min_height`
-(`0.02`), `max_height` (`0.65`), `max_base_offset` (`0.25`),
-`min_cluster_points` (`2`), `max_cluster_points` (`400`), `max_lateral_offset`
-(`10.0`). Defaults bracket both cone sizes -- small 228 × 228 × 325 mm, big
-orange 285 × 285 × 505 mm -- with margin for how sparsely a LiDAR samples them.
-`min_cluster_points` and `max_cluster_points` are handed to the extraction rather
-than applied afterwards, so a wall is never accumulated only to be thrown away.
-
-Note that `min_height` is nearly zero on purpose. Past ten metres or so a cone is
-caught by a single scan ring, which has no measurable height at all, so a real
-height floor would throw away exactly the far detections that matter most.
-
-Plus `enable_debug` (`true`), shared with `mirena_perception`.
-
-The heartbeat report carries `status_state`, `frames_processed`,
-`cones_last_frame` and `seconds_since_frame` under the same names
-`mirena_perception` uses, and adds `nonground_last_frame`, `ground_removal_ms`,
-`total_ms` and `dropped_no_transform`. `nonground_last_frame` is the one to watch
-while tuning: near zero means `sensor_height` is off and the cones are being
-called ground, and a large fraction of the sweep means the opposite.
+The heartbeat carries `status_state`, `frames_processed`, `cones_last_frame` and
+`seconds_since_frame`, and adds `standing_last_frame`, `candidates_last_frame`,
+`total_ms`, the per-stage split (`level_ms`, `coarse_ms`, `peaks_ms`,
+`accept_ms`) and `dropped_no_transform`. **Candidates against cones kept is the
+number to watch**: around 230 candidates for 18 cones is healthy, and a ratio
+collapsing towards 1 means the tests have stopped rejecting anything.
 
 ## Building
 
@@ -139,102 +137,57 @@ called ground, and a large fraction of the sweep means the opposite.
 colcon build --packages-select mirena_perception
 ```
 
-Nothing has to be installed by hand. Patchwork++ is vendored by CMake at
-configure time (pinned to `v1.4.1`), and PCL comes from apt — `libpcl-dev` and
-`ros-jazzy-pcl-conversions`, both added to `docker/Dockerfile.one`, so the
-devcontainer already has them. Only the `common`, `kdtree`, `search` and
-`segmentation` components are asked for; pulling in all of PCL would drag in
-visualization and VTK for nothing.
-
-Configuring prints a CMake dev warning about `FLANN_ROOT` and policy CMP0144.
-That comes out of PCL's own `FindFLANN.cmake`, not this package.
-
-This used to be an Open3D dependency, for the single `ClusterDBSCAN` call.
-Open3D publishes binary devel releases for x86_64 and macOS only, so on the
-Jetson it meant a ~30 min source build of a library used for one function. PCL's
-`EuclideanClusterExtraction` is the same grouping for this data — with
-`min_cluster_points` at 2 and a fixed radius, DBSCAN's core-point rule and
-single-link connectivity agree — and it is already on the image.
+Nothing is vendored and nothing is fetched at configure time. PCL comes from apt
+— `libpcl-dev` and `ros-jazzy-pcl-conversions`, both in `docker/Dockerfile.one` —
+and only its `common` component is asked for, because PCL is used for the debug
+clouds and nothing else. The detector itself is Eigen and a grid.
 
 ## Mounting
 
-Ground removal runs on a levelled cloud: the car-from-LiDAR rotation is applied
-before Patchwork++ and only the translation after. Patchwork++ wants a sensor
-whose z is up. It cuts the cloud into concentric rings and gates each fitted
-patch on how far its elevation sits from `-sensor_height`, with a ground
-thickness of ~12 cm, so a mount tilted by `t` degrees makes the ground's z climb
-by `range × tan(t)` — metres, across the ring widths it uses. The far patches
-then fail the gate and the track surface is handed on as non-ground.
+The car-from-LiDAR transform is looked up per cloud and applied whole, so a
+tilted mount is handled by the extrinsic being right rather than by anything
+here. What protects against the extrinsic being *slightly* wrong is that no
+height is ever measured against a global plane: every one is measured against a
+plane fitted within 2.6 m of the cone it belongs to, so an unmodelled degree of
+pitch — 17 cm at 10 m against a global plane — becomes a few millimetres.
 
-That fixes the tilt the extrinsic knows about. The tilt it does *not* know about
-is why heights are measured against a per-cell ground map instead of a plane: one
-unmodelled degree puts a flat plane 17 cm out at 10 m, which is most of a cone,
-and `max_base_offset` is a 25 cm test. With the map, a wrong mount angle or a
-sloping site costs accuracy in the reported position rather than every detection.
+To check the extrinsic, fit a plane to the ground returns in the car frame over a
+run in which the car changes heading: a mount error is a constant pitch with
+near-zero roll, while a sloping site swings with heading and shows up in roll.
 
-Both are worth having, but neither is a substitute for the extrinsic being right.
-To check it, fit a plane to the ground returns in the car frame over a run in
-which the car changes heading: a mount error is a constant pitch with near-zero
-roll, while a sloping site swings with heading and shows up in roll too.
+There is a near blind spot no software can fix: a sensor at height `h` tilted
+down by `t` degrees first sees the track at about `h / tan(t + half the vertical
+FOV)`, roughly 2.5 m as mounted.
 
 ## Performance
 
-About 28-50 ms per cloud on an Orin NX, against the 100 ms a 10 Hz sensor gives
-you. The heartbeat carries the split — `level_ms`, `patchwork_ms`,
-`ground_map_ms`, `band_ms`, `kdtree_ms`, `cluster_ms`, `accept_ms` — because
-which stage dominates moves with the scene and with the leaf size. On the test
-bag, at defaults:
+7.7 ms per cloud at the median, 11.5 ms at p90, 16.5 ms worst case, on ~66 k
+points. A 9.4 Hz sensor gives 106 ms.
 
-| stage | mean | p90 |
+| stage | p50 | p90 |
 | --- | --- | --- |
-| `patchwork_ms` | 14.9 | 15.9 |
-| `cluster_ms` | 11.0 | 16.9 |
-| everything else | <2 | <3 |
-| **total** | **27.9** | **34.0** |
+| `accept_ms` — one look per candidate | 5.5 | 8.5 |
+| `peaks_ms` | 1.6 | 2.1 |
+| `coarse_ms` | 0.6 | 0.7 |
+| `level_ms` | 0.2 | 0.4 |
+| **total** | **7.7** | **11.5** |
 
-The subscription is best-effort with a shallow queue, so what does not get
-serviced is dropped rather than queued and detections never go stale.
+**The cost scales with candidates, not with point density.** That is deliberate.
+Any design built on per-point neighbour searches pays for how close the points
+are to each other, and a 0.2° sensor puts returns about a centimetre apart at
+3 m — thousands inside a 30 cm radius. Here there is one linear pass to build the
+grid and then a bounded number of candidates, each costing one bucketed ring
+query, so the worst case is set by geometry rather than by how cluttered the
+scene is. A bucket index over the working cloud is what keeps the ring query to a
+few dozen buckets instead of a pass over the sweep.
 
-**Density, not point count, is what costs.** Clustering does one radius search
-per point and pays for every neighbour each one returns, so it scales with how
-close together the points are. A 0.2° sensor puts returns about a centimetre
-apart at 3 m, which is thousands inside a 30 cm radius. Downsampling to a 5 cm
-voxel first took clustering from 72 ms mean / 157 ms p90 to 18 / 28, and the
-whole frame from 92 / 176 to 50 / 65. It also *raised* the detection rate, from
-10.7 to 11.3 cones per frame: near cones were arriving as enough returns to
-exceed `max_cluster_points` and being dropped. Far cones are untouched, since at
-50 m the sample spacing is already 17 cm.
-
-Leaf size trades directly against how many voxels a distant cone survives as.
-On the test bag: `0.03` → 65 ms, `0.05` → 49 ms, `0.08` → 40 ms, all within
-0.1 cones per frame of each other. `0.05` leaves a 228 mm cone four to five
-voxels across, which is why it is the default.
-
-**On the Jetson itself**, the CPU governor is worth more than any of this. Under
-`schedutil` a bursty 50-ms-in-every-100-ms load leaves the cores at 1.19 GHz of
-their 1.98 GHz; pinning them (`jetson_clocks`, or the `performance` governor)
-took the same build from 49.9 ms mean / 65.3 p90 to **27.9 / 34.0**. Nothing in
-the package can do that for you — it is a machine setting.
-
-**There is no GPU-shaped problem left here.** Ubuntu's `libpcl-dev` is built
-without CUDA, so `pcl::gpu::EuclideanClusterExtraction` would mean building PCL
-from source against CUDA on the Jetson — the same trap as the Open3D dependency
-this package was rewritten to escape — and NVIDIA's cuPCL ships against JetPack's
-CUDA 11.4/12.x rather than the 13.3 in this image. What it would buy is a share
-of an 11 ms stage whose input is ~2.8 k points, against transfer and launch
-overhead. Patchwork++ is the larger stage now, and upstream's own source says
-they measured TBB on it and left it single-threaded, because R-VPF and the
-per-patch allocations do not parallelise. Spend the Orin's GPU on the camera
-pipeline.
-
-`cluster_tolerance` has room to come down on a high-resolution sensor. It has to
-exceed the sample spacing on a cone at `ground_max_range`; the M1's 0.2° gives
-17 cm at 50 m, so `0.30` holds with margin, and tightening it separates cones
-from what they stand next to.
+On a Jetson the CPU governor is worth more than any of this: under `schedutil` a
+bursty load leaves the cores well below their clock ceiling. `jetson_clocks`, or
+the `performance` governor.
 
 ## Layout
 
-- `src/cone_detector.{hpp,cpp}` — the pipeline. No ROS, so the heuristics can be
-  read and tuned without reading the node.
+- `src/cone_detector.{hpp,cpp}` — the detector. No ROS in it, so the heuristics
+  can be read and tuned without reading the node.
 - `src/mirena_perception.cpp` — the ROS shell: subscriptions, TF, the
   `EntityList`, the debug clouds, the heartbeat.
