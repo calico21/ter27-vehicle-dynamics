@@ -1,9 +1,12 @@
 # Defaults for the MPC control node.  These mirror the values compiled in as
 # parameter defaults; override any subset from a launch file.
 #
-# Per-mission values are NOT loaded from here at runtime -- the supervisor
-# pushes them from mirena_supervisor/mission_config/<MISSION>.yaml before it
-# triggers CONFIGURE.  `laps` in particular lives there, one file per mission.
+# Per-mission values are NOT loaded from here at runtime -- they are the
+# parameters in mirena_supervisor/launch/missions/<MISSION>.launch.py, which the
+# supervisor starts when the AS selects that mission.  `laps` in particular
+# lives there, one launch file per mission.  The node reads every parameter once
+# in its constructor and never again, so setting one on a running node does
+# nothing.
 #
 # The horizon length, number of shooting nodes and number of reference points
 # are fixed by the generated acados solver (codegen/generate_solver.py) and are
@@ -50,3 +53,33 @@ mirena_control:
     projection_window_back: 5.0
     projection_window_forward: 20.0
     projection_coarse_step: 0.25
+
+    # Safety envelope.  Every reason the solver has to stop producing horizons
+    # ends the same way: the commander stops trusting the last one and brakes.
+    state_timeout: 0.15         # s; /state/car arrives at 100 Hz
+    plan_timeout: 0.25          # s without a new horizon before full braking
+                                # (~5 missed solves; ~4.5 m at cruise)
+
+    # Backstop for a lap mission whose loop the planner never closes: without a
+    # closed centreline nothing in the geometry can end the run.  Counted from
+    # the moment the car first moves, not from launch.  0 disables it.
+    mission_timeout: 600.0      # s of driving
+
+    # Arming the finish truncates the reference for the rest of the run, so it
+    # takes this many consecutive solves agreeing the car is past the line.
+    finish_confirm_count: 3
+
+    # Progress may not advance faster than the car could have travelled:
+    # margin * |u| * dt + slack metres per solve.  This is what stops a SLAM
+    # loop-closure jump from arming the finish and ending the run mid-track.
+    progress_rate_margin: 1.5
+    progress_rate_slack: 0.5    # m
+
+    # A solve that ran out of iterations or out of its wall-clock budget still
+    # leaves a usable horizon; it is accepted when its residual is at most this.
+    # 0 accepts only fully converged solves.
+    max_accepted_residual: 0.1
+
+    # Horizon and reference markers.  Off takes the serialisation cost off the
+    # solver's loop.
+    publish_markers: true

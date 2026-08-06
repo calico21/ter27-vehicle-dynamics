@@ -4,7 +4,8 @@
 Run at CMake configure time; the C it produces is compiled straight into the
 mirena_control executable, so no Python or CasADi is loaded at runtime.
 
-    generate_solver.py --output <dir> [--path-points N] [--horizon N] [--horizon-time T]
+    generate_solver.py --output <dir> [--path-points N] [--horizon N]
+                       [--horizon-time T] [--solve-budget S]
 """
 
 import argparse
@@ -28,7 +29,8 @@ RAD30 = 30.0 * math.pi / 180.0
 MODEL_NAME = 'mpc_problem'
 
 
-def build_ocp(path_points: int, horizon: int, horizon_time: float) -> AcadosOcp:
+def build_ocp(path_points: int, horizon: int, horizon_time: float,
+              solve_budget: float) -> AcadosOcp:
     # Variables de problema
     p = ca.MX.sym('p')    # Progreso
     vp = ca.MX.sym('vp')  # Velocidad de Progreso
@@ -126,8 +128,18 @@ def build_ocp(path_points: int, horizon: int, horizon_time: float) -> AcadosOcp:
     ocp.solver_options.sim_method_num_stages = 4
     ocp.solver_options.nlp_solver_type = 'SQP'
     ocp.solver_options.levenberg_marquardt = 0.01
-    ocp.solver_options.qp_solver_iter_max = 50
-    ocp.solver_options.nlp_solver_max_iter = 100
+    # The solver runs inside a 20 Hz loop, so its budget is the loop's period,
+    # not "however long convergence takes". The iteration caps are what that
+    # budget buys at this problem size; timeout_max_time is the hard backstop
+    # for the iteration that turns out to be unusually expensive -- acados stops
+    # before starting an iteration it predicts will overrun, and returns the
+    # iterate it has. The node accepts that iterate on its residual rather than
+    # discarding it, so a capped solve still drives the car; what it must not do
+    # is hold the solver thread past the period and starve the next solve.
+    ocp.solver_options.qp_solver_iter_max = 25
+    ocp.solver_options.nlp_solver_max_iter = 15
+    ocp.solver_options.timeout_max_time = solve_budget
+    ocp.solver_options.timeout_heuristic = 'LAST'
     ocp.solver_options.globalization_fixed_step_length = 0.8
     ocp.solver_options.regularize_method = 'PROJECT'
     ocp.solver_options.tol = 1e-2
@@ -189,12 +201,16 @@ def main() -> int:
     parser.add_argument('--path-points', type=int, default=20)
     parser.add_argument('--horizon', type=int, default=20)
     parser.add_argument('--horizon-time', type=float, default=2.0)
+    parser.add_argument('--solve-budget', type=float, default=0.04,
+                        help='wall-clock seconds a single solve may take; '
+                             'must stay under the node solver_period')
     args = parser.parse_args()
 
     out_dir = os.path.abspath(args.output)
     os.makedirs(out_dir, exist_ok=True)
 
-    ocp = build_ocp(args.path_points, args.horizon, args.horizon_time)
+    ocp = build_ocp(args.path_points, args.horizon, args.horizon_time,
+                    args.solve_budget)
     ocp.code_export_directory = out_dir
 
     # generate() renders the templates and exports the CasADi functions but does

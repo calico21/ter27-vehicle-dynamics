@@ -146,6 +146,11 @@ namespace mirena
         /// How well this position is known, as a 2x2 row-major covariance in the
         /// car frame: [xx, xy, yx, yy].
         std::array<double, 4> covariance;
+        /// Half the width of the standing blob this was built from, floored by
+        /// what the sensor can resolve across the beam at this range. Two
+        /// detections are the same object when their centres sit inside the sum
+        /// of these, which is what replaced a fixed exclusion radius.
+        float half_extent;
     };
 
     /// Colourless, geometry-only cone detector.

@@ -10,8 +10,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Off by default: -march=native bakes the build machine's instruction set into
+# the solver, and a binary built on a workstation then dies with SIGILL inside
+# acados on a car whose compute unit is older. Turn it on only when the build
+# happens on the machine that will run it.
 option(MIRENA_CONTROL_NATIVE_ARCH
-  "Tune the controller and the generated solver for the build machine" ON)
+  "Tune the controller and the generated solver for the build machine" OFF)
 
 # ---------------------------------------------------------------------------
 # Dependencies

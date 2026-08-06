@@ -24,25 +24,29 @@ find_package(geometry_msgs REQUIRED)
 find_package(GTSAM REQUIRED)
 find_package(mirena_common REQUIRED)
 
-# Define explicit source files instead of using GLOB to avoid compilation duplication
-set(SOURCES
-  src/mirena_slam.cpp
+# The estimator, with no ROS in it. Split out from the node so it can be linked
+# into a test binary and driven directly -- everything worth asserting about
+# this package is a property of the estimator, not of the wiring.
+add_library(mirena_slam_core
   src/slam.cpp
+  src/association.cpp
 )
-
-add_executable(mirena_slam ${SOURCES})
-
-# Target-specific include directories
-target_include_directories(mirena_slam PRIVATE 
-  "src/"
+target_include_directories(mirena_slam_core PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+)
+target_include_directories(mirena_slam_core SYSTEM PUBLIC
   ${EIGEN3_INCLUDE_DIR}
   ${GTSAM_INCLUDE_DIR}
 )
+# GTSAM handles its own export targets best this way.
+target_link_libraries(mirena_slam_core gtsam)
 
-# ROS 2 dependency mapping
-ament_target_dependencies(mirena_slam 
-  rclcpp 
-  visualization_msgs 
+add_executable(mirena_slam src/mirena_slam.cpp)
+target_link_libraries(mirena_slam mirena_slam_core)
+
+ament_target_dependencies(mirena_slam
+  rclcpp
+  visualization_msgs
   geometry_msgs
   mirena_common
   message_filters
@@ -50,11 +54,24 @@ ament_target_dependencies(mirena_slam
   nav_msgs
 )
 
-# Link external libraries (GTSAM handles its own export targets best this way)
-target_link_libraries(mirena_slam gtsam)
-
-# Install directives
 install(TARGETS mirena_slam DESTINATION lib/${PROJECT_NAME})
+
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+
+  ament_add_gtest(test_mirena_slam
+    test/test_association.cpp
+    test/test_candidates.cpp
+    test/test_scenarios.cpp
+    test/test_isam.cpp
+  )
+  target_link_libraries(test_mirena_slam mirena_slam_core)
+  # Track layouts exported from the sim, shared with mirena_planning's tests.
+  # Read as data at run time rather than depended on as a package, so the two
+  # test suites cannot drift into disagreeing about what a track is.
+  target_compile_definitions(test_mirena_slam PRIVATE
+    MIRENA_SLAM_TRACK_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../mirena_planning/test/tracks")
+endif()
 
 # Register package layout
 ament_package()

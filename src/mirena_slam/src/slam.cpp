@@ -1,138 +1,98 @@
 #include "slam.hpp"
 
+#include <gtsam/nonlinear/ExpressionFactor.h>
+#include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
+#include <gtsam/nonlinear/ISAM2UpdateParams.h>
+#include <gtsam/nonlinear/expressions.h>
+#include <gtsam/slam/BetweenFactor.h>
+#include <gtsam/slam/expressions.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <limits>
 #include <unordered_set>
-#include <vector>
 
 namespace mirena
 {
 
     namespace
     {
-        /// Cost standing in for "impossible", finite so the potentials stay
-        /// well-behaved but far above anything the gate would accept.
-        constexpr double kBlocked = 1e9;
-
-        /// Maps a body-frame tangent perturbation to a map-frame one, so the pose
-        /// covariance GTSAM reports can be used with map-frame Jacobians.
-        gtsam::Matrix3 body_to_map(const gtsam::Pose2 &pose)
-        {
-            gtsam::Matrix3 A = gtsam::Matrix3::Identity();
-            A.topLeftCorner<2, 2>() = pose.rotation().matrix();
-            return A;
-        }
-
-        /**
-         * @brief Minimum-cost assignment of rows to columns (Kuhn-Munkres /
-         *        Jonker-Volgenant): shortest augmenting path with potentials,
-         *        O(n^2 m). Requires at least as many columns as rows.
-         * @return the column chosen for each row.
-         */
-        std::vector<int> hungarian(const std::vector<std::vector<double>> &cost)
-        {
-            const int n = static_cast<int>(cost.size());
-            if (n == 0)
-                return {};
-            const int m = static_cast<int>(cost[0].size());
-
-            constexpr double kInf = std::numeric_limits<double>::infinity();
-
-            // One-based potentials and column assignment; column 0 is the
-            // sentinel each augmenting path starts from.
-            std::vector<double> u(n + 1, 0.0), v(m + 1, 0.0);
-            std::vector<int> match(m + 1, 0), path(m + 1, 0);
-
-            for (int row = 1; row <= n; ++row)
-            {
-                match[0] = row;
-                int col = 0;
-                std::vector<double> slack(m + 1, kInf);
-                std::vector<bool> done(m + 1, false);
-
-                do
-                {
-                    done[col] = true;
-                    const int cur = match[col];
-                    double delta = kInf;
-                    int next = 0;
-
-                    for (int j = 1; j <= m; ++j)
-                    {
-                        if (done[j])
-                            continue;
-                        const double reduced = cost[cur - 1][j - 1] - u[cur] - v[j];
-                        if (reduced < slack[j])
-                        {
-                            slack[j] = reduced;
-                            path[j] = col;
-                        }
-                        if (slack[j] < delta)
-                        {
-                            delta = slack[j];
-                            next = j;
-                        }
-                    }
-
-                    // Shift the potentials so the chosen edge becomes tight.
-                    for (int j = 0; j <= m; ++j)
-                    {
-                        if (done[j])
-                        {
-                            u[match[j]] += delta;
-                            v[j] -= delta;
-                        }
-                        else
-                        {
-                            slack[j] -= delta;
-                        }
-                    }
-                    col = next;
-                } while (match[col] != 0);
-
-                // Walk the path back, flipping the matching along it.
-                do
-                {
-                    const int prev = path[col];
-                    match[col] = match[prev];
-                    col = prev;
-                } while (col != 0);
-            }
-
-            std::vector<int> assignment(n, -1);
-            for (int j = 1; j <= m; ++j)
-                if (match[j] != 0)
-                    assignment[match[j] - 1] = j - 1;
-            return assignment;
-        }
-
-        /// A usable 2x2 covariance from what perception reported, or the fallback
-        /// when it reported nothing.
+        /// How many cones it takes to hold a pose still.
         ///
-        /// Perception publishes zeros when it has no estimate, and a covariance of
-        /// zero would mean a perfectly known cone -- the most dangerous thing this
-        /// could believe -- so the check is not defensive padding.
-        gtsam::Matrix2 measurement_covariance(const std::array<double, 4> &reported,
-                                              double fallback_sigma, double min_sigma)
+        /// Two fix a 2D pose and its heading; the third says whether the first two
+        /// agree. A frame that has this many cones it already knows better than the
+        /// sensor can measure them does not need a pose of its own -- whenever one
+        /// is next added, these will pin it. This is a fact about the geometry, not
+        /// a tuning knob.
+        constexpr int kPoseDeterminingCones = 3;
+
+        /// Marginals refreshed per keyframe beyond the ones the solve just touched.
+        ///
+        /// Bounds the per-keyframe cost independent of how big the map has grown.
+        /// A landmark's uncertainty only changes when something touches it, and the
+        /// solver says which ones those were; the rest are swept round-robin so
+        /// nothing goes stale for ever.
+        constexpr size_t kMarginalBudget = 12;
+
+        /// Huber's standard tuning: the residual, in sigmas, beyond which the loss
+        /// becomes linear. 95% efficiency against a true Gaussian.
+        constexpr double kHuberK = 1.345;
+
+        gtsam::ISAM2Params isam_settings()
         {
-            gtsam::Matrix2 R;
-            R << reported[0], reported[1], reported[2], reported[3];
+            gtsam::ISAM2Params p;
 
-            const bool usable = R.allFinite() && R(0, 0) > 0.0 && R(1, 1) > 0.0 &&
-                                R.determinant() > 0.0;
-            if (!usable)
-                R = gtsam::Matrix2::Identity() * (fallback_sigma * fallback_sigma);
+            // Dogleg rather than Gauss-Newton. The batch solver this replaced was
+            // Levenberg-Marquardt, whose damping is what kept a bad step from
+            // running away; plain Gauss-Newton under an incremental solver has no
+            // such guard, and a trust region is the incremental equivalent.
+            p.optimizationParams = gtsam::ISAM2DoglegParams();
 
-            // Symmetrise, then floor the diagonal. A round trip through a message
-            // leaves R(0,1) and R(1,0) very slightly apart, and GTSAM will not
-            // accept a noise model that is not symmetric.
-            R = (0.5 * (R + R.transpose())).eval();
-            const double floor = min_sigma * min_sigma;
-            R(0, 0) = std::max(R(0, 0), floor);
-            R(1, 1) = std::max(R(1, 1), floor);
-            return R;
+            // One relinearisation threshold cannot serve metres and radians at
+            // once: a value sensible for x and y lets heading drift several degrees
+            // from its linearisation point, and at ten metres a degree of heading
+            // is a fifth of a metre of lateral error -- more than the measurement
+            // noise the whole gate is calibrated against. Per symbol, then.
+            gtsam::FastMap<char, gtsam::Vector> thresholds;
+            thresholds['x'] = (gtsam::Vector(3) << 0.05, 0.05, 0.005).finished();
+            thresholds['l'] = (gtsam::Vector(2) << 0.03, 0.03).finished();
+            p.relinearizeThreshold = thresholds;
+
+            // Not the default of 10. At this keyframe rate that would be one
+            // relinearisation check every nine metres driven, and both the factors
+            // and the marginals the association gate reads would be computed at a
+            // linearisation point that far behind. The check itself is a scan over
+            // a delta the wildfire threshold keeps sparse, so in steady driving it
+            // finds nothing and costs nothing.
+            p.relinearizeSkip = 1;
+
+            p.factorization = gtsam::ISAM2Params::CHOLESKY;
+            p.evaluateNonlinearError = false; // walks every factor; never in the loop
+            p.findUnusedFactorSlots = false;  // nothing is ever removed
+            return p;
+        }
+
+        /// The measurement of a landmark from a pose: where the cone should appear
+        /// in the car frame if both the pose and the landmark are where the graph
+        /// says they are.
+        ///
+        /// Plain Gaussian, deliberately. A robust kernel here would be re-weighted
+        /// only when the factor is relinearised, so a weight that collapsed on one
+        /// bad early linearisation survives in the cached linear factor -- and if
+        /// the pose later corrects, nothing ever exceeds the threshold that would
+        /// bring it back. The measurement is discarded permanently and silently.
+        /// Outlier rejection belongs where it is reversible: a detection only
+        /// reaches this function after surviving a gated one-to-one assignment and
+        /// a log-odds confirmation, so what arrives here is already truncated.
+        gtsam::NonlinearFactor::shared_ptr measurement_factor(
+            int pose_index, int landmark_id, const gtsam::Point2 &local,
+            const gtsam::Matrix2 &covariance)
+        {
+            const gtsam::Expression<gtsam::Pose2> x_(gtsam::Symbol('x', pose_index));
+            const gtsam::Expression<gtsam::Point2> l_(gtsam::Symbol('l', landmark_id));
+            return boost::make_shared<gtsam::ExpressionFactor<gtsam::Point2>>(
+                gtsam::noiseModel::Gaussian::Covariance(covariance), local,
+                gtsam::transformTo(x_, l_));
         }
     } // namespace
 
@@ -149,468 +109,681 @@ namespace mirena
         }
     }
 
+    void Slam::TypeVote::absorb(const TypeVote &other)
+    {
+        for (const auto &[type, count] : other.counts)
+            for (int i = 0; i < count; ++i)
+                add(type);
+    }
+
+    double Slam::seen_evidence() const
+    {
+        return std::log(params_.p_detect / params_.p_false);
+    }
+
+    double Slam::missed_evidence() const
+    {
+        return std::log((1.0 - params_.p_detect) / (1.0 - params_.p_false));
+    }
+
     Slam::Slam(const gtsam::Pose2 &initial_raw_pose, SlamParams params)
-        : params_(params)
+        : params_(params), isam_(isam_settings())
     {
         last_raw_odom_ = initial_raw_pose;
         map_to_odom_ = gtsam::Pose2();
+        keyframe_pose_ = gtsam::Pose2(0, 0, 0);
 
         // The map frame is defined to be the car's starting pose, so the first
-        // keyframe sits at the origin and is held there. Everything else is
-        // measured from it.
-        anchor_pose_ = gtsam::Pose2(0, 0, 0);
-        anchor_noise_ = gtsam::noiseModel::Isotropic::Sigma(3, 1e-6);
+        // pose sits at the origin and is held there.
+        //
+        // A millimetre, not the micrometre this used to be. Information of 1e12
+        // against a system whose other entries are of order 1e3 is a condition
+        // number that Cholesky will eventually refuse, and unlike the old sliding
+        // window this pose is in the tree for the rest of the run. Nothing
+        // downstream needs the origin pinned tighter than this; the known-track
+        // planner's own tolerance is five metres.
+        gtsam::NonlinearFactorGraph graph;
+        gtsam::Values values;
+        const gtsam::Symbol first = pose_key(next_keyframe_++);
+        values.insert(first, keyframe_pose_);
+        graph.addPrior(first, keyframe_pose_, gtsam::noiseModel::Isotropic::Sigma(3, 1e-3));
+        isam_.update(graph, values);
+    }
 
-        Keyframe first;
-        first.index = next_keyframe_++;
-        first.odom_delta = gtsam::Pose2();
-        first.odom_noise = anchor_noise_;
-        first.estimate = anchor_pose_;
-        window_.push_back(std::move(first));
+    bool Slam::in_view(const gtsam::Pose2 &pose, const gtsam::Point2 &p) const
+    {
+        const gtsam::Point2 local = pose.transformTo(p);
+        return local.norm() < params_.local_map_radius && local.x() > 0.0 &&
+               std::abs(std::atan2(local.y(), local.x())) < params_.view_half_angle;
+    }
+
+    Target Slam::candidate_target(const Candidate &c, const gtsam::Pose2 &anchor_pose,
+                                  const gtsam::Matrix3 &drift_now) const
+    {
+        gtsam::Matrix23 Hpose;
+        gtsam::Matrix2 Hpoint;
+        const gtsam::Point2 world = anchor_pose.transformFrom(c.mu, Hpose, Hpoint);
+        return Target{world, Hpoint * c.P * Hpoint.transpose() +
+                                 Hpose * drift_now * Hpose.transpose()};
     }
 
     void Slam::observe(const gtsam::Pose2 &raw_odom,
                        const std::vector<Observation> &observations,
+                       const gtsam::Vector3 &odom_sigmas,
                        SlamDebug *debug)
     {
-        // 1. Where the odometry says we are, measured from the last keyframe.
+        // 1. Where the odometry says we are, measured from the last keyframe, and
+        //    how much it could have drifted getting here. That drift is the
+        //    caller's own number -- the same one the keyframe factor will carry --
+        //    so the gate and the graph cannot disagree about how good the odometry
+        //    is.
         const gtsam::Pose2 delta = last_raw_odom_.between(raw_odom);
-        const gtsam::Pose2 pred_pose = window_.back().estimate.compose(delta);
+        const gtsam::Pose2 pose = keyframe_pose_.compose(delta);
 
-        // 2. How much the gate should have widened since that keyframe. There has
-        //    been no solve since, so this is guessed forward from distance driven
-        //    rather than computed -- which is all the gate needs it for.
-        const double driven = delta.translation().norm() + std::abs(delta.theta());
-        const double grew = params_.gate_odom_sigma_per_metre * std::max(driven, 1e-3);
-        gtsam::Matrix3 growth = gtsam::Matrix3::Identity() * (grew * grew);
-        growth(2, 2) *= 0.1;
+        gtsam::Matrix3 rel = gtsam::Matrix3::Zero();
+        rel.diagonal() = odom_sigmas.cwiseProduct(odom_sigmas);
+        pending_odom_cov_ = rel;
 
+        // Where the car is, as well as the graph knows it, carried forward over
+        // the odometry since the last solve. Both terms matter: the first is what
+        // lets a cone last seen a lap ago still be recognised, the second is what
+        // the odometry has added since.
         const gtsam::Matrix3 adjoint = delta.inverse().AdjointMap();
-        const gtsam::Matrix3 pred_cov_body = adjoint * pose_cov_ * adjoint.transpose() + growth;
-        const gtsam::Matrix3 A = body_to_map(pred_pose);
+        const gtsam::Matrix3 body = adjoint * pose_cov_ * adjoint.transpose() + rel;
 
-        // 3. How well each cone was located, straight from perception.
+        gtsam::Matrix3 to_map = gtsam::Matrix3::Identity();
+        to_map.topLeftCorner<2, 2>() = pose.rotation().matrix();
+        const gtsam::Matrix3 pose_cov = to_map * body * to_map.transpose();
+
+        // 2. How well each cone was located, straight from perception.
+        std::vector<gtsam::Point2> local;
         std::vector<gtsam::Matrix2> measurement_cov;
+        local.reserve(observations.size());
         measurement_cov.reserve(observations.size());
         for (const Observation &o : observations)
         {
+            local.emplace_back(o.x, o.y);
             measurement_cov.push_back(measurement_covariance(
-                o.covariance, params_.default_measurement_sigma, params_.min_measurement_sigma));
+                o.covariance, params_.default_measurement_sigma,
+                params_.min_measurement_sigma));
         }
 
-        // 4. One landmark per observation, one observation per landmark.
-        const std::vector<int> matched =
-            associate(pred_pose, A * pred_cov_body * A.transpose(), observations, measurement_cov);
+        // 3. Against the map first, and only then against the candidates.
+        //
+        //    The order is the point, and it is not an optimisation. A candidate
+        //    exists because some earlier observation was not explained by the
+        //    map; an observation that *is* explained by the map is therefore no
+        //    evidence for it. Let the two tiers compete on equal terms and a
+        //    candidate sitting on top of a landmark -- which the gate produces by
+        //    construction, since a 95% test rejects one good observation in
+        //    twenty -- takes it in turns with that landmark to be fed, and never
+        //    starves. It then promotes into a duplicate of the cone it was born
+        //    beside. Matching the map first means the candidate only ever sees
+        //    what the map genuinely cannot account for.
+        const gtsam::Matrix3 &drift_step = adjoint;
 
+        std::vector<Target> map_targets;
+        std::vector<int> map_ids;
+        for (const auto &[id, record] : landmarks_)
+        {
+            if ((record.position - pose.translation()).norm() >= params_.local_map_radius)
+                continue;
+            map_targets.push_back(Target{record.position, record.covariance});
+            map_ids.push_back(id);
+        }
+
+        const std::vector<int> to_landmark = associate(
+            pose, pose_cov, map_targets, local, measurement_cov,
+            params_.mahalanobis_threshold, params_.max_association_distance);
+
+        std::vector<size_t> residue;
+        std::vector<gtsam::Point2> residue_local;
+        std::vector<gtsam::Matrix2> residue_cov;
+        for (size_t i = 0; i < observations.size(); ++i)
+        {
+            if (!to_landmark.empty() && to_landmark[i] >= 0)
+                continue;
+            residue.push_back(i);
+            residue_local.push_back(local[i]);
+            residue_cov.push_back(measurement_cov[i]);
+        }
+
+        std::vector<Target> candidate_targets;
+        std::vector<int> candidate_ids;
+        for (const auto &[id, cand] : candidates_)
+        {
+            const gtsam::Matrix3 drift_now =
+                drift_step * cand.drift * drift_step.transpose() + rel;
+            const Target t = candidate_target(cand, cand.anchor_pose, drift_now);
+            if ((t.position - pose.translation()).norm() >= params_.local_map_radius)
+                continue;
+            candidate_targets.push_back(t);
+            candidate_ids.push_back(id);
+        }
+
+        const std::vector<int> to_candidate = associate(
+            pose, pose_cov, candidate_targets, residue_local, residue_cov,
+            params_.mahalanobis_threshold, params_.max_association_distance);
+
+        // 4. Fold the frame in.
         pending_ = Pending{};
         pending_.raw_odom = raw_odom;
-        pending_.estimate = pred_pose;
+        pending_.estimate = pose;
         pending_.valid = true;
 
         last_matched_ = 0;
-        last_new_ = 0;
-        std::vector<int> seen;
+        std::unordered_set<int> seen_landmarks;
+        std::unordered_set<int> seen_candidates;
+        int well_known = 0;
 
+        // Whatever the map explained.
         for (size_t i = 0; i < observations.size(); ++i)
         {
-            const gtsam::Point2 local(observations[i].x, observations[i].y);
-            int id = matched[i];
+            if (to_landmark.empty() || to_landmark[i] < 0)
+                continue;
 
-            if (id < 0)
-            {
-                // A brand new cone -- unless it lands within touching distance of
-                // one already mapped. The assignment is one-to-one, so a second
-                // detection of a cone another observation just claimed comes back
-                // unmatched, and adding it would stack two landmarks on one
-                // physical cone. Cones stand metres apart, so nothing this close
-                // can be a new one, and refusing costs a single sighting.
-                const gtsam::Point2 world = pred_pose.transformFrom(local);
-                const bool crowded = std::any_of(
-                    landmarks_.begin(), landmarks_.end(), [&](const auto &entry) {
-                        return (entry.second.position - world).norm() < params_.min_cone_separation;
-                    });
-                if (crowded)
-                {
-                    if (debug)
-                        debug->suppressed.push_back(world);
-                    continue;
-                }
+            const int id = map_ids[static_cast<size_t>(to_landmark[i])];
+            LandmarkRecord &record = landmarks_.at(id);
+            ++last_matched_;
+            seen_landmarks.insert(id);
+            record.types.add(observations[i].type);
+            ++record.sightings;
 
-                id = next_landmark_++;
-                LandmarkRecord record;
-                record.position = world;
-                landmarks_.emplace(id, std::move(record));
-                ++last_new_;
-                if (debug)
-                    debug->created.push_back(world);
-            }
-            else
-            {
-                ++last_matched_;
-                if (debug)
-                    debug->associations.emplace_back(pred_pose.transformFrom(local),
-                                                     landmarks_.at(id).position);
-            }
-
-            ++landmarks_.at(id).sightings;
-            landmarks_.at(id).types.add(observations[i].type);
+            // A cone the map knows better than the sensor can measure it. Enough
+            // of these in one frame and the pose is already determined, whether
+            // or not it is given a keyframe of its own.
+            if (record.covariance.trace() < measurement_cov[i].trace())
+                ++well_known;
 
             pending_.ids.push_back(id);
-            pending_.local.push_back(local);
-            pending_.noise.push_back(gtsam::noiseModel::Gaussian::Covariance(measurement_cov[i]));
-            seen.push_back(id);
+            pending_.local.push_back(local[i]);
+            pending_.covariance.push_back(measurement_cov[i]);
+
+            if (debug)
+                debug->associations.emplace_back(pose.transformFrom(local[i]),
+                                                 record.position);
         }
 
-        // Judged on every frame the sensor delivers, not on the few that happen
-        // to become keyframes.
-        remove_unseen(pred_pose, seen, debug);
-        publish_map();
+        // Whatever it could not.
+        for (size_t r = 0; r < residue.size(); ++r)
+        {
+            const size_t i = residue[r];
+
+            if (!to_candidate.empty() && to_candidate[r] >= 0)
+            {
+                // A candidate, gathering evidence outside the graph.
+                const int cid = candidate_ids[static_cast<size_t>(to_candidate[r])];
+                Candidate &cand = candidates_.at(cid);
+                seen_candidates.insert(cid);
+                cand.types.add(observations[i].type);
+
+                // Move the measurement into the frame the candidate is written
+                // in, and fold it in. Everything here is relative to the anchor
+                // pose, so the absolute drift of the trajectory -- which this
+                // candidate shares with every landmark it will be compared
+                // against -- never enters and never has to be taken back out.
+                const gtsam::Matrix3 drift_now =
+                    drift_step * cand.drift * drift_step.transpose() + rel;
+                const gtsam::Pose2 anchor_to_now = cand.anchor_pose.between(pose);
+                gtsam::Matrix23 Hpose;
+                gtsam::Matrix2 Hpoint;
+                const gtsam::Point2 z = anchor_to_now.transformFrom(local[i], Hpose, Hpoint);
+                const gtsam::Matrix2 R = Hpoint * measurement_cov[i] * Hpoint.transpose() +
+                                         Hpose * drift_now * Hpose.transpose();
+
+                const gtsam::Matrix2 S = cand.P + R;
+                if (S.determinant() > 0.0)
+                {
+                    const gtsam::Matrix2 K = cand.P * S.inverse();
+                    cand.mu = cand.mu + K * (z - cand.mu);
+                    cand.P = (gtsam::Matrix2::Identity() - K) * cand.P;
+                    cand.P = (0.5 * (cand.P + cand.P.transpose())).eval();
+                }
+
+                pending_.candidate_ids.push_back(cid);
+                pending_.candidate_local.push_back(local[i]);
+                pending_.candidate_covariance.push_back(measurement_cov[i]);
+                continue;
+            }
+
+            // Explained by nothing the map or the candidate store holds, so it is
+            // something new. Nothing is checked here beyond the gates that already
+            // ran: this costs a candidate, which is free and reversible, not a
+            // graph variable. Every proximity veto that used to guard this point
+            // was a guess about how far apart cones are laid, and the guess was
+            // wrong exactly where cones stand close together.
+            Candidate fresh;
+            fresh.anchor = next_keyframe_ - 1;
+            fresh.anchor_pose = keyframe_pose_;
+            fresh.mu = keyframe_pose_.between(pose).transformFrom(local[i]);
+            fresh.P = measurement_cov[i] + rel.topLeftCorner<2, 2>();
+            fresh.drift = gtsam::Matrix3::Zero();
+            fresh.log_odds = seen_evidence();
+            fresh.born = next_keyframe_ - 1;
+            fresh.types.add(observations[i].type);
+            const int cid = next_candidate_++;
+            candidates_.emplace(cid, std::move(fresh));
+            seen_candidates.insert(cid);
+        }
+
+        // 5. Evidence, for and against. A thing in plain view that was not reported
+        //    counts against itself; a thing nothing was pointed at does not.
+        const double up = seen_evidence();
+        const double down = missed_evidence();
+        const double cap = 2.0 * params_.promote_log_odds;
+
+        last_hidden_ = 0;
+        for (auto &[id, record] : landmarks_)
+        {
+            if (seen_landmarks.count(id))
+                record.log_odds += up;
+            else if (in_view(pose, record.position))
+                record.log_odds += down;
+            record.log_odds = std::clamp(record.log_odds, -cap, cap);
+            if (record.log_odds < params_.publish_log_odds)
+            {
+                ++last_hidden_;
+                if (debug)
+                    debug->hidden.push_back(record.position);
+            }
+        }
+
+        for (auto it = candidates_.begin(); it != candidates_.end();)
+        {
+            Candidate &cand = it->second;
+            const gtsam::Matrix3 drift_now =
+                drift_step * cand.drift * drift_step.transpose() + rel;
+            const gtsam::Point2 world =
+                candidate_target(cand, cand.anchor_pose, drift_now).position;
+
+            if (seen_candidates.count(it->first))
+                cand.log_odds += up;
+            else if (in_view(pose, world))
+                cand.log_odds += down;
+            cand.log_odds = std::min(cand.log_odds, cap);
+
+            if (cand.log_odds < 0.0)
+            {
+                // Looked at and not there. Nothing was written down, so nothing
+                // has to be taken back -- the whole reason this tier exists.
+                it = candidates_.erase(it);
+                continue;
+            }
+            if (debug)
+                debug->candidates.emplace_back(world, cand.log_odds);
+            ++it;
+        }
+
+        // 6. Is this frame worth a permanent pose?
+        ++frames_since_keyframe_;
+        const double drifted = std::sqrt(rel(0, 0) + rel(1, 1));
+        const bool pinned = well_known >= kPoseDeterminingCones;
+        const bool structure = std::any_of(
+            candidates_.begin(), candidates_.end(), [&](const auto &entry) {
+                return entry.second.log_odds >= params_.promote_log_odds &&
+                       !entry.second.sightings.empty();
+            });
+        wants_keyframe_ = frames_since_keyframe_ >= params_.keyframe_max_frames ||
+                          structure ||
+                          (!pinned && drifted > params_.keyframe_odom_sigma);
 
         if (debug)
         {
-            debug->pose = pred_pose;
-            const gtsam::Point2 vehicle = pred_pose.translation();
+            debug->pose = pose;
             for (const auto &[id, record] : landmarks_)
             {
-                if ((record.position - vehicle).norm() < params_.local_map_radius)
+                (void)id;
+                if ((record.position - pose.translation()).norm() < params_.local_map_radius)
                     debug->sightings.emplace_back(record.position, record.sightings);
             }
         }
     }
 
-    void Slam::add_keyframe(gtsam::SharedNoiseModel odom_noise, SlamDebug *debug)
+    void Slam::add_keyframe(const gtsam::Vector3 &odom_sigmas, SlamDebug *debug)
     {
-        (void)debug;
-        if (!pending_.valid)
+        if (!pending_.valid || !healthy_)
             return;
 
         using namespace std::chrono;
         const auto started = high_resolution_clock::now();
 
-        Keyframe frame;
-        frame.index = next_keyframe_++;
-        frame.odom_delta = last_raw_odom_.between(pending_.raw_odom);
-        frame.odom_noise = odom_noise;
-        frame.estimate = pending_.estimate;
-        frame.ids = pending_.ids;
-        frame.local = pending_.local;
-        frame.noise = pending_.noise;
+        const int index = next_keyframe_++;
+        const gtsam::Pose2 delta = last_raw_odom_.between(pending_.raw_odom);
 
+        gtsam::NonlinearFactorGraph graph;
+        gtsam::Values values;
+        values.insert(pose_key(index), pending_.estimate);
+
+        // The odometry link. Huber here and nowhere else: this is where the genuine
+        // one-off garbage is, an INS dropout that widens the velocity covariance
+        // for a keyframe or two, and Huber is convex, so a weight left stale by the
+        // relinearisation schedule costs accuracy rather than stability.
+        graph.emplace_shared<gtsam::BetweenFactor<gtsam::Pose2>>(
+            pose_key(index - 1), pose_key(index), delta,
+            gtsam::noiseModel::Robust::Create(
+                gtsam::noiseModel::mEstimator::Huber::Create(kHuberK),
+                gtsam::noiseModel::Diagonal::Sigmas(odom_sigmas)));
+
+        for (size_t i = 0; i < pending_.ids.size(); ++i)
+        {
+            graph.push_back(measurement_factor(index, pending_.ids[i], pending_.local[i],
+                                               pending_.covariance[i]));
+        }
+
+        // Candidates keep only the sightings taken at a keyframe, because only
+        // those have a pose to attach to when the candidate is promoted.
+        for (size_t i = 0; i < pending_.candidate_ids.size(); ++i)
+        {
+            auto it = candidates_.find(pending_.candidate_ids[i]);
+            if (it == candidates_.end())
+                continue; // its evidence collapsed in the same frame it was seen
+            it->second.sightings.push_back({index, pending_.candidate_local[i],
+                                            pending_.candidate_covariance[i]});
+        }
+
+        // Carry every candidate's relative uncertainty forward over the step just
+        // taken, so what accumulates is drift since its own anchor rather than
+        // drift since the start of the run.
+        const gtsam::Matrix3 step = delta.inverse().AdjointMap();
+        gtsam::Matrix3 step_cov = gtsam::Matrix3::Zero();
+        step_cov.diagonal() = odom_sigmas.cwiseProduct(odom_sigmas);
+        for (auto &[id, cand] : candidates_)
+        {
+            (void)id;
+            cand.drift = step * cand.drift * step.transpose() + step_cov;
+        }
+
+        std::vector<gtsam::Key> fresh;
+        promote_candidates(index, pending_.estimate, graph, values, fresh, debug);
+
+        // Keep the frontier at the top of the tree: the pose just added and
+        // everything it touches are what the next keyframe will touch too.
+        gtsam::ISAM2UpdateParams update_params;
+        gtsam::FastMap<gtsam::Key, int> constrained;
+        constrained[pose_key(index)] = 1;
+        for (const int id : pending_.ids)
+            constrained[landmark_key(id)] = 1;
+        for (const gtsam::Key key : fresh)
+            constrained[key] = 1;
+        update_params.constrainedKeys = constrained;
+
+        try
+        {
+            const gtsam::ISAM2Result result = isam_.update(graph, values, update_params);
+            read_back(result, index);
+        }
+        catch (const std::exception &)
+        {
+            // Not recoverable, and not something to carry on quietly from: after an
+            // indefinite system the solver's own state may be inconsistent, and
+            // every number this class reports afterwards would be furniture. The
+            // caller is expected to say so where somebody will see it.
+            healthy_ = false;
+            return;
+        }
+
+        keyframe_pose_ = isam_.calculateEstimate<gtsam::Pose2>(pose_key(index));
         last_raw_odom_ = pending_.raw_odom;
         pending_.valid = false;
+        frames_since_keyframe_ = 0;
 
-        window_.push_back(std::move(frame));
-        optimise();
-        publish_map();
+        // The newest pose is the best estimate of where the car is, so it is what
+        // the correction is built from. It is also the noisiest, but that is a
+        // smoothing problem and it is solved where the transform is published.
+        map_to_odom_ = keyframe_pose_.compose(last_raw_odom_.inverse());
 
-        // The newest pose is the best estimate of where the car is, so it is
-        // what the correction is built from. It is also the noisiest, but that
-        // is a smoothing problem and it is solved where the transform is
-        // published, not by throwing away the freshest information here.
-        map_to_odom_ = window_.back().estimate.compose(last_raw_odom_.inverse());
         last_update_ms_ =
             duration_cast<microseconds>(high_resolution_clock::now() - started).count() / 1.0e3;
     }
 
-    void Slam::publish_map()
+    bool Slam::is_duplicate(const gtsam::Point2 &position, const gtsam::Matrix2 &covariance,
+                            const gtsam::Matrix2 &resolving, int *of_landmark) const
     {
-        map_.clear();
-        map_.reserve(landmarks_.size());
         for (const auto &[id, record] : landmarks_)
-            map_.push_back({record.position.x(), record.position.y(), record.types.best});
+        {
+            const gtsam::Vector2 d = position - record.position;
+            const double separation = d.norm();
+            if (separation > params_.max_association_distance)
+                continue;
+
+            const gtsam::Matrix2 S = covariance + record.covariance + resolving;
+            if (!(S.determinant() > 0.0))
+                continue;
+
+            const double d2 = d.transpose() * S.inverse() * d;
+            if (!std::isfinite(d2) || d2 >= params_.mahalanobis_threshold)
+                continue; // too far apart to be one cone
+
+            // Consistent -- but consistency alone is not enough to delete one of
+            // them. Two cones a metre apart, each known to half a metre, are
+            // statistically consistent with being one cone and are still two
+            // cones. What decides it is whether the separation could be resolved
+            // at all, in the worst direction the uncertainty allows.
+            const Eigen::SelfAdjointEigenSolver<gtsam::Matrix2> eigen(S);
+            const double worst = std::sqrt(std::max(0.0, eigen.eigenvalues().maxCoeff()));
+            if (separation >= params_.separability_k * worst)
+                continue; // consistent, but resolvable: two cones
+
+            if (of_landmark)
+                *of_landmark = id;
+            return true;
+        }
+        return false;
     }
 
-    void Slam::optimise()
+    void Slam::promote_candidates(int keyframe, const gtsam::Pose2 &keyframe_pose,
+                                  gtsam::NonlinearFactorGraph &graph, gtsam::Values &values,
+                                  std::vector<gtsam::Key> &fresh, SlamDebug *debug)
     {
-        gtsam::NonlinearFactorGraph graph;
-        gtsam::Values values;
+        last_promoted_ = 0;
 
-        // The window is anchored at its oldest pose. That prior is everything the
-        // keyframes already dropped had to say about where the car was, and
-        // without it the window would be free to slide and turn as a whole.
-        const gtsam::Symbol first('x', window_.front().index);
-        graph.addPrior(first, anchor_pose_, anchor_noise_);
-        values.insert(first, window_.front().estimate);
-
-        for (size_t k = 1; k < window_.size(); ++k)
+        for (auto it = candidates_.begin(); it != candidates_.end();)
         {
-            const gtsam::Symbol prev('x', window_[k - 1].index);
-            const gtsam::Symbol curr('x', window_[k].index);
-            graph.emplace_shared<gtsam::BetweenFactor<gtsam::Pose2>>(
-                prev, curr, window_[k].odom_delta, window_[k].odom_noise);
-            values.insert(curr, window_[k].estimate);
-        }
+            Candidate &cand = it->second;
+            const bool earned = cand.log_odds >= params_.promote_log_odds;
+            const bool overdue = (keyframe - cand.born) >= params_.max_candidate_age;
 
-        // Every cone the window can see, seeded at its current estimate and held
-        // by a prior carrying what earlier keyframes made of it.
-        std::unordered_set<int> in_window;
-        for (const Keyframe &frame : window_)
-            for (const int id : frame.ids)
-                in_window.insert(id);
-
-        for (const int id : in_window)
-        {
-            const LandmarkRecord &record = landmarks_.at(id);
-            const gtsam::Symbol key('l', id);
-            values.insert(key, record.position);
-
-            // Only cones with sightings older than the window get a prior. One
-            // seen entirely from inside it is already pinned by its own
-            // measurements, and a prior would be the same evidence twice.
-            if (record.has_prior)
+            if (!earned)
             {
-                graph.addPrior(key, record.prior_position,
-                               gtsam::noiseModel::Gaussian::Covariance(record.prior_covariance));
+                if (overdue)
+                {
+                    // Held on long enough without convincing anybody.
+                    it = candidates_.erase(it);
+                    continue;
+                }
+                ++it;
+                continue;
             }
-        }
-
-        // A robust kernel on every measurement, so an association that slipped
-        // through the gate is down-weighted rather than believed. Its width is in
-        // whitened units, so it scales with each cone's own covariance: a metre of
-        // error on a distant cone is not the outlier it would be on one two metres
-        // away, and now that perception says which is which, the kernel knows too.
-        for (const Keyframe &frame : window_)
-        {
-            const gtsam::Expression<gtsam::Pose2> x_(gtsam::Symbol('x', frame.index));
-            for (size_t i = 0; i < frame.ids.size(); ++i)
+            if (cand.sightings.empty())
             {
-                const auto robust = gtsam::noiseModel::Robust::Create(
-                    gtsam::noiseModel::mEstimator::DCS::Create(3.0), frame.noise[i]);
-                const gtsam::Expression<gtsam::Point2> l_(gtsam::Symbol('l', frame.ids[i]));
-                graph.add(gtsam::ExpressionFactor<gtsam::Point2>(
-                    robust, frame.local[i], gtsam::transformTo(x_, l_)));
+                ++it; // nothing yet to attach it to the trajectory by
+                continue;
             }
-        }
 
-        gtsam::Values result;
+            // Recomputed from the current estimate of the anchor, not carried along
+            // in the map frame: if the graph has moved that pose since -- which at
+            // a loop closure is the entire point -- the candidate moves with it.
+            const gtsam::Pose2 anchor =
+                isam_.calculateEstimate<gtsam::Pose2>(pose_key(cand.anchor));
+            gtsam::Matrix23 Hpose;
+            gtsam::Matrix2 Hpoint;
+            const gtsam::Point2 world = anchor.transformFrom(cand.mu, Hpose, Hpoint);
+            const gtsam::Matrix2 world_cov = Hpoint * cand.P * Hpoint.transpose() +
+                                             Hpose * cand.drift * Hpose.transpose();
+
+            // What one look at this cone costs, in the map frame. Taken from the
+            // most recent sighting, so it carries the range the car is at now
+            // rather than the range it first saw the thing from.
+            const Candidate::Sighting &last = cand.sightings.back();
+            // The keyframe being built is not in the solver yet -- this runs
+            // before the update, so that its promotions and its pose go in as one.
+            const gtsam::Pose2 seen_from =
+                last.keyframe == keyframe
+                    ? keyframe_pose
+                    : isam_.calculateEstimate<gtsam::Pose2>(pose_key(last.keyframe));
+            const gtsam::Matrix2 rotation = seen_from.rotation().matrix();
+            const gtsam::Matrix2 resolving = rotation * last.covariance * rotation.transpose();
+
+            int duplicate_of = -1;
+            if (is_duplicate(world, world_cov, resolving, &duplicate_of))
+            {
+                if (overdue)
+                {
+                    // Still indistinguishable after all this time. An extra cone in
+                    // the map is a cosmetic defect; a missing one is a hole in the
+                    // track that the planner has to route around. Break the tie
+                    // towards existing.
+                }
+                else
+                {
+                    // Give it to the landmark it duplicates and let it go. Nothing
+                    // was ever written for this candidate, so nothing is undone.
+                    landmarks_.at(duplicate_of).types.absorb(cand.types);
+                    it = candidates_.erase(it);
+                    continue;
+                }
+            }
+
+            const int id = next_landmark_++;
+            values.insert(landmark_key(id), world);
+
+            LandmarkRecord record;
+            record.position = world;
+            record.covariance = world_cov;
+            record.log_odds = cand.log_odds;
+            record.sightings = static_cast<int>(cand.sightings.size());
+            record.types = cand.types;
+            record.marginal_keyframe = keyframe;
+            landmarks_.emplace(id, std::move(record));
+
+            // Every sighting that justified the promotion goes into the graph, at
+            // the pose it was actually taken from. Attaching only from here on
+            // would throw away the evidence that made the decision and leave the
+            // landmark starting life with one measurement.
+            const size_t total = cand.sightings.size();
+            const size_t keep = std::min<size_t>(
+                total, static_cast<size_t>(std::max(1, params_.max_promotion_factors)));
+            for (size_t s = total - keep; s < total; ++s)
+            {
+                graph.push_back(measurement_factor(cand.sightings[s].keyframe, id,
+                                                   cand.sightings[s].local,
+                                                   cand.sightings[s].covariance));
+            }
+
+            fresh.push_back(landmark_key(id));
+            ++last_promoted_;
+            if (debug)
+                debug->promoted.push_back(world);
+
+            it = candidates_.erase(it);
+        }
+    }
+
+    void Slam::read_back(const gtsam::ISAM2Result &result, int keyframe)
+    {
+        last_reeliminated_ = static_cast<int>(result.variablesReeliminated);
+        last_cliques_ = static_cast<int>(result.cliques);
+
         try
         {
-            gtsam::LevenbergMarquardtParams lm;
-            lm.setMaxIterations(10);
-            result = gtsam::LevenbergMarquardtOptimizer(graph, values, lm).optimize();
+            pose_cov_ = isam_.marginalCovariance(pose_key(keyframe));
         }
         catch (const std::exception &)
         {
-            // Keep the previous estimate rather than a half-solved one. The next
-            // keyframe brings new information and another chance.
-            return;
+            // Keep the previous one; it only widens the gate, which errs towards
+            // recognising a cone rather than duplicating it.
         }
 
-        for (Keyframe &frame : window_)
-            frame.estimate = result.at<gtsam::Pose2>(gtsam::Symbol('x', frame.index));
-        for (const int id : in_window)
-            landmarks_.at(id).position = result.at<gtsam::Point2>(gtsam::Symbol('l', id));
-
-        // Marginals are what make it safe to throw the window away: they are how
-        // this solve's confidence survives into the next one. If they cannot be
-        // had the estimates still stand, the uncertainties just go stale.
-        //
-        // Only two things need them, and neither is every landmark every cycle:
-        // the newest pose, for the next association gate, and the cones of a
-        // keyframe about to be dropped. That is a handful of back-substitutions
-        // rather than one per cone in the window.
-        try
+        for (auto &[id, record] : landmarks_)
+            record.position = isam_.calculateEstimate<gtsam::Point2>(landmark_key(id));
+        for (auto &[id, cand] : candidates_)
         {
-            gtsam::Marginals marginals(graph, result);
-            pose_cov_ = marginals.marginalCovariance(gtsam::Symbol('x', window_.back().index));
-
-            while (static_cast<int>(window_.size()) > params_.window_keyframes)
-                freeze_oldest(marginals);
+            (void)id;
+            cand.anchor_pose = isam_.calculateEstimate<gtsam::Pose2>(pose_key(cand.anchor));
         }
-        catch (const std::exception &)
+
+        // Marginals are what the gate and the duplicate test both read, and they
+        // are the expensive part: each is a walk up the Bayes tree. The solver has
+        // just said which variables it touched, and a landmark it did not touch has
+        // the same uncertainty it had before, so only those need refreshing -- plus
+        // a few more each keyframe so nothing anywhere goes stale for ever.
+        std::vector<int> refresh;
+        for (const gtsam::Key key : result.markedKeys)
+            if (gtsam::Symbol(key).chr() == 'l')
+                refresh.push_back(static_cast<int>(gtsam::Symbol(key).index()));
+
+        if (!landmarks_.empty())
         {
+            for (size_t n = 0; n < kMarginalBudget; ++n)
+            {
+                marginal_cursor_ = (marginal_cursor_ + 1) % landmarks_.size();
+                auto it = landmarks_.begin();
+                std::advance(it, static_cast<long>(marginal_cursor_));
+                refresh.push_back(it->first);
+            }
         }
-    }
 
-    void Slam::freeze_oldest(const gtsam::Marginals &marginals)
-    {
-        const double landmark_floor = params_.min_landmark_sigma * params_.min_landmark_sigma;
-
-        // Everything the departing keyframe knew about a cone becomes that cone's
-        // prior. Frozen here and not touched again until another of its keyframes
-        // leaves, so the same measurements are never counted twice.
-        for (const int id : window_.front().ids)
+        for (const int id : refresh)
         {
             auto it = landmarks_.find(id);
             if (it == landmarks_.end())
                 continue;
-            LandmarkRecord &record = it->second;
-            record.prior_position = record.position;
-            gtsam::Matrix2 cov = marginals.marginalCovariance(gtsam::Symbol('l', id));
-            cov(0, 0) = std::max(cov(0, 0), landmark_floor);
-            cov(1, 1) = std::max(cov(1, 1), landmark_floor);
-            record.prior_covariance = cov;
-            record.covariance = cov;
-            record.has_prior = true;
+            try
+            {
+                it->second.covariance = isam_.marginalCovariance(landmark_key(id));
+            }
+            catch (const std::exception &)
+            {
+                // Keep the previous one. A stale marginal only widens the gate,
+                // which errs towards recognising a cone rather than duplicating it.
+            }
         }
-
-        window_.pop_front();
-
-        // The pose behind it inherits an anchor at its own optimised estimate,
-        // with its own uncertainty rather than a guessed one. That is what makes
-        // dropping the keyframe safe rather than merely cheap -- and clamping it
-        // matters in both directions: too tight and the window cannot correct
-        // itself when a cone says the car is elsewhere, too loose and it drifts.
-        anchor_pose_ = window_.front().estimate;
-        gtsam::Matrix3 pose_cov = marginals.marginalCovariance(
-            gtsam::Symbol('x', window_.front().index));
-        const double xy_floor = params_.min_anchor_sigma_xy * params_.min_anchor_sigma_xy;
-        const double theta_floor = params_.min_anchor_sigma_theta * params_.min_anchor_sigma_theta;
-        pose_cov(0, 0) = std::max(pose_cov(0, 0), xy_floor);
-        pose_cov(1, 1) = std::max(pose_cov(1, 1), xy_floor);
-        pose_cov(2, 2) = std::max(pose_cov(2, 2), theta_floor);
-        anchor_noise_ = gtsam::noiseModel::Gaussian::Covariance(pose_cov);
     }
 
-
-    void Slam::remove_unseen(const gtsam::Pose2 &pose,
-                             const std::vector<int> &seen,
-                             SlamDebug *debug)
+    std::vector<Landmark> Slam::batch_snapshot() const
     {
-        last_removed_ = 0;
-        const std::unordered_set<int> observed(seen.begin(), seen.end());
-
-        for (auto it = landmarks_.begin(); it != landmarks_.end();)
+        gtsam::Values result;
+        try
         {
-            LandmarkRecord &record = it->second;
-            if (observed.count(it->first))
-            {
-                ++it;
-                continue;
-            }
-
-            // Was it somewhere the car could actually have seen it? A cone behind
-            // the car has not gone missing -- nothing was pointed at it.
-            const gtsam::Point2 local = pose.transformTo(record.position);
-            const bool in_view =
-                local.norm() < params_.local_map_radius && local.x() > 0.0 &&
-                std::abs(std::atan2(local.y(), local.x())) < params_.view_half_angle;
-            if (!in_view)
-            {
-                ++it;
-                continue;
-            }
-
-            // Being seen buys patience, and it buys a bounded amount of it.
-            // Misses are never wiped by a later sighting -- a cone that is seen
-            // once in a while and missed the rest of the time is not a cone, and
-            // resetting the count on every sighting is what let those live for
-            // ever.
-            const int allowance =
-                params_.max_misses * std::min(record.sightings, params_.confirm_sightings);
-            if (++record.misses < allowance)
-            {
-                ++it;
-                continue;
-            }
-
-            // Looked at repeatedly, never seen again: it was never a cone.
-            if (debug)
-                debug->removed.push_back(record.position);
-            const int id = it->first;
-            it = landmarks_.erase(it);
-            ++last_removed_;
-
-            // Its measurements go with it, or the next graph would reference a
-            // landmark that no longer exists.
-            for (Keyframe &frame : window_)
-            {
-                for (size_t i = frame.ids.size(); i-- > 0;)
-                {
-                    if (frame.ids[i] != id)
-                        continue;
-                    frame.ids.erase(frame.ids.begin() + static_cast<long>(i));
-                    frame.local.erase(frame.local.begin() + static_cast<long>(i));
-                    frame.noise.erase(frame.noise.begin() + static_cast<long>(i));
-                }
-            }
+            gtsam::LevenbergMarquardtParams lm;
+            lm.setMaxIterations(100);
+            result = gtsam::LevenbergMarquardtOptimizer(isam_.getFactorsUnsafe(),
+                                                        isam_.calculateEstimate(), lm)
+                         .optimize();
         }
-    }
+        catch (const std::exception &)
+        {
+            return {};
+        }
 
-    std::vector<int> Slam::associate(const gtsam::Pose2 &pred_pose,
-                                     const gtsam::Matrix3 &pose_cov_map,
-                                     const std::vector<Observation> &observations,
-                                     const std::vector<gtsam::Matrix2> &measurement_cov) const
-    {
-        const size_t n = observations.size();
-        std::vector<int> association(n, -1);
-        if (n == 0)
-            return association;
-
-        // Only what is plausibly in view.
-        std::vector<int> ids;
-        const gtsam::Point2 vehicle = pred_pose.translation();
+        std::vector<Landmark> out;
         for (const auto &[id, record] : landmarks_)
         {
-            if ((record.position - vehicle).norm() < params_.local_map_radius)
-                ids.push_back(id);
+            if (record.log_odds < params_.publish_log_odds)
+                continue;
+            const gtsam::Symbol key = landmark_key(id);
+            if (!result.exists(key))
+                continue;
+            const gtsam::Point2 p = result.at<gtsam::Point2>(key);
+            out.push_back({p.x(), p.y(), record.types.best,
+                           1.0 / (1.0 + std::exp(-record.log_odds))});
         }
-        if (ids.empty())
-            return association;
+        return out;
+    }
 
-        const size_t m = ids.size();
-        const gtsam::Matrix2 Rt = pred_pose.rotation().matrix().transpose();
-        gtsam::Matrix2 J;
-        J << 0.0, 1.0,
-            -1.0, 0.0;
-
-        // n rows, m real columns plus one "no match" column per row priced at the
-        // gate. The matrix is therefore always at least as wide as it is tall, and
-        // gating falls out of the assignment rather than being a separate pass:
-        // any pairing costing more than the gate loses to its own column.
-        std::vector<std::vector<double>> cost(n, std::vector<double>(m + n, kBlocked));
-
-        for (size_t i = 0; i < n; ++i)
+    std::vector<Landmark> Slam::map_snapshot() const
+    {
+        std::vector<Landmark> out;
+        out.reserve(landmarks_.size());
+        for (const auto &[id, record] : landmarks_)
         {
-            cost[i][m + i] = params_.mahalanobis_threshold;
-            const gtsam::Point2 local(observations[i].x, observations[i].y);
-
-            // Association is geometry and nothing else. The cone's reported type
-            // takes no part even though one is carried: gating on it would spawn a
-            // duplicate on top of a real cone whenever a detection disagreed, and
-            // a big cone that reads as small for one frame is a misread, not a
-            // second cone half a metre away. Types accumulate as votes on the
-            // landmark instead, where a misread costs one vote.
-            for (size_t j = 0; j < m; ++j)
-            {
-                const LandmarkRecord &record = landmarks_.at(ids[j]);
-
-                // Reject on plain distance first: the chi-square test costs a 2x2
-                // inverse, this costs a subtraction.
-                const gtsam::Vector2 innovation = local - pred_pose.transformTo(record.position);
-                if (innovation.norm() > params_.max_association_distance)
-                    continue;
-
-                const double floor = params_.min_landmark_sigma * params_.min_landmark_sigma;
-                gtsam::Matrix2 P_lm = record.covariance;
-                P_lm(0, 0) = std::max(P_lm(0, 0), floor);
-                P_lm(1, 1) = std::max(P_lm(1, 1), floor);
-
-                gtsam::Matrix23 H;
-                H.leftCols<2>() = -Rt;
-                H.rightCols<1>() = Rt * J * (record.position - vehicle);
-
-                const gtsam::Matrix2 S = H * pose_cov_map * H.transpose() +
-                                         Rt * P_lm * Rt.transpose() + measurement_cov[i];
-
-                const double det = S.determinant();
-                if (!std::isfinite(det) || det <= 0.0)
-                    continue;
-
-                const double d2 = innovation.transpose() * S.inverse() * innovation;
-                if (std::isfinite(d2) && d2 < params_.mahalanobis_threshold)
-                    cost[i][j] = d2;
-            }
+            (void)id;
+            if (record.log_odds < params_.publish_log_odds)
+                continue;
+            out.push_back({record.position.x(), record.position.y(), record.types.best,
+                           1.0 / (1.0 + std::exp(-record.log_odds))});
         }
-
-        const std::vector<int> assignment = hungarian(cost);
-        for (size_t i = 0; i < n; ++i)
-        {
-            const int j = assignment[i];
-            if (j >= 0 && static_cast<size_t>(j) < m)
-                association[i] = ids[j];
-        }
-        return association;
+        return out;
     }
 
 } // namespace mirena

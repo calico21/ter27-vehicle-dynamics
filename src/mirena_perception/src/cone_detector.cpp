@@ -321,10 +321,13 @@ namespace mirena
             const float range = std::hypot(cx - sensor_xy_.x(), cy - sensor_xy_.y());
             if (range > params_.max_range || range < 1.0f) continue;
 
-            bool crowded = false;
-            for (const auto &d : detections_)
-                if ((d.position.head<2>() - Eigen::Vector2f(cx, cy)).norm() < 0.7f) { crowded = true; break; }
-            if (crowded) continue;
+            // Whether this peak is a second look at a cone already found is
+            // decided further down, once its blob has been measured. It used to
+            // be decided here, by a fixed 0.7 m exclusion, and a fixed distance
+            // cannot tell a second peak on one cone from the second cone of a
+            // start-line pair -- the big orange cones stand well inside 0.7 m of
+            // each other, so one of every pair was deleted before the shape
+            // tests ever ran on it.
 
             const Plane plane = fit_ground(cx, cy);
             if (!plane.valid || plane.roughness > params_.max_roughness) continue;
@@ -362,8 +365,36 @@ namespace mirena
             if (n_ring > params_.max_ring_ratio * n_core) continue;
 
             const Eigen::Vector3f centre(sx / n_core, sy / n_core, sz / n_core);
+
+            // How wide this blob actually is, floored by what the sensor can
+            // separate across the beam at this range. Two objects closer than
+            // that are one object as far as this data can honestly say, and the
+            // floor is what stops a distant cone caught in two points from
+            // claiming an extent of nearly nothing and splitting in two.
+            const float half_extent = std::max(
+                0.5f * std::max(max_x - min_x, max_y - min_y),
+                static_cast<float>(params_.bearing_sigma) * range);
+
+            // Same object as one already found? The test is whether the two
+            // blobs overlap, each measured on its own points -- not whether
+            // their centres fall inside a distance chosen in advance. Two peaks
+            // on one cone sit within a cone's width of each other and merge; two
+            // cones set down a start line apart do not, however close that is.
+            bool duplicate = false;
+            for (const auto &d : detections_)
+            {
+                if ((d.position.head<2>() - centre.head<2>()).norm() <
+                    half_extent + d.half_extent)
+                {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate) continue;
+
             detections_.push_back({centre, n_core, top >= params_.big_cone_min_height,
-                                   position_covariance(centre.head<2>(), n_core)});
+                                   position_covariance(centre.head<2>(), n_core),
+                                   half_extent});
 
             // Label the debug cloud, so the node's clustered-points topic shows
             // exactly which returns each cone was built from.

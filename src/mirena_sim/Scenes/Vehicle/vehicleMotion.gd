@@ -10,6 +10,11 @@ const GEAR_RATIO = 5 # 1:5
 const WHEEL_RADIUS = 0.23 # m
 const BRAKE_F = 20
 const MAX_STEER = deg_to_rad(30)
+## Forward speed over which regen is at full strength. Below it regen fades out
+## and the friction brakes take over, so a braking command can only ever remove
+## speed: /control carries a [-1, 1] throttle where -1 is full braking, never
+## reverse, and the car must not drive backwards on one.
+const REGEN_FADE_SPEED = 0.5 # m/s
 
 # --- Pilot Settings ---
 @export var pilot: PilotMode = PilotMode.NO_PILOT
@@ -120,7 +125,7 @@ func _publish_car_state():
 	car_state.y = -odom_transform.origin.x
 	car_state.psi = odom_transform.basis.get_euler().y
 	
-	var local_vel = basis.inverse() * linear_velocity
+	var local_vel = _body_velocity()
 	car_state.u = -local_vel.z
 	car_state.v = -local_vel.x
 	car_state.omega = angular_velocity.y
@@ -247,19 +252,42 @@ func _process_track_rail(delta: float) -> void:
 	).orthonormalized()
 # --- Physics & Low Level Control ---
 
+## Velocity in the car's own frame. Godot's forward is -Z, so the forward speed
+## is -z and the leftward speed is -x -- the same quantities ROS calls u and v.
+## Both the drivetrain and the published state read the car's motion through
+## here so they cannot end up disagreeing about which way the car is pointing.
+func _body_velocity() -> Vector3:
+	return global_basis.inverse() * linear_velocity
+
+
 func _apply_vehicle_physics(_delta: float) -> void:
-	var u = linear_velocity.z
+	# Forward speed in the car's own frame. Reading linear_velocity.z straight
+	# off gives the *world's* z, which only means "forward speed" while the car
+	# happens to point down that axis, and carries the opposite sign besides --
+	# Godot's forward is -Z. Both mistakes together are what turned a braking
+	# command into reverse throttle: driving forward it read negative and killed
+	# the regen entirely, at a standstill it read zero and pushed the car
+	# backwards, and once rolling backwards it read positive and pushed harder.
+	var u = -_body_velocity().z
 	var max_fx_motor = MOTOR_PEAK_TRQ * GEAR_RATIO / WHEEL_RADIUS
-	var max_fx_regen = 0.5 * (1.0 + tanh(u / 0.01)) * max_fx_motor
-	
-	var fx = min(gas, 0) * max_fx_regen + max(gas, 0) * max_fx_motor
-	
+
+	# Regen can only take away speed that is there, so it scales with the speed
+	# there is to take: full strength above REGEN_FADE_SPEED, nothing at rest or
+	# already rolling backwards. This is what bounds braking at zero.
+	var throttle = max(gas, 0.0)
+	var braking = max(-gas, 0.0)
+	var regen_scale = clamp(u / REGEN_FADE_SPEED, 0.0, 1.0)
+	var fx = (throttle - braking * regen_scale) * max_fx_motor
+
 	$RL_WHEEL.engine_force = fx / 2.0
 	$RR_WHEEL.engine_force = fx / 2.0
-	
-	# Apply braking force to wheels
-	$RL_WHEEL.brake = brake
-	$RR_WHEEL.brake = brake
+
+	# Apply braking force to wheels. The friction brakes pick up exactly what
+	# regen gives up as the car slows, so a stopped car under a braking command
+	# is held there instead of left to creep or roll away down a slope.
+	var brake_force = min(brake + braking * (1.0 - regen_scale) * BRAKE_F, BRAKE_F)
+	$RL_WHEEL.brake = brake_force
+	$RR_WHEEL.brake = brake_force
 
 func _smooth_steer(current: float, target: float, delta: float, speed: float) -> float:
 	var diff = target - current

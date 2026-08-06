@@ -4,8 +4,7 @@
 [ext_resource type="ArrayMesh" uid="uid://ba1hm840bhu06" path="res://Assets/Models/Car/TeR.res" id="2_pdc0f"]
 [ext_resource type="Script" uid="uid://cxrb8iam8llhk" path="res://addons/rclgd-sensors/ros_lidar/ros_lidar.gd" id="3_pdc0f"]
 [ext_resource type="Script" uid="uid://ds4q43s0n1ft7" path="res://addons/rclgd-sensors/ros_camera/ros_camera.gd" id="4_dflui"]
-[ext_resource type="Script" uid="uid://bsmemyc0nuhy2" path="res://addons/rclgd-sensors/ros_imu/ros_imu.gd" id="5_sviuk"]
-[ext_resource type="Script" uid="uid://c0hu800pgnmoh" path="res://addons/rclgd-sensors/ros_gps/ros_gps.gd" id="6_1avwx"]
+[ext_resource type="Script" uid="uid://dq7n5vk2ajh1w" path="res://addons/rclgd-sensors/ros_ins/ros_ins.gd" id="5_sviuk"]
 [ext_resource type="Script" uid="uid://bql8sdwil32cb" path="res://addons/rclgd-sensors/ros_transforms/ros_transforms.gd" id="7_tfmgr"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_iwp33"]
@@ -232,7 +231,7 @@ cull_mask = 524287
 transform = Transform3D(1, 0, 0, 0, 0.8660254, 0.5, 0, -0.5, 0.8660254, 0, 3.796, 4)
 
 [node name="Lidar" type="Node3D" parent="." unique_id=1957314712]
-transform = Transform3D(1, 0, 0, 0, 0.98480767, 0.17364816, 0, -0.17364816, 0.98480767, -0.049117498, 1.0057302, 0)
+transform = Transform3D(1, 0, 0, 0, 0.98480767, 0.17364816, 0, -0.17364816, 0.98480767, -0.049, 1, 0)
 script = ExtResource("3_pdc0f")
 horizontal_resolution = 600
 vertical_resolution = 125
@@ -251,13 +250,10 @@ script = ExtResource("4_dflui")
 publish_rate = 60.0
 metadata/_custom_type_script = "uid://ds4q43s0n1ft7"
 
-[node name="IMU" type="Node3D" parent="." unique_id=598701879]
+[node name="INS" type="Node3D" parent="." unique_id=598701879]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
 script = ExtResource("5_sviuk")
-metadata/_custom_type_script = "uid://bsmemyc0nuhy2"
-
-[node name="GPS" type="Node3D" parent="." unique_id=1746440958]
-script = ExtResource("6_1avwx")
-metadata/_custom_type_script = "uid://c0hu800pgnmoh"
+metadata/_custom_type_script = "uid://dq7n5vk2ajh1w"
 
 [node name="MirenaTransform" type="Node3D" parent="." unique_id=1856220417]
 script = ExtResource("7_tfmgr")

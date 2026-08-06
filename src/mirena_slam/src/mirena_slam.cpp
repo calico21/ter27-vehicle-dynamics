@@ -40,16 +40,20 @@
 #define MOVING_FRAME "odom"
 
 // Parameters
-#define MAP_PUBLISH_PERIOD 100ms 
+#define MAP_PUBLISH_PERIOD 100ms
+// map->odom has to keep up with the 100 Hz odom->car/cog it is composed with,
+// or every lookup at a fresh pose stamp falls off the end of the buffer.
+#define TF_PUBLISH_PERIOD 10ms
 #define REPORT_PERIOD 100ms
-#define DIST_THRESH 0.5    // Meters moved before creating a keyframe
-#define ANGLE_THRESH 0.3   // Radians turned before creating a keyframe
 #define MAX_SYNC_DELTA_MS 10.0 // Pose/detection pairs further apart are dropped
 #define REPORT_STALE_AFTER_S 1.0
-// Longest a keyframe may be deferred for want of motion. A car waiting on the
-// line does not move, so the thresholds above never fire and the heartbeat used
-// to go PARTIAL a second into every start -- healthy SLAM, reported as failing.
-// Kept below REPORT_STALE_AFTER_S so standing still stays inside the window.
+// Longest interval the odometry noise is integrated over.
+//
+// Whether a frame becomes a keyframe is the estimator's decision now, not a
+// distance threshold here, but the interval that decision is measured across
+// still has to be bounded: a gap in /state/car would otherwise integrate the
+// velocity uncertainty over the whole outage and hand the graph a factor loose
+// enough to mean nothing.
 #define KEYFRAME_MAX_INTERVAL_S 0.5
 // Time constant of the filter on the published map->odom, seconds.
 //
@@ -90,12 +94,16 @@ class MirenaMapping : public rclcpp::Node
     rclcpp::Publisher<mirena_common::msg::Heartbeat>::SharedPtr _report_pub;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr _debug_pub;
     bool _publish_debug = true;
+    /// Latches the one-time fatal log when the solver gives up. Touched only from
+    /// the sync callback, so it needs no lock.
+    bool _reported_unhealthy = false;
 
     // Transform broadcaster (map -> odom)
     std::unique_ptr<tf2_ros::TransformBroadcaster> _tf_broadcaster;
 
     // Timers
     rclcpp::TimerBase::SharedPtr _map_publish_timer;
+    rclcpp::TimerBase::SharedPtr _tf_publish_timer;
     rclcpp::TimerBase::SharedPtr _report_timer;
 
     // Report State & Mutex (NUEVO: Protege las variables que comparten ambos hilos)
@@ -108,15 +116,19 @@ class MirenaMapping : public rclcpp::Node
     double _current_car_psi = 0.0;
     bool _has_keyframe = false;
     int _last_matched = 0;
-    int _last_new = 0;
-    int _last_removed = 0;
-    int _window_size = 0;
+    int _last_promoted = 0;
+    int _last_hidden = 0;
+    int _candidates = 0;
+    int _poses = 0;
+    int _variables_reeliminated = 0;
+    int _cliques = 0;
+    bool _healthy = true;
     uint64_t _dropped_sync_pairs = 0;
 
-    // Result of the last optimisation, handed to the publisher thread.
-    // Everything the timer needs is copied out here so it never touches _slam
-    // while the optimiser is running -- note get_map() hands back a reference to
-    // a vector that update_isam() clears and refills.
+    // Result of the last solve, handed to the publisher thread. Everything the
+    // timers need is copied out here so they never touch _slam while the solver
+    // is running -- which under an incremental solver is a wait measured in
+    // hundreds of milliseconds the first time the track closes on itself.
     std::mutex _snapshot_mutex;
     gtsam::Pose2 _map_to_odom_snapshot;
     std::shared_ptr<const mirena_common::msg::EntityList> _map_snapshot;
@@ -145,8 +157,13 @@ class MirenaMapping : public rclcpp::Node
 
 public:
     MirenaMapping() : rclcpp::Node("mirena_mapping") {
-        this->_last_update_timestamp = this->now();
-        this->_last_keyframe_time = this->now();
+        // Left at zero rather than now(): under use_sim_time the node is
+        // constructed before /clock exists, so now() is 0 anyway, and an "age"
+        // measured from it came out as the seconds since 1970 -- the report
+        // carried seconds_since_update = 1.78e9 until the first keyframe. Both
+        // are overwritten from message stamps before anything reads them.
+        this->_last_update_timestamp = rclcpp::Time(0, 0, this->get_clock()->get_clock_type());
+        this->_last_keyframe_time = this->_last_update_timestamp;
         this->_last_update_total_landmark_count = 0;
 
         RCLCPP_INFO(this->get_logger(), "Starting Mirena Mapping");
@@ -183,11 +200,21 @@ public:
         _sync->registerCallback(std::bind(&MirenaMapping::synchronized_callback, this, std::placeholders::_1, std::placeholders::_2));
 
         // Low-frequency Map and TF update timer
-        _map_publish_timer = this->create_wall_timer(
-            MAP_PUBLISH_PERIOD, std::bind(&MirenaMapping::map_publish_timer_callback, this), _tf_cb_group);
+        // Node clock, not wall clock: under use_sim_time these are different
+        // clocks at different rates, and the correction filter below steps on
+        // elapsed node time, so a wall timer would ease at the wrong rate
+        // whenever the simulator or a bag is not running at exactly 1x.
+        _map_publish_timer = rclcpp::create_timer(
+            this, this->get_clock(), MAP_PUBLISH_PERIOD,
+            std::bind(&MirenaMapping::map_publish_timer_callback, this), _tf_cb_group);
 
-        _report_timer = this->create_wall_timer(
-            REPORT_PERIOD, std::bind(&MirenaMapping::report_callback, this), _report_cb_group);
+        _tf_publish_timer = rclcpp::create_timer(
+            this, this->get_clock(), TF_PUBLISH_PERIOD,
+            std::bind(&MirenaMapping::tf_publish_timer_callback, this), _tf_cb_group);
+
+        _report_timer = rclcpp::create_timer(
+            this, this->get_clock(), REPORT_PERIOD,
+            std::bind(&MirenaMapping::report_callback, this), _report_cb_group);
 
         _is_initialized = false;
     }
@@ -228,7 +255,7 @@ private:
 
         gtsam::Pose2 current_raw(car_msg->x, car_msg->y, car_msg->psi);
 
-        std::lock_guard<std::mutex> slam_lock(_slam_mutex);
+        std::unique_lock<std::mutex> slam_lock(_slam_mutex);
 
         if (!_is_initialized) {
             _slam = std::make_unique<mirena::Slam>(current_raw);
@@ -255,27 +282,30 @@ private:
 
         mirena::SlamDebug debug;
         mirena::SlamDebug *sink = _publish_debug ? &debug : nullptr;
-        _slam->observe(current_raw, obs, sink);
 
-        // 3. Only commit a pose when the car has actually gone somewhere. The old
-        //    "or the map is empty" clause meant that until the first cone landed,
-        //    every synchronised pair became a keyframe: a pile of near-zero-delta
-        //    poses right where the prior is stiffest.
+        // How much the odometry could have drifted since the last keyframe.
+        // Computed once and used twice: the association gate widens by it now,
+        // and if this frame becomes a keyframe its factor carries the same
+        // numbers. Two different answers to that question is how a gate ends up
+        // rejecting cones the graph is perfectly happy to believe in.
         gtsam::Pose2 delta = _last_keyframe_raw_odom.between(current_raw);
-        const bool first_keyframe = !_has_keyframe;
-        // Standing still is a state to keep observing, not one to fall silent
-        // in: the cones in front of the car are still being seen, and the graph
-        // should keep taking them.
-        // Measured against the message stamps, not now(): the interval is a
-        // property of the data, and it is what the odometry noise below
-        // integrates over. Mixing a wall reading into that would make the
-        // factor weights depend on how busy this node happened to be.
         const double interval_s = (car_stamp - _last_keyframe_time).seconds();
-        const bool overdue = interval_s >= KEYFRAME_MAX_INTERVAL_S;
-        if (first_keyframe || overdue || delta.translation().norm() >= DIST_THRESH ||
-            std::abs(delta.theta()) >= ANGLE_THRESH)
+        const gtsam::Vector3 odom_sigmas = odometry_sigmas(*car_msg, delta, interval_s);
+
+        _slam->observe(current_raw, obs, odom_sigmas, sink);
+
+        // 3. Whether this frame is worth a permanent pose is the estimator's
+        //    question, not the node's. It turns on what the frame can see and how
+        //    well the map already knows it -- a keyframe is cheap to add and
+        //    impossible to remove, so "the car moved half a metre" is the wrong
+        //    test. All the node still owns is the very first one.
+        //
+        //    Stamps, not now(): the interval is a property of the data, and it is
+        //    what the odometry noise integrates over. Mixing a wall reading into
+        //    that would make factor weights depend on how busy this node was.
+        if (!_has_keyframe || _slam->wants_keyframe())
         {
-            _slam->add_keyframe(make_odometry_noise(*car_msg, delta, interval_s), sink);
+            _slam->add_keyframe(odom_sigmas, sink);
             _last_keyframe_raw_odom = current_raw;
             _last_keyframe_time = car_stamp;
 
@@ -283,27 +313,51 @@ private:
                 std::lock_guard<std::mutex> lock(_report_mutex);
                 _last_update_timestamp = this->now();
                 _last_update_ms_elapsed = _slam->get_last_update_elapsed_ms();
-                _window_size = _slam->get_window_size();
                 _has_keyframe = true;
             }
         }
 
-        // The map changes on every frame now, not only on keyframes, because a
-        // cone can be born or dropped between them.
+        if (!_slam->healthy() && !_reported_unhealthy) {
+            _reported_unhealthy = true;
+            RCLCPP_FATAL(
+                this->get_logger(),
+                "SLAM solver failed and the estimate can no longer be trusted. "
+                "The map and map->odom are frozen at their last good values.");
+        }
+
+        // The map changes on every frame, not only on keyframes, because a cone
+        // can be promoted or lose its evidence between them.
         publish_snapshot(car_msg->header.stamp);
-        if (_publish_debug)
-            publish_debug(debug, car_msg->header.stamp);
 
         {
             std::lock_guard<std::mutex> lock(_report_mutex);
-            _last_update_total_landmark_count = static_cast<uint16_t>(_slam->get_map().size());
+            _last_update_total_landmark_count =
+                static_cast<uint16_t>(_slam->get_landmark_count());
             _last_matched = _slam->get_last_matched_count();
-            _last_new = _slam->get_last_new_count();
-            _last_removed = _slam->get_last_removed_count();
+            _last_promoted = _slam->get_last_promoted_count();
+            _last_hidden = _slam->get_last_hidden_count();
+            _candidates = _slam->get_candidate_count();
+            _poses = _slam->get_pose_count();
+            _variables_reeliminated = _slam->get_variables_reeliminated();
+            _cliques = _slam->get_cliques();
+            _healthy = _slam->healthy();
         }
+
+        // Deliberately outside the lock. Serialising a MarkerArray is not work the
+        // estimator should be held hostage to, and under an incremental solver a
+        // loop closure can make that critical section hundreds of milliseconds
+        // long.
+        slam_lock.unlock();
+        if (_publish_debug)
+            publish_debug(debug, car_msg->header.stamp);
     }
 
-    /// Noise for the odometry *delta*, not for the absolute pose.
+    /// Uncertainty accumulated by the odometry *delta*, not the absolute pose,
+    /// as sigmas over [x, y, theta] in the body frame.
+    ///
+    /// One answer, used in two places: the association gate widens by it on
+    /// every frame, and the keyframe factor is built from it. They are the same
+    /// question and must not be allowed to have different answers.
     ///
     /// This used to difference the absolute position covariance across the
     /// keyframe interval. That cannot work: a converged filter's absolute
@@ -334,9 +388,9 @@ private:
     /// to filter confidence, gyro_meas_var in mirena_state is what sets it.
     ///
     /// Caller must hold _slam_mutex.
-    gtsam::SharedNoiseModel make_odometry_noise(const mirena_common::msg::Car &car,
-                                                const gtsam::Pose2 &delta,
-                                                double interval_s)
+    gtsam::Vector3 odometry_sigmas(const mirena_common::msg::Car &car,
+                                   const gtsam::Pose2 &delta,
+                                   double interval_s)
     {
         // Car covariance is row-major 6x6 over [x, y, psi, u, v, omega], so the
         // velocity block sits on the diagonal at 21, 28 and 35.
@@ -354,7 +408,7 @@ private:
         const double sy = std::max({drift_y, model_xy, 0.02});
         const double st = std::max({drift_th, model_th, 0.005});
 
-        return gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector3(sx, sy, st));
+        return gtsam::Vector3(sx, sy, st);
     }
 
     /// Copy the optimiser's result somewhere the publisher thread can read it
@@ -364,13 +418,16 @@ private:
     void publish_snapshot(const builtin_interfaces::msg::Time &stamp)
     {
         auto map_msg = std::make_shared<mirena_common::msg::EntityList>();
-        const auto &landmarks = _slam->get_map();
+        const std::vector<mirena::Landmark> landmarks = _slam->map_snapshot();
         map_msg->entities.reserve(landmarks.size());
         for (const auto &l : landmarks) {
             mirena_common::msg::Entity e;
             e.position.x = l.x;
             e.position.y = l.y;
             e.type = l.type;
+            // Nobody downstream reads this yet, but with no landmark ids on the
+            // wire it is the only thing that can say how sure the map is.
+            e.confidence = l.confidence;
             map_msg->entities.push_back(e);
         }
         map_msg->header.frame_id = FIXED_FRAME;
@@ -437,31 +494,34 @@ private:
         }
         array.markers.push_back(links);
 
-        // New landmarks. After the first lap these should stop appearing; if they
-        // do not, association is failing to recognise cones already mapped.
-        Marker created = marker("created", Marker::SPHERE_LIST, 0.45, 0.2f, 0.8f, 1.0f, 0.9f);
-        for (const auto &p : debug.created)
-            created.points.push_back(point(p));
-        array.markers.push_back(created);
+        // Candidates promoted into the graph this keyframe. After the first lap
+        // these should stop appearing; if they do not, association is failing to
+        // recognise cones already mapped.
+        Marker promoted = marker("promoted", Marker::SPHERE_LIST, 0.45, 0.2f, 0.8f, 1.0f, 0.9f);
+        for (const auto &p : debug.promoted)
+            promoted.points.push_back(point(p));
+        array.markers.push_back(promoted);
 
-        // Detections dropped for landing on a cone already mapped. A few are
-        // normal -- two detections of one cone in a frame, and the assignment can
-        // only claim it once. A steady stream means the gate is too tight to
-        // recognise its own landmarks.
-        Marker suppressed = marker("suppressed", Marker::CUBE_LIST, 0.3, 1.0f, 0.3f, 0.2f, 0.9f);
-        for (const auto &p : debug.suppressed)
-            suppressed.points.push_back(point(p));
-        array.markers.push_back(suppressed);
+        // Everything the map is still making its mind up about. These are outside
+        // the graph and cost nothing to be wrong about, which is the point of
+        // them. A cloud that grows and never promotes means the promotion test is
+        // stuck; a cloud that never forms means perception has gone quiet.
+        Marker candidates = marker("candidates", Marker::SPHERE_LIST, 0.25, 1.0f, 0.6f, 0.1f, 0.7f);
+        for (const auto &[position, log_odds] : debug.candidates) {
+            (void)log_odds;
+            candidates.points.push_back(point(position));
+        }
+        array.markers.push_back(candidates);
 
-        // Cones deleted this keyframe: looked at repeatedly from close range and
-        // never seen again, so they were never cones.
-        Marker removed = marker("removed", Marker::CUBE_LIST, 0.4, 1.0f, 0.9f, 0.1f, 0.9f);
-        for (const auto &p : debug.removed)
-            removed.points.push_back(point(p));
-        array.markers.push_back(removed);
+        // Landmarks whose evidence has collapsed. They are still in the graph --
+        // their measurements remain perfectly good constraints on the trajectory
+        // -- but they are no longer published as cones.
+        Marker hidden = marker("hidden", Marker::CUBE_LIST, 0.4, 1.0f, 0.9f, 0.1f, 0.9f);
+        for (const auto &p : debug.hidden)
+            hidden.points.push_back(point(p));
+        array.markers.push_back(hidden);
 
-        // How many times each nearby cone has been seen. A landmark stuck at one
-        // while the car drives past it repeatedly is about to be removed.
+        // How many times each nearby cone has been seen.
         int id = 0;
         for (const auto &[position, sightings] : debug.sightings) {
             Marker label = marker("sightings", Marker::TEXT_VIEW_FACING, 0.3,
@@ -476,17 +536,46 @@ private:
         _debug_pub->publish(array);
     }
 
+    /// Republish the map. Slow on purpose: it only changes when SLAM solves.
     void map_publish_timer_callback()
     {
-        // Read the last optimisation result and get straight out of the way.
-        gtsam::Pose2 map_to_odom;
         std::shared_ptr<const mirena_common::msg::EntityList> map_msg;
         {
             std::lock_guard<std::mutex> lock(_snapshot_mutex);
             if (!_has_snapshot)
                 return;
-            map_to_odom = _map_to_odom_snapshot;
             map_msg = _map_snapshot;
+        }
+        // Keeps the stamp of the update that produced it, which is the time the
+        // landmarks were actually valid.
+        if (map_msg)
+            _map_pub->publish(*map_msg);
+    }
+
+    /// Broadcast map->odom, at the rate consumers ask for it rather than the
+    /// rate SLAM solves at.
+    ///
+    /// This used to share the map's 100 ms timer. tf2 interpolates between
+    /// samples but will not extrapolate past the newest one, and mirena_control
+    /// looks map->car/cog up at the freshest /state/car stamp -- which arrives
+    /// at 100 Hz, from a node that publishes ten times as often as this one did.
+    /// So for most of every 100 ms window the newest map->odom was older than
+    /// the pose being asked about, and the lookup failed with "extrapolation
+    /// into the future": 130 times in a 271 s replay of
+    /// rosbag2_2026_08_05-20_26_23, each one a control cycle with no transform.
+    ///
+    /// The correction is piecewise-constant between keyframes, so re-emitting
+    /// it under a fresh stamp adds no information -- it just keeps the buffer's
+    /// newest sample abreast of the poses it has to be composed with.
+    void tf_publish_timer_callback()
+    {
+        // Read the last optimisation result and get straight out of the way.
+        gtsam::Pose2 map_to_odom;
+        {
+            std::lock_guard<std::mutex> lock(_snapshot_mutex);
+            if (!_has_snapshot)
+                return;
+            map_to_odom = _map_to_odom_snapshot;
         }
 
         // 1. Ease the published correction towards the one SLAM last solved.
@@ -543,11 +632,6 @@ private:
         t.transform.rotation.w = q.w();
 
         _tf_broadcaster->sendTransform(t);
-
-        // 3. Republish the map as-is; it keeps the stamp of the update that
-        // produced it, which is the time the landmarks were actually valid.
-        if (map_msg)
-            _map_pub->publish(*map_msg);
     }
 
     void report_callback() {
@@ -567,9 +651,12 @@ private:
             // the constant "WORKING".
             const double since_update = (this->now() - _last_update_timestamp).seconds();
             const bool stale = _has_keyframe && since_update > REPORT_STALE_AFTER_S;
-            report_json["status_state"] = !_has_keyframe ? "IDLE" : (stale ? "PARTIAL" : "WORKING");
+            report_json["status_state"] = !_healthy ? "NOT_WORKING"
+                                          : !_has_keyframe ? "IDLE"
+                                          : (stale ? "PARTIAL" : "WORKING");
 
-            report_json["seconds_since_update"] = since_update;
+            if (_has_keyframe)
+                report_json["seconds_since_update"] = since_update;
             report_json["last_update_ms_elapsed"] = this->_last_update_ms_elapsed;
             report_json["last_update_total_landmark_count"] = this->_last_update_total_landmark_count;
             report_json["last_run_cones_seen"] = this->_last_update_total_landmark_count;
@@ -578,11 +665,19 @@ private:
             // they keep coming, association is failing to recognise cones already
             // mapped.
             report_json["matched_last_keyframe"] = _last_matched;
-            report_json["new_cones_last_keyframe"] = _last_new;
-            report_json["removed_last_keyframe"] = _last_removed;
-            // Constant once the window fills. If it is not, the optimiser is
-            // being handed a bigger problem every keyframe and will not keep up.
-            report_json["window_keyframes"] = _window_size;
+            report_json["promoted_last_keyframe"] = _last_promoted;
+            report_json["hidden_landmarks"] = _last_hidden;
+            // Candidates that have not earned a place in the graph. A number that
+            // climbs and never falls means the promotion test is stuck.
+            report_json["candidates"] = _candidates;
+            // Poses in the graph. Under information-based keyframing this should
+            // grow through the first laps and then flatten; if it keeps climbing
+            // linearly, the pose chain is paying for laps it learns nothing from.
+            report_json["poses"] = _poses;
+            // Straight out of the solver, so a loop-closure spike shows up as work
+            // done rather than as an unexplained slow keyframe.
+            report_json["variables_reeliminated"] = _variables_reeliminated;
+            report_json["cliques"] = _cliques;
             report_json["dropped_sync_pairs"] = _dropped_sync_pairs;
 
             report_json["car_pos_x"] = this->_current_car_x;

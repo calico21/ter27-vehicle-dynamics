@@ -17,6 +17,11 @@
   <depend>gtsam</depend>
   <depend>visualization_msgs</depend>
   <depend>mirena_common</depend>
+  <depend>message_filters</depend>
+  <depend>nav_msgs</depend>
+  <depend>nlohmann-json-dev</depend>
+
+  <test_depend>ament_cmake_gtest</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

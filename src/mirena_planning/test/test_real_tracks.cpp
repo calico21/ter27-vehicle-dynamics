@@ -29,7 +29,9 @@ constexpr double kTrackWidth = 3.0;
 
 std::vector<std::string> trackNames()
 {
-  return {"track1", "track2", "track3", "track4", "track5"};
+  std::vector<std::string> names;
+  for (int i = 1; i <= 10; ++i) {names.push_back("track" + std::to_string(i));}
+  return names;
 }
 
 TrackTemplate loadTrack(const std::string & name)

@@ -209,15 +209,12 @@ private:
 
     declare_parameter<double>("curvature_weight", u.curvature_weight);
     declare_parameter<int>("lookahead", u.lookahead);
-    declare_parameter<double>("min_gate_width", u.min_gate_width);
-    declare_parameter<double>("width_tolerance", u.width_tolerance);
-    declare_parameter<double>("max_gate_width", u.max_gate_width);
+    declare_parameter<double>("track_width", u.track_width);
+    declare_parameter<double>("cone_spacing", u.cone_spacing);
     declare_parameter<double>("max_gate_gap", u.max_gate_gap);
-    declare_parameter<double>("closure_radius", u.closure_radius);
-    declare_parameter<double>("min_loop_ratio", u.min_loop_ratio);
     declare_parameter<double>("start_gate_radius", u.start_gate_radius);
-    declare_parameter<int>("min_path_points", u.min_path_points);
     declare_parameter<int>("closure_hysteresis", u.closure_hysteresis);
+    declare_parameter<int>("max_path_points", u.max_path_points);
   }
 
   std::unique_ptr<Planner> makePlanner()
@@ -225,15 +222,12 @@ private:
     UnknownPlannerParams p;
     p.curvature_weight = get_parameter("curvature_weight").as_double();
     p.lookahead = static_cast<int>(get_parameter("lookahead").as_int());
-    p.min_gate_width = get_parameter("min_gate_width").as_double();
-    p.width_tolerance = get_parameter("width_tolerance").as_double();
-    p.max_gate_width = get_parameter("max_gate_width").as_double();
+    p.track_width = get_parameter("track_width").as_double();
+    p.cone_spacing = get_parameter("cone_spacing").as_double();
     p.max_gate_gap = get_parameter("max_gate_gap").as_double();
-    p.closure_radius = get_parameter("closure_radius").as_double();
-    p.min_loop_ratio = get_parameter("min_loop_ratio").as_double();
     p.start_gate_radius = get_parameter("start_gate_radius").as_double();
-    p.min_path_points = static_cast<int>(get_parameter("min_path_points").as_int());
     p.closure_hysteresis = static_cast<int>(get_parameter("closure_hysteresis").as_int());
+    p.max_path_points = static_cast<int>(get_parameter("max_path_points").as_int());
 
     RCLCPP_INFO(get_logger(), "Planning an unknown track by Delaunay triangulation.");
     return std::make_unique<UnknownPlanner>(p);

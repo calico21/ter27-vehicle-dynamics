@@ -13,123 +13,133 @@ namespace mirena::planning
 
 struct UnknownPlannerParams
 {
-  /// Narrowest edge that can be a way through the track, in metres. The track
-  /// is 3 m across, so anything narrower is two cones on the same side of it.
-  double min_gate_width{3.0};
-  /// How far under that a measured width may fall and still count.
+  /// The track width, in metres. Formula Student sets a floor of 3 m.
   ///
-  /// Not slack for its own sake. What gets measured is not the track, it is two
-  /// mapped cones, and a gate pegged out at 3.000 m arrives here measuring
-  /// 2.9992. Tested against 3 exactly, a third of the real gates on the sim's own
-  /// exported tracks are thrown away and the trace stops at the first of them.
-  double width_tolerance{0.1};
-  /// Widest edge that can be a way through the track, in metres.
+  /// A figure out of the rules rather than off the cones. It could be measured
+  /// across the big cones of the start line instead, and that was tried: it comes
+  /// out at 3.00 m on every one of the exported tracks, so it buys nothing, and
+  /// it costs something. The seed is two *perceived* cones, so on a map carrying
+  /// 0.10 m of landmark error the measurement carries about 0.14 m of its own,
+  /// and every bound derived from it inherits that -- a threshold that ought to
+  /// be fixed jitters from frame to frame instead.
+  double track_width{3.0};
+
+  /// Furthest apart two cones down one side of the track may be, in metres.
+  /// Formula Student sets a ceiling of 5 m.
   ///
-  /// Set to let the diagonals through, not to keep them out. Between two gates
-  /// the triangulation always draws the two crossing diagonals, and they are
-  /// real gates: their midpoints sit on the centreline, and where a cone is
-  /// missing they are the only gate there is. On the sim's five exported tracks
-  /// with 6% of cones unmapped, admitting them traced 77% of the lap and
-  /// excluding them traced 12%.
-  ///
-  /// What the ceiling is for is everything longer than a diagonal -- the chord
-  /// across the inside of a hairpin, the edge reaching clean across a corner.
-  /// Those are not ways through anything. Uncapped, the same five tracks put the
-  /// centreline 24 m off the track.
-  double max_gate_width{5.0};
+  /// With track_width this fixes the widest an edge may be and still be a way
+  /// across the track: the longest honest one is the diagonal bridging an
+  /// unmapped cone, which reaches two stations along one side and the width of
+  /// the track across it.
+  double cone_spacing{5.0};
 
   /// Furthest apart two consecutive gates may be, in metres.
   ///
-  /// Twice the 5 m cones are set out at, and the doubling is the point. Five
-  /// metres is how far apart *cones* are; gates are only that far apart while
-  /// every cone is in the map. Lose one and the next gate the car has not
-  /// already spent is two stations away, so a 5 m reach cannot get there and the
-  /// trace stops at the hole. On the five exported tracks with 6% of cones
-  /// unmapped, 5 m traced 6% of the lap and 10 m traced 93%.
+  /// The one length here the rules cannot settle, and the only reason this is a
+  /// parameter rather than a derivation.
   ///
-  /// Reaching this far is only safe because reach_weight makes it unattractive.
-  /// Without that the search strides whenever it can, and a 10 m gap put the
-  /// centreline 1.5 m off on a complete map; with it the trace steps through the
-  /// same 70 gates a 5 m cap does, and spends the extra reach only at holes.
-  double max_gate_gap{10.0};
+  /// Wanted large. Gates are a cone spacing apart only while every cone is in the
+  /// map; lose one and the next gate the trace has not already spent is two
+  /// stations away, so the rules would put this at twice the cone spacing, 10 m.
+  ///
+  /// What overrules them is how close the track runs to itself. Reach further
+  /// than the gap between one pass of the track and the next and the search can
+  /// step across into the wrong one, which it will do readily: the two passes run
+  /// parallel there, so the step is straight and costs nothing to take. On the
+  /// exported tracks the tightest such pinch is 9.06 m -- 9.1 m on three of the
+  /// ten and never under 18 m on the other seven -- and at the rules' 10 m the
+  /// trace crosses it and lands 5.1 m off the line on a complete map. Hence
+  /// 8.5 m, under the pinch.
+  ///
+  /// That is half a metre of headroom, held against the track rather than against
+  /// the car, and nothing in the rules guarantees it. A layout folding back
+  /// tighter than about 9 m would have no setting that both bridges a missing
+  /// cone and refuses the neighbouring pass. The durable answer is to bound a
+  /// step by the triangulation -- how many edges it crosses -- rather than by a
+  /// distance in metres.
+  double max_gate_gap{8.5};
 
-  /// What bending the centreline costs, against the one gate a step is worth.
+  /// What bending the centreline costs, against the one gate a step earns.
   ///
   /// A step earns 1 for the gate it drives through and pays this many times the
-  /// turn it took to get there, so at 1.0 a step that turns a right angle earns
-  /// nothing and anything sharper earns less than not moving. That is all there
-  /// is to whether a step is worth taking -- no separate threshold, because a
-  /// step nobody would drive is already worth less than staying put.
-  double curvature_weight{1.0};
-  /// What reaching costs, per full gap of reach, against that same one gate.
+  /// angle between the tangent it arrived on and the tangent it leaves on: 0 for
+  /// carrying straight on, 1 for a right angle, 2 for doubling back, so a
+  /// reversal is priced out without having to be forbidden. That is also the only
+  /// test of whether a step is worth taking -- a step nobody would drive is
+  /// already worth less than staying put, so no separate threshold is wanted.
   ///
-  /// The gap has to be generous, because a cone perception missed puts the next
-  /// gate two stations away instead of one. But a generous gap with nothing to
-  /// discourage it means the search reaches for no reason: a gate three along is
-  /// worth exactly what the next one is worth, so it strides past gates it
-  /// should have driven through and lands off the line. This makes the nearer
-  /// gate the better one when both are otherwise equal, so the reach is there
-  /// when it is needed and unused when it is not.
-  double reach_weight{0.5};
+  /// Curvature alone cannot keep the trace off the boundaries, and no sharpening
+  /// of it can. A boundary is itself a smooth curve running parallel to the
+  /// centreline: a path riding one has the same tangents and the same turn radii
+  /// as the real line, and differs only in where it lies. Bending is all
+  /// curvature reads. So the same weight also pays for how squarely the step
+  /// crossed its gates rather than running along them, 0 to 1, which is the one
+  /// thing the two do not share -- the centreline passes between a gate's cones,
+  /// a boundary runs along from one to the next.
+  ///
+  /// 1.0 sits mid-plateau: anything from 0.8 to 1.15 keeps the centreline inside
+  /// the cones on every map tested, with the same margin.
+  double curvature_weight{1.0};
 
   /// How many gates ahead the search looks before committing to the next one.
   ///
-  /// This is what stops the tracer being fooled by a gate that looks good on its
-  /// own. A step onto the wrong boundary is always cheap to take and always
-  /// expensive to leave -- everything after it has to turn back, or dead-ends --
-  /// and the only way to see that is to look past it. One is a greedy walk,
-  /// which commits to its first mistake. The cost of looking is exponential in
-  /// this, so it wants to stay small.
+  /// This is what makes the count of gates worth anything. Judged one step at a
+  /// time every edge earns the same 1, so nothing separates the gate that opens
+  /// the track up from the one that dead-ends two gates later; only looking past
+  /// them tells them apart. The cost of looking is exponential in this, so it
+  /// wants to stay small.
   ///
   /// Odd on purpose. A zigzag between the centreline and a boundary repeats
   /// every two steps, so an even horizon ends where it started and the detour
-  /// looks free; an odd one always ends mid-zigzag and has to pay for it. On the
-  /// sim's five exported tracks a horizon of four put the centreline 1.7 m off
-  /// the track, where three and five both hold it inside 5 cm.
+  /// looks free; an odd one always ends mid-zigzag and has to pay for it.
   int lookahead{5};
 
-  /// Distance to the start gate that counts as "back at the line". A tolerance
-  /// on SLAM's idea of where the line is, not a property of the track.
-  double closure_radius{8.0};
-  /// How much longer a lap is than the ground it covers: the distance driven
-  /// over the furthest the path ever got from the line.
-  ///
-  /// This is what stops a there-and-back being called a lap. Run out along one
-  /// boundary and back along the other and the path is twice its own reach;
-  /// anything that genuinely goes round is more, a circle being pi times its
-  /// own. Scale free, so it says the same thing about a short circuit and a long
-  /// one.
-  double min_loop_ratio{2.5};
-  /// A path shorter than this cannot be a closed lap.
-  int min_path_points{15};
+  /// Radius around the map origin searched for the big cones of the start line.
+  /// The map frame is anchored at the car's start pose, so the line is just
+  /// ahead of the origin; this is what stops an autocross finish gate being
+  /// taken for the start.
+  double start_gate_radius{10.0};
+
   /// Consecutive agreeing detections needed to flip the published closed flag.
   /// Without it the flag chatters and the controller keeps re-fitting its spline
   /// between periodic and open.
   int closure_hysteresis{5};
+
   /// Hard cap on the walk, so a pathological cone set cannot spin forever.
   int max_path_points{400};
-
-  /// Radius around the map origin searched for the big cones of the start line.
-  /// The map frame is anchored at the car's start pose, so the line is at the
-  /// origin; this is what stops an autocross finish gate being averaged in.
-  double start_gate_radius{10.0};
 };
 
-/// Colourless centreline finder: Delaunay-triangulate the cones, then drive
-/// through as many of the resulting edges as possible, as straight as possible.
+/// Colourless centreline finder.
 ///
-/// That sentence is the whole planner. A step through a gate is worth one gate
-/// less what it cost to turn, and the search is a recursion -- what a step is
-/// worth is what it earns now plus the best that can be earned after it. So a
-/// step that looks fine on its own and dead-ends a few gates later loses to one
-/// that looks slightly worse and opens the track up, which is exactly the
-/// judgement a greedy tracer cannot make.
+/// Three steps, and the first two are what make the third simple.
 ///
-/// There is no test for what counts as a gate. Every edge of the triangulation
-/// is a candidate, including the ones running down a boundary, and they lose on
-/// their own merits: an edge along the track leads to a midpoint off to one
-/// side, and everything after it has to turn back. A wrong step is not rejected,
-/// it is simply outbid.
+/// The seed gate is the pair of big orange cones the car is facing. The map
+/// frame is the pose the car started from, so it stands at the origin looking
+/// down +x at the start line, and the pair of big cones lying either side of
+/// that line of sight is the gate it is about to drive through. That fixes both
+/// ends of what the cones alone cannot say: where the lap starts, and which way
+/// round it goes.
+///
+/// The triangulation is then built from the small cones only. The big cones are
+/// the seed, not part of the track's fabric, and leaving them in only invites
+/// the trace to turn round and come back out through the line it started on.
+///
+/// What is left is one question asked over and over: of the edges that touch no
+/// cone already spent, which one carries on straightest? Drive through as many
+/// as possible, bending as little as possible. Every edge is a candidate,
+/// including the ones running down a boundary, and they lose on their own merits
+/// rather than being ruled out -- an edge along the track leads to a midpoint off
+/// to one side, and everything after it has to turn back or dead-end, so over a
+/// horizon of a few gates it simply counts fewer of them.
+///
+/// Nothing in that depends on where the car is. The centreline is a property of
+/// the cones, and asking the same cones twice from two different car poses has
+/// to give the same line or the line was never the track. The car appears once,
+/// in the seed, and never again.
+///
+/// The lap is closed when the search comes back to the seed gate. Not a radius
+/// and not a ratio -- the one edge that means the lap is over is the one it
+/// started on, so finding it is the answer rather than evidence for it.
 class UnknownPlanner : public Planner
 {
 public:
@@ -142,13 +152,29 @@ public:
   bool closed() const {return closed_;}
 
 private:
-  /// Where the track starts. With no big cones mapped the origin is the honest
-  /// answer rather than a guess: the map frame is anchored at the car's start
-  /// pose, and the car starts on the line.
-  Vec2 startGate(const std::vector<Observation> & observations) const;
+  /// The gate the lap starts and ends on, and the way it is driven through.
+  struct Seed
+  {
+    Vec2 mid{};
+    Vec2 heading{};   ///< direction of traversal, square to the gate
+    Vec2 a{}, b{};    ///< the two big cones themselves
+    bool found{false};
+  };
 
-  std::vector<Vec2> trace(
-    const std::vector<Vec2> & cones, Vec2 start, PlanDebug * debug) const;
+  struct Trace
+  {
+    std::vector<Vec2> path;
+    bool closed{false};
+  };
+
+  /// The first valid pair of big cones: the nearest two, ahead of the car, that
+  /// lie either side of the way it faces. Cones on the same side of that line
+  /// are the two halves of one side of the start line, not a gate across it.
+  Seed findSeed(const std::vector<Observation> & observations) const;
+
+  Trace trace(
+    const std::vector<Observation> & observations, const Seed & seed,
+    PlanDebug * debug) const;
 
   bool closureFilter(bool detected);
 

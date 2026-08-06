@@ -27,6 +27,11 @@ public:
   static constexpr int kNpGlobal = MPC_PROBLEM_NP_GLOBAL;    // 2 * path points + 1
   static constexpr int kPathPoints = (kNpGlobal - 1) / 2;
 
+  /// Index of the progress state p in the augmented state vector
+  /// [x, y, phi, u, v, omega, g, delta, p, vp].  Only shiftProgress() needs to
+  /// know the layout; everything else treats the horizon as opaque.
+  static constexpr int kProgressIndex = 8;
+
   /// Row-major horizons; each row is contiguous and passed straight to acados.
   using StateHorizon = std::array<std::array<double, kNx>, kN + 1>;
   using InputHorizon = std::array<std::array<double, kNu>, kN>;
@@ -47,9 +52,24 @@ public:
   /// Length of one shooting interval, read back from the generated solver.
   double stepDuration() const noexcept {return step_duration_;}
 
-  /// Warm start from the stored horizon, solve, and on success overwrite it.
-  /// Returns the acados status (0 == converged).
+  /// Warm start from the stored horizon, solve, and overwrite it whenever the
+  /// solve left a usable iterate behind.  Returns the acados status
+  /// (0 == converged); see hasIterate() for which other statuses still carry a
+  /// solution the caller may inspect.
   int solve(const double (& x0)[kNx], const double (& p_global)[kNpGlobal]);
+
+  /// True if `status` leaves a well-defined iterate in the horizon: a converged
+  /// solve, one that ran out of iterations, and one that hit the wall-clock
+  /// timeout all do.  A NaN or a QP failure does not.
+  static bool hasIterate(int status) noexcept;
+
+  /// Slide the stored horizon's progress state back by `delta` metres.
+  ///
+  /// p is measured from the start of the reference window, and that window
+  /// slides forward with the car between solves, so a warm start seeded from
+  /// the previous horizon has to be re-based or it starts the solver off by
+  /// however far the car travelled.  Clamped at zero to stay inside p >= 0.
+  void shiftProgress(double delta) noexcept;
 
   /// Discard the internal solver state after a failure.
   void reset();

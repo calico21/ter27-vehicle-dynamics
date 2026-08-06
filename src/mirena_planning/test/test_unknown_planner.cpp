@@ -285,13 +285,19 @@ TEST(UnknownPlanner, HeadsForwardFromTheStartLine)
   EXPECT_NEAR(plan->gates[1].psi, 0.0, 0.2);
 }
 
-TEST(UnknownPlanner, RootsTheTrackAtTheOriginUntilTheBigConesAreMapped)
+TEST(UnknownPlanner, DeclinesToPlanUntilTheBigConesAreMapped)
 {
-  // The big cones are the track root, but they are not a precondition: the map
-  // frame is the pose the car started from and the car starts on the line, so
-  // the origin is the same point until they have been seen. Refusing to plan
-  // here would leave the car with no path for the first stretch of its first
-  // lap, which is exactly when it is driving towards cones it has not mapped.
+  // The big cones are the seed, and the seed is not optional. They fix both of
+  // the things the small cones cannot say on their own -- which gate the lap
+  // starts on, and which of the two ways round it is driven -- and they are also
+  // what the walk looks for to know the lap has closed.
+  //
+  // Rooting a guess at the origin instead would be inventing a gate nobody
+  // pegged out. The cost of insisting is that there is no path at all until the
+  // line has been seen, which a colourless pipeline can still do: the two
+  // Formula Student cones stand 505 mm and 325 mm tall, so the big ones are
+  // told apart by height, and they are the nearest cones to a car sitting on
+  // the line.
   UnknownPlanner planner;
   std::vector<Observation> cones;
   for (double x = 3.0; x <= 30.0; x += 3.0) {
@@ -299,11 +305,32 @@ TEST(UnknownPlanner, RootsTheTrackAtTheOriginUntilTheBigConesAreMapped)
     cones.push_back({{x, -kWidth / 2.0}, ConeSize::Small});
   }
 
+  EXPECT_FALSE(planner.plan(cones, nullptr).has_value());
+}
+
+TEST(UnknownPlanner, TakesTheNearestBigConePairAheadAsTheSeed)
+{
+  // Four big cones mark the line, two down each side, so they make more than one
+  // pair. The seed is the nearest pair that spans the way the car is facing;
+  // pairs running down one side of the line span nothing.
+  UnknownPlanner planner;
+  std::vector<Observation> cones{
+    {{4.0, kWidth / 2.0}, ConeSize::Big},
+    {{4.0, -kWidth / 2.0}, ConeSize::Big},
+    {{5.0, kWidth / 2.0}, ConeSize::Big},
+    {{5.0, -kWidth / 2.0}, ConeSize::Big}};
+  for (double x = 8.0; x <= 40.0; x += kSpacing) {
+    cones.push_back({{x, kWidth / 2.0}, ConeSize::Small});
+    cones.push_back({{x, -kWidth / 2.0}, ConeSize::Small});
+  }
+
   const auto plan = planner.plan(cones, nullptr);
   ASSERT_TRUE(plan.has_value());
-  EXPECT_NEAR(plan->start.x, 0.0, 1e-9);
+  EXPECT_NEAR(plan->start.x, 4.0, 1e-9);
   EXPECT_NEAR(plan->start.y, 0.0, 1e-9);
-  EXPECT_GT(plan->gates.back().p.x, 25.0);
+  // and it drives away from the line, not back through it
+  ASSERT_GE(plan->gates.size(), 2u);
+  EXPECT_GT(plan->gates[1].p.x, plan->gates[0].p.x);
 }
 
 TEST(UnknownPlanner, DeclinesToPlanWithoutBoundaries)
