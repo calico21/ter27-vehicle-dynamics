@@ -1,22 +1,21 @@
+#include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cstdint>
+#include <ctime>
+#include <exception>
 #include <string>
 #include <thread>
-#include <atomic>
-#include <ctime>
 #include <vector>
-#include <algorithm>
-#include <exception>
 
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
-#include <tf2/LinearMath/Matrix3x3.h>
-#include <tf2/LinearMath/Quaternion.h>
+#include <tf2/LinearMath/Transform.h>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
 #include <rclcpp/rclcpp.hpp>
 
 #include "imu_wrapper.hpp"
-#include "ahrs_pipeline.hpp"
-#include "ins_pipeline.hpp"
+#include "imu_pipeline.hpp"
 
 #include <vectornav/Interface/Sensor.hpp>
 #include <vectornav/Interface/Registers.hpp>
@@ -25,24 +24,25 @@
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 
-#include <limits>
-#include <cstdint>
-
 using namespace std::chrono_literals;
 
-enum InsMode
+/// VectorNav INS mode, as reported in insStatus.
+enum class InsMode
 {
-    NotTracking, // Dead
-    Aligning,    // INS Kalman filter working but diverging from GNSS
-    Tracking,    // INS Kalman filter and converged with GNSS
-    GpsLoss      // Tracking lost
+    NotTracking, ///< no solution
+    Aligning,    ///< filter running but not yet converged with GNSS
+    Tracking,    ///< converged
+    GpsLoss      ///< was tracking, now dead reckoning
 };
 
-struct InsStatus
+/// Where a measurement's timestamp came from. Worth naming because a silent
+/// change of source is a silent jump in the clock of a 100 Hz sensor.
+enum class StampSource
 {
-    InsMode mode;
-    bool GpsFix;
-    bool GpsCompassFix;
+    None,
+    GpsHardware,
+    SdkReception,
+    PublishTime
 };
 
 class ImuNode : public rclcpp::Node
@@ -50,7 +50,7 @@ class ImuNode : public rclcpp::Node
 public:
     ImuNode()
         : Node("mirena_imu"),
-          imu(this->get_logger()),
+          imu_(this->get_logger()),
           tf_buffer_(this->get_clock()),
           tf_listener_(tf_buffer_)
     {
@@ -64,17 +64,13 @@ public:
 
         // GPS->UNIX leap-second offset (18 since Dec 2016). Exposed so it can be
         // bumped without a rebuild if a future leap second is announced.
-        gps_leap_seconds_ = this->declare_parameter<int>("gps_leap_seconds", 18);
+        gps_leap_seconds_ns_ =
+            static_cast<int64_t>(this->declare_parameter<int>("gps_leap_seconds", 18)) * 1'000'000'000LL;
 
         // Output rate: the binary message is streamed at base_rate / divisor.
         // VN-300 base IMU rate is 400 Hz; VN-200/100 is 800 Hz.
         imu_base_rate_hz_ = this->declare_parameter<int>("imu_base_rate_hz", 400);
         imu_output_rate_hz_ = this->declare_parameter<int>("imu_output_rate_hz", 100);
-
-        // Persist the sensor config to non-volatile flash. Off by default: the
-        // driver reconfigures the sensor on every connect, so flash writes (which
-        // wear the chip) are unnecessary.
-        persist_config_ = this->declare_parameter<bool>("persist_config", false);
 
         reconnect_delay_s_ = this->declare_parameter<double>("reconnect_delay_sec", 1.0);
 
@@ -82,14 +78,11 @@ public:
         use_sensor_qos_ = this->declare_parameter<bool>("use_sensor_data_qos", true);
         qos_depth_ = this->declare_parameter<int>("qos_depth", 10);
 
-        // Frames
-        lidar_frame_ = this->declare_parameter<std::string>("lidar_frame", "car/lidar");
-        odom_frame_ = this->declare_parameter<std::string>("odom_frame", "odom");
-        base_frame_ = this->declare_parameter<std::string>("base_frame", "car/cog");
-        gnss_frame_ = this->declare_parameter<std::string>("gnss_frame", "car/gnss");
+        frames_.lidar = this->declare_parameter<std::string>("lidar_frame", "car/lidar");
+        frames_.odom = this->declare_parameter<std::string>("odom_frame", "odom");
+        frames_.cog = this->declare_parameter<std::string>("base_frame", "car/cog");
+        frames_.gnss = this->declare_parameter<std::string>("gnss_frame", "car/gnss");
         imu_frame_ = this->declare_parameter<std::string>("imu_frame", "car/imu");
-
-        gps_leap_seconds_ns_ = static_cast<int64_t>(gps_leap_seconds_) * 1'000'000'000LL;
 
         if (antenna_a_offset_.size() != 3 || gnss_baseline_.size() != 3 || gnss_baseline_unc_.size() != 3)
         {
@@ -125,9 +118,9 @@ public:
             publish_thread_.join();
         }
 
-        if (imu.is_connected())
+        if (imu_.is_connected())
         {
-            imu.disconnect();
+            imu_.disconnect();
         }
         RCLCPP_INFO(get_logger(), "IMU bridge node destroyed cleanly.");
     }
@@ -138,26 +131,34 @@ private:
     std::vector<double> antenna_a_offset_;
     std::vector<double> gnss_baseline_;
     std::vector<double> gnss_baseline_unc_;
-    int gps_leap_seconds_;
     int64_t gps_leap_seconds_ns_;
     int imu_base_rate_hz_;
     int imu_output_rate_hz_;
-    bool persist_config_;
     double reconnect_delay_s_;
     bool use_sensor_qos_;
     int qos_depth_;
-    std::string odom_frame_, base_frame_, gnss_frame_, lidar_frame_, imu_frame_;
+    mirena::IMU::Frames frames_;
+    std::string imu_frame_;
 
     // ---- State ----
-    bool logged_stamp_source_ = false;
-    InsStatus last_status_;
+    StampSource stamp_source_ = StampSource::None;
 
-    mirena::IMU::Wrapper imu;
-    mirena::AHRS::Pipeline ahrs_pipeline;
-    mirena::INS::Pipeline ins_pipeline;
+    mirena::IMU::Wrapper imu_;
+    mirena::IMU::Pipeline pipeline_;
 
     tf2_ros::Buffer tf_buffer_;
     tf2_ros::TransformListener tf_listener_;
+
+    // The mounting geometry, looked up once.
+    //
+    // These are bolts, not motion: car/imu, car/lidar and car/cog do not move
+    // relative to each other, so re-querying them for every one of a hundred
+    // measurements a second bought nothing and cost a failure mode -- a lookup
+    // that missed dropped the whole measurement, silently taking the INS
+    // odometry that mirena_state runs on down with it.
+    bool have_mounting_ = false;
+    tf2::Transform cog_from_imu_;
+    tf2::Transform lidar_from_imu_;
 
     rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_in_lidar_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_in_cog_pub_;
@@ -167,234 +168,202 @@ private:
     std::thread publish_thread_;
     std::atomic<bool> keep_running_{false};
 
-    // voy a suicidarme OZUBA DEJA EL PUTO CLAUDE XFI?????
     // ==========================================
     // Hardware Timestamp (camera-style approach)
     // ==========================================
     rclcpp::Time get_measurement_stamp(const VN::Sensor::CompositeDataQueueReturn &msg)
     {
         // Priority 1: GPS hardware timestamp — absolute wall-clock (sub-µs accuracy)
-        if (msg->time.timeStatus.has_value() && msg->time.timeGps.has_value())
+        if (msg->time.timeStatus.has_value() && msg->time.timeGps.has_value() &&
+            msg->time.timeStatus.value().towValid)
         {
-            if (msg->time.timeStatus.value().towValid)
-            {
-                // GPS epoch = Jan 6 1980 = 315,964,800 s after UNIX epoch.
-                // GPS time does not count leap seconds; subtract the configured offset.
-                constexpr int64_t GPS_TO_UNIX_NS = 315'964'800LL * 1'000'000'000LL;
-                int64_t unix_ns = static_cast<int64_t>(msg->time.timeGps.value().nanoseconds()) + GPS_TO_UNIX_NS - gps_leap_seconds_ns_;
-                if (!logged_stamp_source_)
-                {
-                    RCLCPP_INFO(get_logger(), "IMU Timestamp: GPS hardware time active (sub-µs accuracy).");
-                    logged_stamp_source_ = true;
-                }
-                return rclcpp::Time(unix_ns, RCL_SYSTEM_TIME);
-            }
+            // GPS epoch = Jan 6 1980 = 315,964,800 s after UNIX epoch.
+            // GPS time does not count leap seconds; subtract the configured offset.
+            constexpr int64_t GPS_TO_UNIX_NS = 315'964'800LL * 1'000'000'000LL;
+            const int64_t unix_ns = static_cast<int64_t>(msg->time.timeGps.value().nanoseconds()) +
+                                    GPS_TO_UNIX_NS - gps_leap_seconds_ns_;
+            note_stamp_source(StampSource::GpsHardware);
+            return rclcpp::Time(unix_ns, RCL_SYSTEM_TIME);
         }
 
-        // Priority 2: SDK packet reception time — steady_clock → CLOCK_REALTIME offset (camera-style)
+        // Priority 2: SDK packet reception time — steady_clock → CLOCK_REALTIME offset
         using tp = std::chrono::steady_clock::time_point;
         if (msg->timestamp != tp{})
         {
             struct timespec ts_mono, ts_real;
             clock_gettime(CLOCK_MONOTONIC, &ts_mono);
             clock_gettime(CLOCK_REALTIME, &ts_real);
-            int64_t mono_ns = static_cast<int64_t>(ts_mono.tv_sec) * 1'000'000'000LL + ts_mono.tv_nsec;
-            int64_t real_ns = static_cast<int64_t>(ts_real.tv_sec) * 1'000'000'000LL + ts_real.tv_nsec;
-            int64_t sdk_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                 msg->timestamp.time_since_epoch())
-                                 .count();
-            if (!logged_stamp_source_)
-            {
-                RCLCPP_WARN(get_logger(), "IMU Timestamp: No GPS fix — SDK reception time (steady_clock → epoch).");
-                logged_stamp_source_ = true;
-            }
+            const int64_t mono_ns = static_cast<int64_t>(ts_mono.tv_sec) * 1'000'000'000LL + ts_mono.tv_nsec;
+            const int64_t real_ns = static_cast<int64_t>(ts_real.tv_sec) * 1'000'000'000LL + ts_real.tv_nsec;
+            const int64_t sdk_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                       msg->timestamp.time_since_epoch())
+                                       .count();
+            note_stamp_source(StampSource::SdkReception);
             return rclcpp::Time(sdk_ns + (real_ns - mono_ns), RCL_SYSTEM_TIME);
         }
 
-        // Priority 3: fallback to publish time
-        if (!logged_stamp_source_)
-        {
-            RCLCPP_WARN(get_logger(), "IMU Timestamp: SDK timestamp unavailable — falling back to publish time.");
-            logged_stamp_source_ = true;
-        }
+        note_stamp_source(StampSource::PublishTime);
         return this->get_clock()->now();
     }
 
-    bool get_transform(const std::string &target_frame, const std::string &source_frame, const rclcpp::Time &stamp, tf2::Transform &transform)
+    /// Log every *change* of timestamp source, not just the first one.
+    ///
+    /// This used to latch after the first measurement, so losing towValid
+    /// mid-session swapped GPS time for the host clock in silence. Those two
+    /// agree only if the host is disciplined to GPS; if it is not, every
+    /// stamp downstream steps by the difference with nothing in the log to
+    /// say why.
+    void note_stamp_source(StampSource source)
     {
+        if (source == stamp_source_)
+        {
+            return;
+        }
+        const char *name = source == StampSource::GpsHardware  ? "GPS hardware time (sub-us)"
+                           : source == StampSource::SdkReception ? "SDK reception time (no GPS fix)"
+                                                                 : "publish time (no SDK timestamp)";
+        if (stamp_source_ == StampSource::None)
+        {
+            RCLCPP_INFO(get_logger(), "IMU timestamp source: %s", name);
+        }
+        else
+        {
+            RCLCPP_WARN(get_logger(), "IMU timestamp source CHANGED to %s — expect a step in the stamps.", name);
+        }
+        stamp_source_ = source;
+    }
+
+    /// Look the mounting geometry up once, at whatever time TF has it for.
+    ///
+    /// Deliberately TimePointZero rather than the measurement stamp: these are
+    /// static transforms, and asking for them at a GPS-derived wall-clock time
+    /// only invites a clock-domain mismatch with the buffer for no benefit.
+    bool ensure_mounting()
+    {
+        if (have_mounting_)
+        {
+            return true;
+        }
         try
         {
-            geometry_msgs::msg::TransformStamped tf_msg = tf_buffer_.lookupTransform(target_frame, source_frame, stamp);
-            tf2::fromMsg(tf_msg.transform, transform);
-            return true;
+            tf2::fromMsg(tf_buffer_.lookupTransform(frames_.cog, imu_frame_, tf2::TimePointZero).transform,
+                         cog_from_imu_);
+            tf2::fromMsg(tf_buffer_.lookupTransform(frames_.lidar, imu_frame_, tf2::TimePointZero).transform,
+                         lidar_from_imu_);
         }
         catch (const tf2::TransformException &e)
         {
-            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "TF lookup failed: %s", e.what());
+            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                                 "Waiting for mounting transforms: %s", e.what());
             return false;
         }
+
+        const tf2::Vector3 &arm = cog_from_imu_.getOrigin();
+        RCLCPP_INFO(get_logger(), "Mounting geometry latched: IMU sits at (%.3f, %.3f, %.3f) in %s.",
+                    arm.x(), arm.y(), arm.z(), frames_.cog.c_str());
+        have_mounting_ = true;
+        return true;
     }
 
     void publish_loop()
     {
         while (keep_running_ && rclcpp::ok())
         {
-            if (!imu.is_connected())
+            if (!imu_.is_connected())
             {
-                imu.connect_and_config(imu_dev_path_.c_str(), antenna_a_offset_, gnss_baseline_, gnss_baseline_unc_, compute_rate_divisor());
-                if (!imu.is_connected())
+                imu_.connect_and_config(imu_dev_path_.c_str(), antenna_a_offset_, gnss_baseline_,
+                                        gnss_baseline_unc_, compute_rate_divisor());
+                if (!imu_.is_connected())
                 {
                     std::this_thread::sleep_for(std::chrono::duration<double>(reconnect_delay_s_));
                     continue;
                 }
             }
 
-            VN::Sensor::CompositeDataQueueReturn msg = imu.get_next_measurement();
+            VN::Sensor::CompositeDataQueueReturn msg = imu_.get_next_measurement();
             if (!msg)
             {
                 RCLCPP_ERROR(get_logger(), "IMU read timeout — assuming dead, disconnecting.");
-                imu.disconnect();
-                logged_stamp_source_ = false; // re-log the stamp source on the next session
+                imu_.disconnect();
+                stamp_source_ = StampSource::None; // re-log the source on the next session
+                continue;
+            }
+
+            if (!ensure_mounting())
+            {
                 continue;
             }
 
             try
             {
-                rclcpp::Time stamp = get_measurement_stamp(msg);
-                last_status_ = extract_imu_status(msg);
-                bool ins_active = last_status_.mode == InsMode::Aligning || last_status_.mode == InsMode::Tracking;
+                const rclcpp::Time stamp = get_measurement_stamp(msg);
 
-                tf2::Transform t_imu_to_cog, t_imu_to_lidar;
-                if (!get_transform(base_frame_, imu_frame_, stamp, t_imu_to_cog) ||
-                    !get_transform(lidar_frame_, imu_frame_, stamp, t_imu_to_lidar))
-                {
-                    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Missing transforms, skipping measurement");
-                    continue;
-                }
-
-                tf2::Vector3 t_imu_to_cog_vec = t_imu_to_cog.getOrigin();
-                tf2::Vector3 t_imu_to_lidar_vec = t_imu_to_lidar.getOrigin();
-                tf2::Quaternion r_body_to_ned = t_imu_to_cog.getRotation();
-                
-
+                // Only a *converged* INS gets to speak. Aligning means the
+                // onboard filter has not agreed with GNSS yet, and mirena_state
+                // seeds its EKF from the first odometry it sees -- so accepting
+                // one of those pins the whole run's origin on a position the
+                // sensor itself does not stand behind.
+                const bool ins_active = read_mode(msg) == InsMode::Tracking;
                 if (!ins_active)
                 {
-                    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000, "Waiting for GPS Fix...");
-                    auto ret = ahrs_pipeline.process_imu(
-                        base_frame_,
-                        lidar_frame_,
-                        stamp,
-                        msg,
-                        t_imu_to_cog_vec,
-                        t_imu_to_lidar_vec,
-                        r_body_to_ned);
-
-                    imu_in_lidar_pub_->publish(ret->lidar_imu);
-                    imu_in_cog_pub_->publish(ret->cog_imu);
-                    // No INS odometry before GPS lock — documented contract:
-                    // consumers (mirena_state) must tolerate its absence.
+                    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000,
+                                         "Waiting for the INS to converge (no odometry until it does)...");
                 }
-                else
-                {
-                    auto ret = ins_pipeline.process_imu(
-                        odom_frame_,
-                        base_frame_,
-                        lidar_frame_,
-                        gnss_frame_,
-                        stamp,
-                        msg,
-                        t_imu_to_cog_vec,
-                        t_imu_to_lidar_vec,
-                        r_body_to_ned);
 
-                    imu_in_lidar_pub_->publish(ret->lidar_imu);
-                    imu_in_cog_pub_->publish(ret->cog_imu);
-                    odom_pub_->publish(ret->odom);
-                    fix_pub_->publish(ret->fix_msg);
+                mirena::IMU::Output out = pipeline_.process(
+                    frames_, stamp, msg, cog_from_imu_, lidar_from_imu_, ins_active);
+
+                imu_in_lidar_pub_->publish(out.lidar_imu);
+                imu_in_cog_pub_->publish(out.cog_imu);
+                if (out.odom)
+                {
+                    odom_pub_->publish(*out.odom);
+                }
+                if (out.fix)
+                {
+                    fix_pub_->publish(*out.fix);
                 }
             }
             catch (const std::exception &e)
             {
-                RCLCPP_WARN(get_logger(), "Skipping measurement, processing error: %s", e.what());
+                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+                                     "Skipping measurement, processing error: %s", e.what());
             }
         }
     }
 
-    uint16_t compute_rate_divisor() const
+    uint16_t compute_rate_divisor()
     {
-        int rate = std::max(1, imu_output_rate_hz_);
-        int divisor = std::max(1, imu_base_rate_hz_ / rate);
+        const int rate = std::max(1, imu_output_rate_hz_);
+        const int divisor = std::max(1, imu_base_rate_hz_ / rate);
+        const int actual = imu_base_rate_hz_ / divisor;
+        if (actual != rate)
+        {
+            RCLCPP_WARN(get_logger(),
+                        "imu_output_rate_hz=%d does not divide imu_base_rate_hz=%d; streaming at %d Hz instead.",
+                        rate, imu_base_rate_hz_, actual);
+        }
         return static_cast<uint16_t>(divisor);
     }
 
-    void print_status_info(VN::Sensor::CompositeDataQueueReturn &msg)
+    static InsMode read_mode(const VN::Sensor::CompositeDataQueueReturn &msg)
     {
         if (!msg->ins.insStatus.has_value())
         {
-            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000, "InsStatus not being published.");
+            return InsMode::NotTracking;
         }
-        auto ins_status = msg->ins.insStatus.value();
-
-        auto highestCno = std::numeric_limits<uint8_t>::min();
-
-        for (int i = 0; i < msg->gnss.gnss1SatInfo.value().numSats; i++)
-        {
-            auto currentCno = msg->gnss.gnss1SatInfo.value().cno[i];
-            if (currentCno > highestCno)
-            {
-                highestCno = currentCno;
-            }
-        }
-        auto highestCno2 = std::numeric_limits<uint8_t>::min();
-
-        for (int i = 0; i < msg->gnss2.gnss2SatInfo.value().numSats; i++)
-        {
-            auto currentCno2 = msg->gnss2.gnss2SatInfo.value().cno[i];
-            if (currentCno2 > highestCno2)
-            {
-                highestCno2 = currentCno2;
-            }
-        }
-
-        RCLCPP_DEBUG(get_logger(), "SatInfo1=%d SatInfo2=%d",
-                     highestCno, highestCno2);
-
-        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000, "GpsFix=%s GpsCompass=%s GpsErr=%i mode=%i",
-                             ins_status.gnssFix ? "yes" : "no", ins_status.gnssCompassFix ? "yes" : "no",
-                             ins_status.gnssErr, ins_status.mode);
-    }
-
-    InsStatus extract_imu_status(const VN::Sensor::CompositeDataQueueReturn &msg)
-    {
-        InsStatus ret;
-        if (!msg->ins.insStatus.has_value())
-        {
-            ret.mode = InsMode::NotTracking;
-            ret.GpsFix = false;
-            ret.GpsCompassFix = false;
-            return ret;
-        }
-
-        auto ins_status = msg->ins.insStatus.value();
-        ret.GpsFix = ins_status.gnssFix == 1;
-        ret.GpsCompassFix = ins_status.gnssCompassFix == 1;
         // VectorNav INS mode field: 0=NotTracking, 1=Aligning, 2=Tracking, 3=GpsLoss
-        switch (ins_status.mode)
+        switch (msg->ins.insStatus.value().mode)
         {
         case 1:
-            ret.mode = InsMode::Aligning;
-            break;
+            return InsMode::Aligning;
         case 2:
-            ret.mode = InsMode::Tracking;
-            break;
+            return InsMode::Tracking;
         case 3:
-            ret.mode = InsMode::GpsLoss;
-            break;
+            return InsMode::GpsLoss;
         default:
-            ret.mode = InsMode::NotTracking;
-            break;
+            return InsMode::NotTracking;
         }
-        return ret;
     }
 };
 

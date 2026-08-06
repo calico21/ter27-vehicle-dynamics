@@ -174,6 +174,27 @@ private:
 
     // --- EKF mode -----------------------------------------------------------
 
+    /// Log a filter step that did not apply. Divergence is an error (the filter
+    /// dropped itself and now waits for a new INS fix); Ignored is a producer
+    /// problem, throttled because a broken producer breaks every sample.
+    void log_step(mirena::Ekf::Step step, const char *what)
+    {
+        using Step = mirena::Ekf::Step;
+        if (step == Step::Diverged)
+        {
+            RCLCPP_ERROR(this->get_logger(),
+                         "EKF diverged on %s (non-finite state or covariance) — filter reset, "
+                         "re-initializing from the next INS fix. Reset #%u.",
+                         what, _ekf->divergences());
+        }
+        else if (step == Step::Ignored)
+        {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                                 "EKF ignored %s: non-finite values or a stamp that did not "
+                                 "advance. Check the sensor layer.", what);
+        }
+    }
+
     void imu_callback(const sensor_msgs::msg::Imu::ConstSharedPtr &msg)
     {
         std::lock_guard<std::mutex> lock(_filter_mutex);
@@ -183,8 +204,9 @@ private:
         const double t = rclcpp::Time(msg->header.stamp).seconds();
         // Body accel is gravity-free forward/left (REP-103) after the driver's
         // gravity compensation and frame alignment to the base frame.
-        _ekf->predict(t, msg->linear_acceleration.x, msg->linear_acceleration.y);
-        _ekf->update_gyro(msg->angular_velocity.z);
+        log_step(_ekf->predict(t, msg->linear_acceleration.x, msg->linear_acceleration.y), "IMU predict");
+        if (!_ekf->is_initialized()) return; // predict diverged and reset the filter
+        log_step(_ekf->update_gyro(msg->angular_velocity.z), "gyro update");
     }
 
     void ins_odom_callback(const nav_msgs::msg::Odometry::ConstSharedPtr &msg)
@@ -212,11 +234,13 @@ private:
 
         if (!_ekf->is_initialized())
         {
-            _ekf->init(z, r, t);
-            RCLCPP_INFO(this->get_logger(), "EKF initialized from INS at (%.2f, %.2f)", z(0), z(1));
+            if (_ekf->init(z, r, t) == mirena::Ekf::Step::Ok)
+                RCLCPP_INFO(this->get_logger(), "EKF initialized from INS at (%.2f, %.2f)", z(0), z(1));
+            else
+                log_step(mirena::Ekf::Step::Ignored, "INS initialization");
             return;
         }
-        _ekf->update_odom(z, r);
+        log_step(_ekf->update_odom(z, r), "INS odometry update");
     }
 
     void publish_timer_callback()
@@ -299,19 +323,38 @@ private:
             const double odom_age = now_s - rclcpp::Time(_last_odom_stamp).seconds();
             const double imu_age = now_s - rclcpp::Time(_last_imu_stamp).seconds();
 
+            // Both inputs are checked: losing the INS leaves the filter dead
+            // reckoning on the accelerometer, losing the IMU leaves it with no
+            // propagation between fixes. They fail differently, so they report
+            // differently rather than collapsing into one "STALE".
+            const bool odom_stale = odom_age > _odom_timeout_sec;
+            const bool imu_stale = imu_age > _imu_timeout_sec;
+
             std::string mode;
             if (_passthrough)
                 mode = "GT_PASSTHROUGH";
             else if (!_ekf || !_ekf->is_initialized())
                 mode = "INIT";
-            else if (odom_age > _odom_timeout_sec)
-                mode = "STALE";
+            else if (odom_stale && imu_stale)
+                mode = "STALE";           // nothing is arriving; the pose is frozen
+            else if (odom_stale)
+                mode = "DEAD_RECKONING";  // IMU only; drifting, trust it briefly
+            else if (imu_stale)
+                mode = "NO_IMU";          // INS fixes only; no propagation between them
             else
                 mode = "FUSED";
 
             report_json["mode"] = mode;
             report_json["odom_age_s"] = odom_age;
-            report_json["imu_age_s"] = imu_age;
+            if (!_passthrough)
+            {
+                // Meaningless in passthrough: nothing ever stamps the IMU there.
+                report_json["imu_age_s"] = imu_age;
+                report_json["odom_stale"] = odom_stale;
+                report_json["imu_stale"] = imu_stale;
+            }
+            if (_ekf)
+                report_json["ekf_resets"] = _ekf->divergences();
             if (_ekf && _ekf->is_initialized())
             {
                 const auto &x = _ekf->state();

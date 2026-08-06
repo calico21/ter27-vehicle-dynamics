@@ -1,6 +1,11 @@
 #include <rclcpp/rclcpp.hpp>
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <mutex> // NUEVO: Para seguridad en hilos (Thread-safety)
+
+// Lie-group interpolation, for easing the published correction
+#include <gtsam/base/Lie.h>
 
 // Message filters for time-synchronization
 #include <message_filters/subscriber.h>
@@ -46,6 +51,18 @@
 // to go PARTIAL a second into every start -- healthy SLAM, reported as failing.
 // Kept below REPORT_STALE_AFTER_S so standing still stays inside the window.
 #define KEYFRAME_MAX_INTERVAL_S 0.5
+// Time constant of the filter on the published map->odom, seconds.
+//
+// The correction absorbs accumulated odometry drift, so what it has to say
+// changes over metres and laps. What it actually did on a measured run was
+// travel 75 m of path to end up 3 cm from where it started, and swing 64 deg of
+// heading to drift a third of one -- because it is re-derived from a fresh
+// solve several times a second, and every solve moves the whole window a little.
+// That is not error to be fixed in the optimiser, it is estimator noise on a
+// quantity that is genuinely slowly varying, and the place to take it out is
+// here. Against a signal drifting a third of a degree a lap, half a second of
+// lag is nothing; against noise arriving at 3 Hz it is most of it.
+#define CORRECTION_TIME_CONSTANT_S 0.5
 
 using namespace std::chrono_literals;
 class MirenaMapping : public rclcpp::Node
@@ -104,6 +121,14 @@ class MirenaMapping : public rclcpp::Node
     gtsam::Pose2 _map_to_odom_snapshot;
     std::shared_ptr<const mirena_common::msg::EntityList> _map_snapshot;
     bool _has_snapshot = false;
+
+    // What was last put on the wire, and when. Only the publisher touches these,
+    // so they need no lock. The transform is filtered towards the snapshot
+    // rather than snapped to it, which is why they have to persist between
+    // ticks.
+    gtsam::Pose2 _published_correction;
+    rclcpp::Time _last_broadcast;
+    bool _has_broadcast = false;
 
     // SLAM Engine.
     //
@@ -446,7 +471,35 @@ private:
             map_msg = _map_snapshot;
         }
 
-        // 1. Broadcast map -> odom.
+        // 1. Ease the published correction towards the one SLAM last solved.
+        //
+        // A first-order filter, stepped with the time actually elapsed rather
+        // than the nominal period, so a late tick catches up by the right
+        // amount instead of falling behind. Interpolation is along the SE(2)
+        // geodesic: doing it on x, y and yaw separately would drag the car
+        // sideways through the turn between two corrections that differ in
+        // heading.
+        //
+        // The first correction is taken as-is. Easing in from identity would
+        // spend the first seconds of every run publishing a transform that is
+        // knowingly wrong.
+        const rclcpp::Time now = this->now();
+        if (!_has_broadcast)
+        {
+            _published_correction = map_to_odom;
+            _has_broadcast = true;
+        }
+        else
+        {
+            const double dt = std::clamp((now - _last_broadcast).seconds(), 0.0, 1.0);
+            const double alpha = 1.0 - std::exp(-dt / CORRECTION_TIME_CONSTANT_S);
+            _published_correction =
+                gtsam::interpolate<gtsam::Pose2>(_published_correction, map_to_odom, alpha);
+        }
+        _last_broadcast = now;
+        map_to_odom = _published_correction;
+
+        // 2. Broadcast map -> odom.
         //
         // Stamped at broadcast time, NOT at the time of the data it was derived
         // from. map->odom is a piecewise-constant correction that only changes on
@@ -456,7 +509,7 @@ private:
         // looking up at a fresher time (control uses the latest /state/car stamp)
         // fails with "extrapolation into the future".
         geometry_msgs::msg::TransformStamped t;
-        t.header.stamp = this->now();
+        t.header.stamp = now;
         t.header.frame_id = FIXED_FRAME;
         t.child_frame_id = MOVING_FRAME;
 
@@ -473,7 +526,7 @@ private:
 
         _tf_broadcaster->sendTransform(t);
 
-        // 2. Republish the map as-is; it keeps the stamp of the update that
+        // 3. Republish the map as-is; it keeps the stamp of the update that
         // produced it, which is the time the landmarks were actually valid.
         if (map_msg)
             _map_pub->publish(*map_msg);

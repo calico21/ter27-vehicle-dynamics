@@ -5,6 +5,7 @@
 #include <gtsam/linear/NoiseModel.h>
 #include <gtsam/nonlinear/ExpressionFactor.h>
 #include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
+#include <gtsam/nonlinear/Marginals.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam/nonlinear/expressions.h>
@@ -102,23 +103,36 @@ namespace mirena
         /// stand metres apart, so anything closer is a second report of one the
         /// frame already has.
         double min_cone_separation = 1.0;
-        /// Added to a landmark's covariance before gating, in m^2. A converged
-        /// cone otherwise carries a gate a couple of centimetres wide, and every
-        /// re-detection that misses it becomes a duplicate sitting on top of it.
-        double covariance_floor = 0.09;
-        /// Loosest and tightest a frozen landmark's prior may be, in metres.
+        /// Least uncertain a cone is ever allowed to be, in metres.
         ///
-        /// The floor is not numerical hygiene. A cone frozen at 3 cm cannot move,
-        /// so when the car comes back round and its own drift says the cone is
-        /// somewhere else, the map wins and the pose is dragged to fit a map that
-        /// was itself built from a drifting pose. Leaving the cone room to be
-        /// wrong is what lets the loop close.
-        double min_landmark_sigma = 0.15;
-        double max_landmark_sigma = 2.0;
-        /// Loosest and tightest the anchor on the oldest kept pose may be.
-        double min_anchor_sigma = 0.05;
-        double max_anchor_sigma = 1.0;
-        /// Only cones this close to the car are considered for association.
+        /// One floor doing two jobs, because they are the same job. A cone frozen
+        /// at 3 cm cannot move, so when the car comes back round and its own drift
+        /// says the cone is somewhere else, the map wins and the pose is dragged
+        /// to fit a map that was itself built from a drifting pose. The same
+        /// number widens the association gate: a converged cone otherwise carries
+        /// a gate a couple of centimetres across, and every re-detection that
+        /// misses it becomes a duplicate sitting on top of it.
+        ///
+        /// There is no ceiling to go with it, and there should not be. A prior
+        /// that is looser than the truth simply fails to constrain, which costs
+        /// accuracy; one that is tighter than the truth pins the map to a lie.
+        /// Only one of those is worth a parameter.
+        double min_landmark_sigma = 0.30;
+        /// Least uncertain the anchor on the oldest kept pose may be, in metres.
+        /// Same reasoning: pin it hard and the window can no longer correct
+        /// itself when a cone it can still see says the car is somewhere else.
+        double min_anchor_sigma_xy = 0.05;
+        /// The same floor for the anchor's heading, in radians -- and it has to
+        /// be its own number, because 0.05 is a sensible few centimetres and an
+        /// absurd three degrees. Sharing one meant the anchor was loosened to
+        /// 2.9 deg of heading slack however confident the marginals were, and a
+        /// window free to pivot about its anchor swings the newest pose -- the
+        /// one map->odom is read from -- by most of a metre at the far end.
+        /// Downstream that is a correction whose heading wobbles by a degree
+        /// several times a second while drifting by a fraction of one.
+        double min_anchor_sigma_theta = 0.002;
+        /// How far the car looks. Cones inside it are candidates for association
+        /// and are expected to be seen; cones outside it are neither.
         double local_map_radius = 20.0;
 
         // -- Removing landmarks that were never there ---------------------------
@@ -139,9 +153,11 @@ namespace mirena
         /// that stops being seen has stopped being there, however convincing it
         /// looked on the first lap.
         int confirm_sightings = 3;
-        /// Range within which a cone should have been seen, metres.
-        double view_range = 12.0;
-        /// Half-angle of the sensor's field of view, radians.
+        /// Half-angle of the sensor's field of view, radians. With
+        /// local_map_radius this is the whole definition of "should have been
+        /// seen" -- deliberately the same radius the associator uses, because a
+        /// band where a cone can be matched but never judged is a band where
+        /// nothing is ever removed.
         double view_half_angle = 1.05;
     };
 
@@ -296,10 +312,9 @@ namespace mirena
                            SlamDebug *debug);
 
         /// Freezes what the oldest keyframe knew into priors and drops it.
-        /// Called from inside optimise(), where the solved graph is still in
-        /// scope, because that is the only place the marginals can be had.
-        void freeze_oldest(const gtsam::NonlinearFactorGraph &graph,
-                           const gtsam::Values &result);
+        /// Takes the marginals optimise() already computed rather than building
+        /// its own; they are the expensive part.
+        void freeze_oldest(const gtsam::Marginals &marginals);
 
         /// The last frame observe() matched, waiting to become a keyframe. Only
         /// the newest is kept: the frames in between have already done their job

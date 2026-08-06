@@ -1,7 +1,5 @@
 #include "slam.hpp"
 
-#include <gtsam/nonlinear/Marginals.h>
-
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -305,6 +303,10 @@ namespace mirena
         optimise();
         publish_map();
 
+        // The newest pose is the best estimate of where the car is, so it is
+        // what the correction is built from. It is also the noisiest, but that
+        // is a smoothing problem and it is solved where the transform is
+        // published, not by throwing away the freshest information here.
         map_to_odom_ = window_.back().estimate.compose(last_raw_odom_.inverse());
         last_update_ms_ =
             duration_cast<microseconds>(high_resolution_clock::now() - started).count() / 1.0e3;
@@ -413,24 +415,16 @@ namespace mirena
             pose_cov_ = marginals.marginalCovariance(gtsam::Symbol('x', window_.back().index));
 
             while (static_cast<int>(window_.size()) > params_.window_keyframes)
-                freeze_oldest(graph, result);
+                freeze_oldest(marginals);
         }
         catch (const std::exception &)
         {
         }
     }
 
-    void Slam::freeze_oldest(const gtsam::NonlinearFactorGraph &graph,
-                             const gtsam::Values &result)
+    void Slam::freeze_oldest(const gtsam::Marginals &marginals)
     {
-        gtsam::Marginals marginals(graph, result);
-
-        const auto clamp_2d = [](gtsam::Matrix2 cov, double lo, double hi) {
-            const double lo2 = lo * lo, hi2 = hi * hi;
-            cov(0, 0) = std::min(std::max(cov(0, 0), lo2), hi2);
-            cov(1, 1) = std::min(std::max(cov(1, 1), lo2), hi2);
-            return cov;
-        };
+        const double landmark_floor = params_.min_landmark_sigma * params_.min_landmark_sigma;
 
         // Everything the departing keyframe knew about a cone becomes that cone's
         // prior. Frozen here and not touched again until another of its keyframes
@@ -442,10 +436,11 @@ namespace mirena
                 continue;
             LandmarkRecord &record = it->second;
             record.prior_position = record.position;
-            record.prior_covariance =
-                clamp_2d(marginals.marginalCovariance(gtsam::Symbol('l', id)),
-                         params_.min_landmark_sigma, params_.max_landmark_sigma);
-            record.covariance = record.prior_covariance;
+            gtsam::Matrix2 cov = marginals.marginalCovariance(gtsam::Symbol('l', id));
+            cov(0, 0) = std::max(cov(0, 0), landmark_floor);
+            cov(1, 1) = std::max(cov(1, 1), landmark_floor);
+            record.prior_covariance = cov;
+            record.covariance = cov;
             record.has_prior = true;
         }
 
@@ -457,13 +452,14 @@ namespace mirena
         // matters in both directions: too tight and the window cannot correct
         // itself when a cone says the car is elsewhere, too loose and it drifts.
         anchor_pose_ = window_.front().estimate;
-        gtsam::Matrix3 cov = marginals.marginalCovariance(
+        gtsam::Matrix3 pose_cov = marginals.marginalCovariance(
             gtsam::Symbol('x', window_.front().index));
-        const double lo = params_.min_anchor_sigma * params_.min_anchor_sigma;
-        const double hi = params_.max_anchor_sigma * params_.max_anchor_sigma;
-        for (int k = 0; k < 3; ++k)
-            cov(k, k) = std::min(std::max(cov(k, k), lo), hi);
-        anchor_noise_ = gtsam::noiseModel::Gaussian::Covariance(cov);
+        const double xy_floor = params_.min_anchor_sigma_xy * params_.min_anchor_sigma_xy;
+        const double theta_floor = params_.min_anchor_sigma_theta * params_.min_anchor_sigma_theta;
+        pose_cov(0, 0) = std::max(pose_cov(0, 0), xy_floor);
+        pose_cov(1, 1) = std::max(pose_cov(1, 1), xy_floor);
+        pose_cov(2, 2) = std::max(pose_cov(2, 2), theta_floor);
+        anchor_noise_ = gtsam::noiseModel::Gaussian::Covariance(pose_cov);
     }
 
 
@@ -487,7 +483,7 @@ namespace mirena
             // the car has not gone missing -- nothing was pointed at it.
             const gtsam::Point2 local = pose.transformTo(record.position);
             const bool in_view =
-                local.norm() < params_.view_range && local.x() > 0.0 &&
+                local.norm() < params_.local_map_radius && local.x() > 0.0 &&
                 std::abs(std::atan2(local.y(), local.x())) < params_.view_half_angle;
             if (!in_view)
             {
@@ -585,9 +581,10 @@ namespace mirena
                 if (innovation.norm() > params_.max_association_distance)
                     continue;
 
+                const double floor = params_.min_landmark_sigma * params_.min_landmark_sigma;
                 gtsam::Matrix2 P_lm = record.covariance;
-                P_lm(0, 0) += params_.covariance_floor;
-                P_lm(1, 1) += params_.covariance_floor;
+                P_lm(0, 0) = std::max(P_lm(0, 0), floor);
+                P_lm(1, 1) = std::max(P_lm(1, 1), floor);
 
                 gtsam::Matrix23 H;
                 H.leftCols<2>() = -Rt;

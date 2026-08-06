@@ -33,13 +33,24 @@ public:
         double max_dt;              // predict steps longer than this are clamped [s]
     };
 
+    /// Outcome of a filter step, so the caller can log the two failure kinds apart.
+    enum class Step
+    {
+        Ok,         ///< applied
+        Ignored,    ///< input was unusable (non-finite, or out-of-order in time); state untouched
+        Diverged,   ///< state or covariance went non-finite; the filter reset itself
+    };
+
     explicit Ekf(const Config &config) : cfg_(config) { reset(); }
 
     void reset();
     bool is_initialized() const { return initialized_; }
 
+    /// Times the filter has reset itself after divergence, since construction.
+    unsigned divergences() const { return divergences_; }
+
     /// Seed state + covariance from a full measurement (first INS odometry fix).
-    void init(const Vec6 &z, const Vec6 &r_diag, double stamp);
+    Step init(const Vec6 &z, const Vec6 &r_diag, double stamp);
 
     /**
      * Propagate the state to `stamp` using body-frame accelerations (gravity-free,
@@ -47,18 +58,22 @@ public:
      *   x'   = u cos(psi) - v sin(psi)     u' = ax + v*omega
      *   y'   = u sin(psi) + v cos(psi)     v' = ay - u*omega
      *   psi' = omega                       omega' = 0
+     *
+     * Samples that are out of order or duplicate in time are Ignored, and
+     * crucially leave the filter clock where it was: adopting their stamp would
+     * let one bogus future timestamp disable prediction for the rest of the run.
      */
-    void predict(double stamp, double ax, double ay);
+    Step predict(double stamp, double ax, double ay);
 
     /// Fuse a gyro yaw-rate reading as a scalar measurement of omega.
-    void update_gyro(double omega_meas);
+    Step update_gyro(double omega_meas);
 
     /**
      * Fuse a full INS odometry measurement z = [x, y, psi, u, v, omega].
      * `r_diag` is the measurement variance per axis (floored by config).
      * The psi innovation is wrapped to [-pi, pi].
      */
-    void update_odom(const Vec6 &z, const Vec6 &r_diag);
+    Step update_odom(const Vec6 &z, const Vec6 &r_diag);
 
     const Vec6 &state() const { return x_; }
     const Mat6 &covariance() const { return P_; }
@@ -67,13 +82,19 @@ public:
     static double wrap_angle(double a);
 
 private:
-    void joseph_symmetrize();
+    void symmetrize();
+
+    /// Post-step sanity check. A single NaN anywhere in x_ or P_ is permanent --
+    /// it spreads through every subsequent product -- so the only recovery is to
+    /// drop the filter and let the next INS fix re-seed it.
+    Step commit();
 
     Config cfg_;
     Vec6 x_;
     Mat6 P_;
     double stamp_ = 0.0;
     bool initialized_ = false;
+    unsigned divergences_ = 0;
 };
 
 } // namespace mirena

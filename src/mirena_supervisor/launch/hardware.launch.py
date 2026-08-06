@@ -94,7 +94,7 @@ def generate_launch_description():
             parameters=[{
                 'use_sim_time': False,
                 'can_interface': 'can0',
-                'can_bitrate': 500000,
+                'can_bitrate': 1000000,
                 # The node runs `ip link set can0 up type can bitrate ...` itself.
                 'auto_bringup': True,
             }],

@@ -1,15 +1,26 @@
 #include "ekf.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 namespace mirena
 {
 
+namespace
+{
+/// Floor for the covariance diagonal. The short-form covariance updates below
+/// can round a near-zero variance slightly negative; clamping keeps a negative
+/// variance from reaching consumers. It does not make P positive-definite --
+/// it only bounds the symptom.
+constexpr double kMinVariance = 1e-12;
+} // namespace
+
 double Ekf::wrap_angle(double a)
 {
-    while (a > M_PI) a -= 2.0 * M_PI;
-    while (a < -M_PI) a += 2.0 * M_PI;
-    return a;
+    // IEEE remainder lands in [-pi, pi] and terminates for every input. The
+    // subtract-in-a-loop form this replaces spun forever on +/-inf, hanging the
+    // callback thread with no crash and no log.
+    return std::remainder(a, 2.0 * M_PI);
 }
 
 void Ekf::reset()
@@ -20,23 +31,44 @@ void Ekf::reset()
     initialized_ = false;
 }
 
-void Ekf::init(const Vec6 &z, const Vec6 &r_diag, double stamp)
+Ekf::Step Ekf::commit()
 {
+    if (x_.allFinite() && P_.allFinite())
+    {
+        P_.diagonal() = P_.diagonal().cwiseMax(kMinVariance);
+        return Step::Ok;
+    }
+
+    reset();
+    divergences_++;
+    return Step::Diverged;
+}
+
+Ekf::Step Ekf::init(const Vec6 &z, const Vec6 &r_diag, double stamp)
+{
+    if (!z.allFinite() || !r_diag.allFinite() || !std::isfinite(stamp)) return Step::Ignored;
+
     x_ = z;
     x_(2) = wrap_angle(x_(2));
     P_ = r_diag.cwiseMax(cfg_.odom_meas_floor_diag).asDiagonal();
     stamp_ = stamp;
     initialized_ = true;
+    return commit();
 }
 
-void Ekf::predict(double stamp, double ax, double ay)
+Ekf::Step Ekf::predict(double stamp, double ax, double ay)
 {
-    if (!initialized_) return;
+    if (!initialized_) return Step::Ignored;
+    if (!std::isfinite(stamp) || !std::isfinite(ax) || !std::isfinite(ay)) return Step::Ignored;
 
-    double dt = stamp - stamp_;
+    const double elapsed = stamp - stamp_;
+    if (elapsed <= 0.0) return Step::Ignored; // out-of-order or duplicate sample
+
+    // Adopt the stamp only now that the sample is accepted, so the filter clock
+    // can never run ahead of the data. Long gaps still jump the clock but
+    // propagate at most max_dt, which is the intended guard.
     stamp_ = stamp;
-    if (dt <= 0.0) return; // out-of-order or duplicate sample
-    if (dt > cfg_.max_dt) dt = cfg_.max_dt;
+    const double dt = std::min(elapsed, cfg_.max_dt);
 
     const double psi = x_(2), u = x_(3), v = x_(4), omega = x_(5);
     const double c = std::cos(psi), s = std::sin(psi);
@@ -65,27 +97,32 @@ void Ekf::predict(double stamp, double ax, double ay)
 
     P_ = F * P_ * F.transpose();
     P_ += (cfg_.process_noise_diag * dt).asDiagonal().toDenseMatrix();
-    joseph_symmetrize();
+    symmetrize();
+    return commit();
 }
 
-void Ekf::update_gyro(double omega_meas)
+Ekf::Step Ekf::update_gyro(double omega_meas)
 {
-    if (!initialized_) return;
+    if (!initialized_) return Step::Ignored;
+    if (!std::isfinite(omega_meas)) return Step::Ignored;
 
     // Scalar update on omega: H = [0 0 0 0 0 1]
     const double innovation = omega_meas - x_(5);
     const double s_var = P_(5, 5) + cfg_.gyro_meas_var;
+    if (!(s_var > 0.0)) return Step::Ignored;
     const Vec6 K = P_.col(5) / s_var;
 
     x_ += K * innovation;
     x_(2) = wrap_angle(x_(2));
     P_ -= K * P_.row(5);
-    joseph_symmetrize();
+    symmetrize();
+    return commit();
 }
 
-void Ekf::update_odom(const Vec6 &z, const Vec6 &r_diag)
+Ekf::Step Ekf::update_odom(const Vec6 &z, const Vec6 &r_diag)
 {
-    if (!initialized_) return;
+    if (!initialized_) return Step::Ignored;
+    if (!z.allFinite() || !r_diag.allFinite()) return Step::Ignored;
 
     // Full-state measurement: H = I6
     Vec6 innovation = z - x_;
@@ -98,10 +135,11 @@ void Ekf::update_odom(const Vec6 &z, const Vec6 &r_diag)
     x_ += K * innovation;
     x_(2) = wrap_angle(x_(2));
     P_ = (Mat6::Identity() - K) * P_;
-    joseph_symmetrize();
+    symmetrize();
+    return commit();
 }
 
-void Ekf::joseph_symmetrize()
+void Ekf::symmetrize()
 {
     P_ = (0.5 * (P_ + P_.transpose())).eval();
 }

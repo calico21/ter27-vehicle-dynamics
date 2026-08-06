@@ -495,6 +495,15 @@ namespace mirena
     {
         const Eigen::Vector3f extent = cluster.extent();
         const Eigen::Vector3f centroid = cluster.centroid();
+
+        // First, because it is what makes the rest of these tests mean anything.
+        // Every one of them reads the cluster's shape, and shape stops being
+        // measurable once the sensor has only a beam or two on the cone.
+        if ((centroid.head<2>() - sensor_xy_).norm() > params_.max_detection_range)
+        {
+            return false;
+        }
+
         const float ground_z = ground_->at(centroid.x(), centroid.y());
         const float top = cluster.upper.z() - ground_z;
         const float base = cluster.lower.z() - ground_z;
@@ -515,7 +524,7 @@ namespace mirena
 
     bool ConeDetector::has_plausible_return_count(const ClusterBounds &cluster) const
     {
-        if (params_.expected_points_max_ratio <= 0.0 || returns_ == nullptr)
+        if (params_.expected_points_min_ratio <= 0.0 || returns_ == nullptr)
         {
             return true;
         }
@@ -529,8 +538,8 @@ namespace mirena
 
         const double expected = params_.expected_points_at_10m *
                                 std::pow(10.0 / range, params_.expected_points_exponent);
-        const auto lower = static_cast<int>(expected * params_.expected_points_min_ratio);
-        const auto upper = static_cast<int>(expected * params_.expected_points_max_ratio);
+        const int needed = std::max(params_.min_expected_points,
+                                    static_cast<int>(expected * params_.expected_points_min_ratio));
 
         // A cluster is a box in the downsampled cloud; the returns that made it
         // are the ones inside that box, give or take a voxel at each face.
@@ -538,6 +547,9 @@ namespace mirena
         const Eigen::Vector3f low = cluster.lower.array() - slack;
         const Eigen::Vector3f high = cluster.upper.array() + slack;
 
+        // Stops as soon as the answer is yes, which is the common case, so the
+        // scan usually ends in the first handful of points rather than walking
+        // the whole cloud once per cluster.
         int count = 0;
         for (const auto &point : returns_->points)
         {
@@ -545,15 +557,14 @@ namespace mirena
                 point.y >= low.y() && point.y <= high.y() &&
                 point.z >= low.z() && point.z <= high.z())
             {
-                ++count;
-                if (count > upper)
+                if (++count >= needed)
                 {
-                    return false;
+                    return true;
                 }
             }
         }
 
-        return count >= lower;
+        return false;
     }
 
 } // namespace mirena

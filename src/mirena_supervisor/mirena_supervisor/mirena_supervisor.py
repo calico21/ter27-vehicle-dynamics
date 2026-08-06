@@ -68,6 +68,8 @@ MISSION_LAUNCH_FILES: Dict[int, str] = {
     AsInfo.AS_MISSION_TRACKDRIVE: 'trackdrive',
     AsInfo.AS_MISSION_INSPECTION: 'inspection',
     AsInfo.AS_MISSION_AUTOCROSS: 'autocross',
+    AsInfo.AS_MISSION_NONE: 'none',
+
     # AS_MISSION_BRAKE_TEST has no launch file yet; selecting it fails the
     # mission with a clear message rather than launching something wrong.
 }

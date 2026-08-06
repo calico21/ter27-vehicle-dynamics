@@ -319,7 +319,8 @@ private:
         p.expected_points_at_10m = this->declare_parameter("expected_points_at_10m", p.expected_points_at_10m);
         p.expected_points_exponent = this->declare_parameter("expected_points_exponent", p.expected_points_exponent);
         p.expected_points_min_ratio = this->declare_parameter("expected_points_min_ratio", p.expected_points_min_ratio);
-        p.expected_points_max_ratio = this->declare_parameter("expected_points_max_ratio", p.expected_points_max_ratio);
+        p.min_expected_points = this->declare_parameter("min_expected_points", p.min_expected_points);
+        p.max_detection_range = this->declare_parameter("max_detection_range", p.max_detection_range);
         p.max_lateral_offset = this->declare_parameter("max_lateral_offset", p.max_lateral_offset);
         return p;
     }

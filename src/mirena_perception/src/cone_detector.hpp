@@ -197,13 +197,31 @@ namespace mirena
         int min_cluster_points = 2;
         int max_cluster_points = 400;
 
+        /// Furthest a cone is claimed at all, metres.
+        ///
+        /// The one number that decides whether this detector is honest. Every
+        /// test below it is a test of a cluster's *shape*, and shape is only
+        /// measurable while the sensor puts several beams on the cone: 0.2
+        /// degrees is 8.7 cm at 25 m, so a 325 mm cone still spans three or four
+        /// rows and its height can be read. Past that it spans one or two, height
+        /// collapses towards zero, and the height test -- much the strongest one
+        /// here -- quietly stops rejecting anything. What comes back from beyond
+        /// this range is not cones, it is every two-voxel blob on the airfield.
+        ///
+        /// So the range is set where discrimination ends rather than where the
+        /// sensor's returns end, and nothing further is reported. That costs
+        /// nothing: the car is driving towards those cones and will see them from
+        /// close enough to be sure within a couple of seconds, and a cone mapped
+        /// from 40 m is one nothing downstream can verify or correct.
+        double max_detection_range = 25.0;
+
         // -- Expected return count ----------------------------------------------
         // How many returns a cone *should* give at the range it was found at. The
         // count band above is a pair of constants and so cannot say anything: at
         // 3 m a cone gives ~57 returns and at 25 m ~3, and [2, 400] admits both
         // and everything between. Range is known per cluster, so the count can be
         // checked against what the sensor can physically put on a cone that far
-        // away -- which is the strongest single discriminator in the data.
+        // away -- which is the strongest discriminator here after height.
         //
         // Counted on the returns, not the voxels: downsampling flattens the curve
         // from 57:3 to 17:2 and by 15 m leaves nothing to test against.
@@ -215,12 +233,21 @@ namespace mirena
         /// on a cone are not an area sample of it.
         double expected_points_at_10m = 10.0;
         double expected_points_exponent = 1.65;
-        /// Multiplicative slack either side. Wide on purpose: this is here to
-        /// reject a cluster that cannot be a cone at that range, not to fit one.
-        /// The upper bound has to clear a big orange cone, which has about 2.4
-        /// times the frontal area of a small one. Zero disables the test.
+        /// How far below that a cluster may fall and still be a cone. Wide on
+        /// purpose: this is here to reject a cluster that *cannot* be a cone at
+        /// that range, not to fit one. Zero disables the test.
+        ///
+        /// There is no upper bound to go with it. min/max_cluster_points already
+        /// bound cluster size, and the old ceiling only ever fired on things the
+        /// extraction had already thrown away.
         double expected_points_min_ratio = 0.33;
-        double expected_points_max_ratio = 4.0;
+        /// Floor on the resulting count, in returns.
+        ///
+        /// Without it the test disables itself exactly where it is needed most:
+        /// the expected count falls below one at 30 m, so the minimum rounds to
+        /// zero and every cluster passes. It failed silently and open, which is
+        /// the worst way for a filter to fail.
+        int min_expected_points = 2;
 
         // -- How well a detection is located ------------------------------------
         //

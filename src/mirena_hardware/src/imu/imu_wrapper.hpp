@@ -37,6 +37,14 @@ namespace mirena::IMU
                 return err;
             }
 
+            // From here the port is open, so every failure below has to give it
+            // back before returning. Leaving it held meant the next attempt
+            // called autoConnect on a device this process already had.
+            const auto give_up = [&](const char *what) {
+                RCLCPP_WARN(logger, "Could not write %s register; closing the port to retry.", what);
+                imu_.disconnect();
+            };
+
             // --- Antenna A offset ---
             VN::Registers::GNSS::GnssAOffset antenna_a;
             antenna_a.positionX = static_cast<float>(antenna_a_offset_[0]);
@@ -44,7 +52,7 @@ namespace mirena::IMU
             antenna_a.positionZ = static_cast<float>(antenna_a_offset_[2]);
             if ((err = imu_.writeRegister(&antenna_a)) != VN::Error::None)
             {
-                RCLCPP_WARN(logger, "Could not write GNSS antenna A offset register.");
+                give_up("GNSS antenna A offset");
                 return err;
             }
 
@@ -58,7 +66,7 @@ namespace mirena::IMU
             baseline.uncertaintyZ = static_cast<float>(gnss_baseline_unc_[2]);
             if ((err = imu_.writeRegister(&baseline)) != VN::Error::None)
             {
-                RCLCPP_WARN(logger, "Could not write GNSS compass baseline register.");
+                give_up("GNSS compass baseline");
                 return err;
             }
 
@@ -89,7 +97,7 @@ namespace mirena::IMU
 
             if ((err = imu_.writeRegister(&bin_out_1)) != VN::Error::None)
             {
-                RCLCPP_WARN(logger, "Could not write binary output 1 register.");
+                give_up("binary output 1");
                 return err;
             }
 
@@ -100,7 +108,7 @@ namespace mirena::IMU
             bin_out_2.rateDivisor = rate_divisor;
             if ((err = imu_.writeRegister(&bin_out_2)) != VN::Error::None)
             {
-                RCLCPP_WARN(logger, "Could not write binary output 2 register.");
+                give_up("binary output 2");
                 return err;
             }
 
@@ -111,23 +119,12 @@ namespace mirena::IMU
             bin_out_3.rateDivisor = rate_divisor;
             if ((err = imu_.writeRegister(&bin_out_3)) != VN::Error::None)
             {
-                RCLCPP_WARN(logger, "Could not write binary output 3 register.");
+                give_up("binary output 3");
                 return err;
             }
 
             imu_is_connected_ = true;
             return VN::Error::None;
-        }
-
-        VN::Error write_config()
-        {
-            VN::Error err;
-            if ((err = imu_.writeSettings()) != VN::Error::None)
-            {
-                RCLCPP_WARN(logger, "Could not persist config to flash.");
-                return err;
-            }
-            RCLCPP_INFO(logger, "Sensor config persisted to non-volatile flash.");
         }
 
         VN::Error print_imu_info()
@@ -147,10 +144,14 @@ namespace mirena::IMU
             return VN::Error::None;
         }
 
-        VN::Error disconnect()
+        void disconnect()
         {
             imu_.disconnect();
-            return VN::Error::None;
+            // The flag is the whole point of this call. Leaving it set meant
+            // is_connected() answered yes for ever after the first connect, so
+            // the reconnect branch in the publish loop was unreachable and one
+            // dropped cable wedged the driver until it was restarted.
+            imu_is_connected_ = false;
         }
 
         bool is_connected(){
