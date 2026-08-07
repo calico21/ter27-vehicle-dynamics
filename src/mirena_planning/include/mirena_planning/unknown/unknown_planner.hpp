@@ -13,7 +13,7 @@ namespace mirena::planning
 
 struct UnknownPlannerParams
 {
-  /// The track width, in metres. Formula Student sets a floor of 3 m.
+  /// The narrowest the track may get, in metres. Formula Student's floor is 3 m.
   ///
   /// A figure out of the rules rather than off the cones. It could be measured
   /// across the big cones of the start line instead, and that was tried: it comes
@@ -24,10 +24,33 @@ struct UnknownPlannerParams
   /// be fixed jitters from frame to frame instead.
   double track_width{3.0};
 
+  /// The widest the track may get, in metres, and so the widest an edge may be
+  /// and still be a gate. The rules give the floor and leave the ceiling open, so
+  /// this one is a judgement rather than a citation.
+  ///
+  /// What it is for is the hairpin. Where the track doubles back, the ground
+  /// inside the turn carries no cones, the triangulation spans it, and those
+  /// spanning edges are not gates of anything -- there is no track between their
+  /// cones. Nothing else rejects them: they sit square to the trace and they lead
+  /// somewhere, which is all the cost function asks, so the walk drives straight
+  /// through the hairpin instead of round it.
+  ///
+  /// Width is what separates them. On a synthetic hairpin whose passes run 5.0 m
+  /// to 6.5 m apart the trace cuts, and the gates it cuts through measure 4.88 m
+  /// to 5.21 m; opened to 7 m and beyond it goes round, and every gate it drives
+  /// is 3.00 m to the centimetre. An honest gate is the track's width, and the
+  /// chords are half as wide again at least.
+  ///
+  /// 5.0 is the loosest setting that still refuses them -- the cut on the 6.0 m
+  /// hairpin survives at 5.5 and dies at 5.0. Tighter buys nothing and costs
+  /// more, so this sits at the top of the range that works rather than in the
+  /// middle of it.
+  double max_track_width{5.0};
+
   /// Furthest apart two cones down one side of the track may be, in metres.
   /// Formula Student sets a ceiling of 5 m.
   ///
-  /// With track_width this fixes the widest an edge may be and still be a way
+  /// With max_track_width this fixes the widest an edge may be and still be a way
   /// across the track: the longest honest one is the diagonal bridging an
   /// unmapped cone, which reaches two stations along one side and the width of
   /// the track across it.

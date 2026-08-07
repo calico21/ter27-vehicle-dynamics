@@ -382,4 +382,121 @@ namespace mirena::test
         return best;
     }
 
+    /// The rigid transform that best carries the map onto the truth layout, and
+    /// the map under it.
+    ///
+    /// Two different things get called "the map is wrong" and they need different
+    /// answers, which is why this exists. A map can be internally perfect -- every
+    /// cone in the right place relative to every other -- and still sit rotated in
+    /// the frame, because a graph anchored only at the first pose is accurate up
+    /// to a gauge, and the gauge is fixed by odometry that drifts. That is not the
+    /// same defect as a map with two landmarks per cone, and it does not have the
+    /// same fix: the first is what an absolute reference is for, the second is an
+    /// association failure. Measured together, they are indistinguishable.
+    ///
+    /// Nearest-neighbour ICP from the identity, which is enough here because the
+    /// map starts within a few metres of the truth and both are the same layout.
+    struct Alignment
+    {
+        std::vector<gtsam::Point2> aligned; ///< the map, carried onto the truth
+        double rotation = 0.0;              ///< radians
+        double translation = 0.0;           ///< metres
+    };
+
+    inline Alignment align_to(const std::vector<Landmark> &map,
+                              const std::vector<Cone> &truth)
+    {
+        Alignment out;
+        for (const Landmark &l : map)
+            out.aligned.emplace_back(l.x, l.y);
+        if (out.aligned.empty() || truth.empty())
+            return out;
+
+        const std::vector<gtsam::Point2> original = out.aligned;
+        for (int iteration = 0; iteration < 60; ++iteration)
+        {
+            // Pair each landmark with the truth cone it is nearest to, then take
+            // the rotation and translation that best explain all those pairs.
+            gtsam::Point2 centre_map(0, 0), centre_truth(0, 0);
+            std::vector<gtsam::Point2> paired;
+            paired.reserve(out.aligned.size());
+            for (const gtsam::Point2 &p : out.aligned)
+            {
+                double best = std::numeric_limits<double>::infinity();
+                gtsam::Point2 match(0, 0);
+                for (const Cone &c : truth)
+                {
+                    const double d = (c.position - p).norm();
+                    if (d < best) { best = d; match = c.position; }
+                }
+                paired.push_back(match);
+                centre_map = centre_map + p;
+                centre_truth = centre_truth + match;
+            }
+            const double n = static_cast<double>(out.aligned.size());
+            centre_map = centre_map / n;
+            centre_truth = centre_truth / n;
+
+            // The 2x2 correlation, whose polar factor is the rotation.
+            double sxx = 0.0, sxy = 0.0, syx = 0.0, syy = 0.0;
+            for (size_t i = 0; i < out.aligned.size(); ++i)
+            {
+                const gtsam::Point2 a = out.aligned[i] - centre_map;
+                const gtsam::Point2 b = paired[i] - centre_truth;
+                sxx += a.x() * b.x(); sxy += a.x() * b.y();
+                syx += a.y() * b.x(); syy += a.y() * b.y();
+            }
+            const double theta = std::atan2(sxy - syx, sxx + syy);
+            const gtsam::Rot2 R = gtsam::Rot2::fromAngle(theta);
+            for (gtsam::Point2 &p : out.aligned)
+                p = R.rotate(p - centre_map) + centre_truth;
+        }
+
+        // Report the total transform, measured rather than accumulated.
+        gtsam::Point2 c0(0, 0), c1(0, 0);
+        for (size_t i = 0; i < original.size(); ++i)
+        {
+            c0 = c0 + original[i];
+            c1 = c1 + out.aligned[i];
+        }
+        const double n = static_cast<double>(original.size());
+        c0 = c0 / n;
+        c1 = c1 / n;
+        double sxx = 0.0, sxy = 0.0, syx = 0.0, syy = 0.0;
+        for (size_t i = 0; i < original.size(); ++i)
+        {
+            const gtsam::Point2 a = original[i] - c0;
+            const gtsam::Point2 b = out.aligned[i] - c1;
+            sxx += a.x() * b.x(); sxy += a.x() * b.y();
+            syx += a.y() * b.x(); syy += a.y() * b.y();
+        }
+        out.rotation = std::abs(std::atan2(sxy - syx, sxx + syy));
+        out.translation = (c1 - c0).norm();
+        return out;
+    }
+
+    /// How many landmarks claim a truth cone of their own, once the map has been
+    /// aligned. Short of the map size means duplicates: two landmarks for one cone.
+    inline int distinct_cones_claimed(const std::vector<gtsam::Point2> &aligned,
+                                      const std::vector<Cone> &truth, double within)
+    {
+        std::vector<bool> claimed(truth.size(), false);
+        for (const gtsam::Point2 &p : aligned)
+        {
+            double best = within;
+            size_t which = truth.size();
+            for (size_t i = 0; i < truth.size(); ++i)
+            {
+                const double d = (truth[i].position - p).norm();
+                if (d < best) { best = d; which = i; }
+            }
+            if (which < truth.size())
+                claimed[which] = true;
+        }
+        int count = 0;
+        for (const bool c : claimed)
+            count += c ? 1 : 0;
+        return count;
+    }
+
 } // namespace mirena::test

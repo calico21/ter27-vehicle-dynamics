@@ -155,18 +155,38 @@ UnknownPlanner::Trace UnknownPlanner::trace(
   // The seed joins the candidates as an ordinary edge, on two cones of its own
   // that no triangle uses. It is what the walk stands on at the start and what
   // it is looking for at the end, and being in the list is how it can be found.
-  // Widest an edge can be and still be a way across the track. Not a
-  // discriminator -- it cannot tell a gate from an edge running down a boundary,
-  // because the two overlap: cones sit 2.95 m to 4.89 m apart down a boundary on
-  // these tracks and the track is 3.00 m across, so no length separates them.
-  // The cost function does that. This only rules out the geometrically absurd,
-  // the chord cutting the inside of a hairpin and the edge reaching clean across
-  // a corner.
+  // Widest an edge can be and still be a way across the track: the track itself,
+  // at its widest. A gate is the ground between two cones facing each other
+  // across the track, so its width is the track's width and nothing else.
   //
-  // The longest honest one is the diagonal that bridges an unmapped cone,
-  // reaching two stations along one side and the width of the track across.
-  const double max_width =
-    std::hypot(params_.track_width, 2.0 * params_.cone_spacing);
+  // Not a discriminator, and never was. It cannot tell a gate from an edge
+  // running down a boundary, because the two overlap: cones sit 2.95 m to 4.89 m
+  // apart down a boundary on these tracks and the track is 3.00 m across, so no
+  // length separates them. The cost function does that.
+  //
+  // What it does rule out is the chord across the inside of a hairpin. Where the
+  // track doubles back, the ground enclosed by the turn carries no cones, and the
+  // triangulation spans that void with edges running from one pass to the other.
+  // Those are not gates of anything -- there is no track between their cones --
+  // but they sit square to the trace's heading and they lead somewhere, so the
+  // cost function likes them and the walk drives straight through the hairpin
+  // instead of round it.
+  //
+  // Length is what separates them, and cleanly. On a hairpin whose passes run
+  // 5.0 m to 6.5 m apart the trace cuts, and the gates it cuts through measure
+  // 4.88 m to 5.21 m; on the same hairpin opened to 7 m and beyond it goes round,
+  // and every gate it drives is 3.00 m to the centimetre. Honest gates are the
+  // track's width. The chords are half as wide again, at least.
+  //
+  // The price is the diagonal bridging an unmapped cone, which reaches along the
+  // track as well as across and so is wider than the track by definition. Those
+  // are gone, and on a frozen map with 6% of the cones deleted that costs real
+  // coverage. On the moving map it costs much less than it looks: the planner
+  // re-plans several times a second against a map that is densest exactly where
+  // the car is about to drive, so a hole is crossed by waiting a beat for it to
+  // fill rather than by reaching over it. Cutting a hairpin is not recoverable
+  // that way.
+  const double max_width = params_.max_track_width;
   const double width = distance(seed.a, seed.b);
 
   const int seed_index = static_cast<int>(edges.size());

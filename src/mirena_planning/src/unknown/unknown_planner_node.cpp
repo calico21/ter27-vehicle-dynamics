@@ -210,6 +210,7 @@ private:
     declare_parameter<double>("curvature_weight", u.curvature_weight);
     declare_parameter<int>("lookahead", u.lookahead);
     declare_parameter<double>("track_width", u.track_width);
+    declare_parameter<double>("max_track_width", u.max_track_width);
     declare_parameter<double>("cone_spacing", u.cone_spacing);
     declare_parameter<double>("max_gate_gap", u.max_gate_gap);
     declare_parameter<double>("start_gate_radius", u.start_gate_radius);
@@ -223,6 +224,7 @@ private:
     p.curvature_weight = get_parameter("curvature_weight").as_double();
     p.lookahead = static_cast<int>(get_parameter("lookahead").as_int());
     p.track_width = get_parameter("track_width").as_double();
+    p.max_track_width = get_parameter("max_track_width").as_double();
     p.cone_spacing = get_parameter("cone_spacing").as_double();
     p.max_gate_gap = get_parameter("max_gate_gap").as_double();
     p.start_gate_radius = get_parameter("start_gate_radius").as_double();

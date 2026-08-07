@@ -8,6 +8,7 @@
 #include <gtsam/nonlinear/Values.h>
 
 #include <array>
+#include <deque>
 #include <map>
 #include <string>
 #include <utility>
@@ -459,6 +460,10 @@ namespace mirena
         int next_landmark_ = 0;
         int next_candidate_ = 0;
         size_t marginal_cursor_ = 0;
+        /// Landmarks the solver has touched whose marginal has not been recomputed
+        /// yet. Drained a budget at a time so a loop closure, which marks most of
+        /// the map at once, cannot spend a whole frame interval on covariances.
+        std::deque<int> stale_marginals_;
 
         double last_update_ms_ = 0.0;
         int last_matched_ = 0;
