@@ -1,5 +1,5 @@
-// Track planner for the missions whose layout is surveyed in advance: skidpad
-// and acceleration.
+// Track planner for the missions whose layout is surveyed in advance: skidpad,
+// acceleration and brake_test.
 //
 // Loads the mission's template from resource/<mission>.json and registers it
 // against the mapped cones with RANSAC + ICP, so the centreline comes from the
@@ -135,7 +135,10 @@ public:
 
     // The mission launch file picks the planner, so the two should never
     // disagree -- but a hand-rolled `ros2 run` can still get it wrong.
-    if (mission_ != "skidpad" && mission_ != "acceleration") {
+    //
+    // brake_test drives the acceleration straight, so it is surveyed like the
+    // other two and registers resource/brake_test.json.
+    if (mission_ != "skidpad" && mission_ != "acceleration" && mission_ != "brake_test") {
       RCLCPP_ERROR(
         get_logger(),
         "Mission '%s' has no surveyed layout. Launch mirena_planning for it.",
