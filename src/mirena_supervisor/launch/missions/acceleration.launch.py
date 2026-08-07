@@ -105,6 +105,42 @@ def generate_launch_description():
             parameters=[{
                 'use_sim_time': use_sim_time,
                 'publish_debug': True,                         # publish the map and association markers
+                # -- Association. One gate answers every "is this the thing I already have" question
+                'mahalanobis_threshold': 5.99,                 # chi-square gate on squared Mahalanobis distance; 95th pct, 2 DoF
+                'max_association_distance': 2.5,               # m, Euclidean backstop applied before the chi-square test
+                'local_map_radius': 20.0,                      # m the car looks; also defines "should have been seen"
+                'view_half_angle': 1.05,                       # rad, half-angle of the sensor field of view
+                # -- Measurements
+                'default_measurement_sigma': 0.10,             # m, used when perception reports no covariance
+                'min_measurement_sigma': 0.03,                 # m, floor; also what keeps the association gate open
+                # -- Existence, in log-odds. Both measurable from a labelled run
+                'p_detect': 0.55,                              # how often perception reports a cone genuinely in view
+                'p_false': 0.05,                               # how often it reports one where there is none
+                'promote_log_odds': 9.0,                       # evidence before a candidate is written into the graph (~4 looks)
+                'publish_log_odds': 1.0,                       # evidence to stay in the published map; below promote, for hysteresis
+                # -- Promotion
+                'separability_k': 2.0,                         # sigmas of separation before two estimates are two objects
+                'max_candidate_age': 20,                       # keyframes a candidate may stay unresolved before promoting anyway
+                'max_promotion_factors': 10,                   # most measurements one promotion may bring into the graph
+                # -- When a pose is worth its keep
+                'keyframe_odom_sigma': 0.30,                   # m of odometry drift before the pose needs pinning
+                'keyframe_max_frames': 4,                      # frames between keyframes, at most, whatever else is true
+                # -- Node timing
+                'map_publish_period': 0.1,                     # s, 10 Hz map republish
+                'tf_publish_period': 0.01,                     # s, 100 Hz map->odom; must keep up with odom->car/cog
+                'heartbeat_period': 0.1,                       # s, 10 Hz supervisor report
+                'max_sync_delta_ms': 10.0,                     # ms; pose/detection pairs further apart are dropped
+                'report_stale_after_s': 1.0,                   # s without a keyframe before the report reads PARTIAL
+                'keyframe_max_interval_s': 0.5,                # s, longest interval the odometry noise is integrated over
+                'correction_time_constant_s': 0.5,             # s, easing filter on the published map->odom
+                # -- Odometry motion model: the floor under every keyframe factor, and what
+                #    governs normal driving; velocity-derived drift overrides it only on INS dropouts
+                'odom_model_xy_per_m': 0.05,                   # sigma m per m travelled
+                'odom_model_xy_per_rad': 0.10,                 # sigma m per rad turned
+                'odom_model_th_per_m': 0.02,                   # sigma rad per m travelled
+                'odom_model_th_per_rad': 0.05,                 # sigma rad per rad turned
+                'odom_sigma_floor_xy': 0.02,                   # m
+                'odom_sigma_floor_th': 0.005,                  # rad
             }],
         ),
 

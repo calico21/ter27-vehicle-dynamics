@@ -39,34 +39,33 @@
 #define FIXED_FRAME "map"
 #define MOVING_FRAME "odom"
 
-// Parameters
-#define MAP_PUBLISH_PERIOD 100ms
-// map->odom has to keep up with the 100 Hz odom->car/cog it is composed with,
-// or every lookup at a fresh pose stamp falls off the end of the buffer.
-#define TF_PUBLISH_PERIOD 10ms
-#define REPORT_PERIOD 100ms
-#define MAX_SYNC_DELTA_MS 10.0 // Pose/detection pairs further apart are dropped
-#define REPORT_STALE_AFTER_S 1.0
-// Longest interval the odometry noise is integrated over.
-//
-// Whether a frame becomes a keyframe is the estimator's decision now, not a
-// distance threshold here, but the interval that decision is measured across
-// still has to be bounded: a gap in /state/car would otherwise integrate the
-// velocity uncertainty over the whole outage and hand the graph a factor loose
-// enough to mean nothing.
-#define KEYFRAME_MAX_INTERVAL_S 0.5
-// Time constant of the filter on the published map->odom, seconds.
-//
-// The correction absorbs accumulated odometry drift, so what it has to say
-// changes over metres and laps. What it actually did on a measured run was
-// travel 75 m of path to end up 3 cm from where it started, and swing 64 deg of
-// heading to drift a third of one -- because it is re-derived from a fresh
-// solve several times a second, and every solve moves the whole window a little.
-// That is not error to be fixed in the optimiser, it is estimator noise on a
-// quantity that is genuinely slowly varying, and the place to take it out is
-// here. Against a signal drifting a third of a degree a lap, half a second of
-// lag is nothing; against noise arriving at 3 Hz it is most of it.
-#define CORRECTION_TIME_CONSTANT_S 0.5
+// Everything that used to be a #define here is a ROS parameter now, declared in
+// declare_parameters() with these as the defaults. The values and the reasoning
+// behind each one live on the declarations; what follows are only the defaults,
+// kept here so the node still reads as one file.
+namespace defaults
+{
+    constexpr double kMapPublishPeriod = 0.1;   // s
+    // map->odom has to keep up with the 100 Hz odom->car/cog it is composed
+    // with, or every lookup at a fresh pose stamp falls off the end of the
+    // buffer.
+    constexpr double kTfPublishPeriod = 0.01;   // s
+    constexpr double kReportPeriod = 0.1;       // s
+    constexpr double kMaxSyncDeltaMs = 10.0;    // pose/detection pairs further apart are dropped
+    constexpr double kReportStaleAfterS = 1.0;
+    constexpr double kKeyframeMaxIntervalS = 0.5;
+    constexpr double kCorrectionTimeConstantS = 0.5;
+
+    // Odometry motion model: sigma per metre travelled and per radian turned,
+    // and the floor under each. What governs normal driving -- see
+    // odometry_sigmas().
+    constexpr double kOdomModelXyPerM = 0.05;
+    constexpr double kOdomModelXyPerRad = 0.10;
+    constexpr double kOdomModelThPerM = 0.02;
+    constexpr double kOdomModelThPerRad = 0.05;
+    constexpr double kOdomSigmaFloorXy = 0.02;  // m
+    constexpr double kOdomSigmaFloorTh = 0.005; // rad
+} // namespace defaults
 
 using namespace std::chrono_literals;
 class MirenaMapping : public rclcpp::Node
@@ -152,12 +151,30 @@ class MirenaMapping : public rclcpp::Node
     // MultiThreadedExecutor while the map and report timers run in their own.
     std::mutex _slam_mutex;
     std::unique_ptr<mirena::Slam> _slam;
+    /// Resolved in declare_parameters() and handed to the engine when it is
+    /// built on the first synchronised frame.
+    mirena::SlamParams _slam_params;
     gtsam::Pose2 _last_keyframe_raw_odom;
     /// Stamp of the last keyframe, from the /state/car header rather than the
     /// wall clock: make_odometry_noise integrates the estimator's velocity
     /// uncertainty over this interval.
     rclcpp::Time _last_keyframe_time;
     bool _is_initialized = false;
+
+    // Node-level tuning, resolved once in declare_parameters().
+    double _map_publish_period = defaults::kMapPublishPeriod;
+    double _tf_publish_period = defaults::kTfPublishPeriod;
+    double _report_period = defaults::kReportPeriod;
+    double _max_sync_delta_ms = defaults::kMaxSyncDeltaMs;
+    double _report_stale_after_s = defaults::kReportStaleAfterS;
+    double _keyframe_max_interval_s = defaults::kKeyframeMaxIntervalS;
+    double _correction_time_constant_s = defaults::kCorrectionTimeConstantS;
+    double _odom_model_xy_per_m = defaults::kOdomModelXyPerM;
+    double _odom_model_xy_per_rad = defaults::kOdomModelXyPerRad;
+    double _odom_model_th_per_m = defaults::kOdomModelThPerM;
+    double _odom_model_th_per_rad = defaults::kOdomModelThPerRad;
+    double _odom_sigma_floor_xy = defaults::kOdomSigmaFloorXy;
+    double _odom_sigma_floor_th = defaults::kOdomSigmaFloorTh;
 
 public:
     MirenaMapping() : rclcpp::Node("mirena_mapping") {
@@ -172,6 +189,8 @@ public:
 
         RCLCPP_INFO(this->get_logger(), "Starting Mirena Mapping");
 
+        declare_parameters();
+
         _slam_cb_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
         _report_cb_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
         _tf_cb_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -183,7 +202,6 @@ public:
         _map_pub = this->create_publisher<mirena_common::msg::EntityList>(MAP_TOPIC, 10);
         _report_pub = this->create_publisher<mirena_common::msg::Heartbeat>("health", 10);
 
-        _publish_debug = this->declare_parameter<bool>("publish_debug", true);
         if (_publish_debug)
             _debug_pub = this->create_publisher<visualization_msgs::msg::MarkerArray>(DEBUG_TOPIC, 1);
         _tf_broadcaster = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
@@ -200,7 +218,7 @@ public:
         // Refuse pairs the policy would otherwise match across an arbitrary gap.
         // At 15 m/s a 100 ms mismatch is 1.5 m of pose error baked into every
         // landmark of that keyframe.
-        _sync->setMaxIntervalDuration(rclcpp::Duration::from_seconds(MAX_SYNC_DELTA_MS / 1000.0));
+        _sync->setMaxIntervalDuration(rclcpp::Duration::from_seconds(_max_sync_delta_ms / 1000.0));
         _sync->registerCallback(std::bind(&MirenaMapping::synchronized_callback, this, std::placeholders::_1, std::placeholders::_2));
 
         // Low-frequency Map and TF update timer
@@ -209,21 +227,119 @@ public:
         // elapsed node time, so a wall timer would ease at the wrong rate
         // whenever the simulator or a bag is not running at exactly 1x.
         _map_publish_timer = rclcpp::create_timer(
-            this, this->get_clock(), MAP_PUBLISH_PERIOD,
+            this, this->get_clock(), rclcpp::Duration::from_seconds(_map_publish_period),
             std::bind(&MirenaMapping::map_publish_timer_callback, this), _tf_cb_group);
 
         _tf_publish_timer = rclcpp::create_timer(
-            this, this->get_clock(), TF_PUBLISH_PERIOD,
+            this, this->get_clock(), rclcpp::Duration::from_seconds(_tf_publish_period),
             std::bind(&MirenaMapping::tf_publish_timer_callback, this), _tf_cb_group);
 
         _report_timer = rclcpp::create_timer(
-            this, this->get_clock(), REPORT_PERIOD,
+            this, this->get_clock(), rclcpp::Duration::from_seconds(_report_period),
             std::bind(&MirenaMapping::report_callback, this), _report_cb_group);
 
         _is_initialized = false;
     }
 
 private:
+    /// Every knob the estimator has, exposed.
+    ///
+    /// The SlamParams defaults are used as the ROS defaults rather than being
+    /// written out again, so the two cannot drift: changing a default in
+    /// slam.hpp changes it here, and a launch file that says nothing about a
+    /// parameter still gets the value the header documents. Same arrangement as
+    /// mirena_perception's declare_detector_params.
+    ///
+    /// The reasoning behind each value lives on the struct member in slam.hpp,
+    /// which is where it belongs -- it is an argument about the estimator, not
+    /// about ROS. Nothing here is re-read after startup and there is no
+    /// parameter callback: a node's lifetime is the mission's, so a value that
+    /// changed mid-run would have nowhere sensible to take effect.
+    void declare_parameters()
+    {
+        const mirena::SlamParams p;   // the documented defaults
+
+        _publish_debug = this->declare_parameter<bool>("publish_debug", true);
+
+        // -- Association
+        _slam_params.mahalanobis_threshold =
+            this->declare_parameter<double>("mahalanobis_threshold", p.mahalanobis_threshold);
+        _slam_params.max_association_distance =
+            this->declare_parameter<double>("max_association_distance", p.max_association_distance);
+        _slam_params.local_map_radius =
+            this->declare_parameter<double>("local_map_radius", p.local_map_radius);
+        _slam_params.view_half_angle =
+            this->declare_parameter<double>("view_half_angle", p.view_half_angle);
+
+        // -- Measurements
+        _slam_params.default_measurement_sigma =
+            this->declare_parameter<double>("default_measurement_sigma", p.default_measurement_sigma);
+        _slam_params.min_measurement_sigma =
+            this->declare_parameter<double>("min_measurement_sigma", p.min_measurement_sigma);
+
+        // -- Existence
+        _slam_params.p_detect = this->declare_parameter<double>("p_detect", p.p_detect);
+        _slam_params.p_false = this->declare_parameter<double>("p_false", p.p_false);
+        _slam_params.promote_log_odds =
+            this->declare_parameter<double>("promote_log_odds", p.promote_log_odds);
+        _slam_params.publish_log_odds =
+            this->declare_parameter<double>("publish_log_odds", p.publish_log_odds);
+
+        // -- Promotion
+        _slam_params.separability_k =
+            this->declare_parameter<double>("separability_k", p.separability_k);
+        _slam_params.max_candidate_age = static_cast<int>(
+            this->declare_parameter<int>("max_candidate_age", p.max_candidate_age));
+        _slam_params.max_promotion_factors = static_cast<int>(
+            this->declare_parameter<int>("max_promotion_factors", p.max_promotion_factors));
+
+        // -- Keyframing
+        _slam_params.keyframe_odom_sigma =
+            this->declare_parameter<double>("keyframe_odom_sigma", p.keyframe_odom_sigma);
+        _slam_params.keyframe_max_frames = static_cast<int>(
+            this->declare_parameter<int>("keyframe_max_frames", p.keyframe_max_frames));
+
+        // -- Node timing
+        _map_publish_period =
+            this->declare_parameter<double>("map_publish_period", defaults::kMapPublishPeriod);
+        _tf_publish_period =
+            this->declare_parameter<double>("tf_publish_period", defaults::kTfPublishPeriod);
+        _report_period =
+            this->declare_parameter<double>("heartbeat_period", defaults::kReportPeriod);
+        _max_sync_delta_ms =
+            this->declare_parameter<double>("max_sync_delta_ms", defaults::kMaxSyncDeltaMs);
+        _report_stale_after_s =
+            this->declare_parameter<double>("report_stale_after_s", defaults::kReportStaleAfterS);
+        _keyframe_max_interval_s = this->declare_parameter<double>(
+            "keyframe_max_interval_s", defaults::kKeyframeMaxIntervalS);
+        _correction_time_constant_s = this->declare_parameter<double>(
+            "correction_time_constant_s", defaults::kCorrectionTimeConstantS);
+
+        // -- Odometry motion model
+        _odom_model_xy_per_m =
+            this->declare_parameter<double>("odom_model_xy_per_m", defaults::kOdomModelXyPerM);
+        _odom_model_xy_per_rad =
+            this->declare_parameter<double>("odom_model_xy_per_rad", defaults::kOdomModelXyPerRad);
+        _odom_model_th_per_m =
+            this->declare_parameter<double>("odom_model_th_per_m", defaults::kOdomModelThPerM);
+        _odom_model_th_per_rad =
+            this->declare_parameter<double>("odom_model_th_per_rad", defaults::kOdomModelThPerRad);
+        _odom_sigma_floor_xy =
+            this->declare_parameter<double>("odom_sigma_floor_xy", defaults::kOdomSigmaFloorXy);
+        _odom_sigma_floor_th =
+            this->declare_parameter<double>("odom_sigma_floor_th", defaults::kOdomSigmaFloorTh);
+
+        // A correction time constant at or below zero divides by zero in the
+        // easing filter; the rest are merely unwise rather than fatal.
+        if (!(_correction_time_constant_s > 0.0))
+        {
+            RCLCPP_WARN(this->get_logger(),
+                        "correction_time_constant_s must be positive, got %.3f; using %.3f.",
+                        _correction_time_constant_s, defaults::kCorrectionTimeConstantS);
+            _correction_time_constant_s = defaults::kCorrectionTimeConstantS;
+        }
+    }
+
     void synchronized_callback(const mirena_common::msg::Car::ConstSharedPtr &car_msg,
                                const mirena_common::msg::EntityList::ConstSharedPtr &landmark_msg)
     {
@@ -236,7 +352,7 @@ private:
         // Belt and braces on top of setMaxIntervalDuration: a pose and a cone
         // frame this far apart describe different moments, and pretending
         // otherwise writes the difference straight into the map.
-        if (delta_ms > MAX_SYNC_DELTA_MS)
+        if (delta_ms > _max_sync_delta_ms)
         {
             {
                 std::lock_guard<std::mutex> lock(_report_mutex);
@@ -244,7 +360,7 @@ private:
             }
             RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
                                  "Dropping sync pair, delta %.1f ms exceeds %.1f ms",
-                                 delta_ms, MAX_SYNC_DELTA_MS);
+                                 delta_ms, _max_sync_delta_ms);
             return;
         }
 
@@ -262,7 +378,7 @@ private:
         std::unique_lock<std::mutex> slam_lock(_slam_mutex);
 
         if (!_is_initialized) {
-            _slam = std::make_unique<mirena::Slam>(current_raw);
+            _slam = std::make_unique<mirena::Slam>(current_raw, _slam_params);
             _last_keyframe_raw_odom = current_raw;
             _last_keyframe_time = car_msg->header.stamp;
             _is_initialized = true;
@@ -402,19 +518,19 @@ private:
     {
         // Car covariance is row-major 6x6 over [x, y, psi, u, v, omega], so the
         // velocity block sits on the diagonal at 21, 28 and 35.
-        const double dt = std::clamp(interval_s, 0.0, KEYFRAME_MAX_INTERVAL_S);
+        const double dt = std::clamp(interval_s, 0.0, _keyframe_max_interval_s);
         const double drift_x = std::sqrt(std::max(0.0, car.covariance[21])) * dt;
         const double drift_y = std::sqrt(std::max(0.0, car.covariance[28])) * dt;
         const double drift_th = std::sqrt(std::max(0.0, car.covariance[35])) * dt;
 
         const double dist = delta.translation().norm();
         const double turn = std::abs(delta.theta());
-        const double model_xy = 0.05 * dist + 0.10 * turn;
-        const double model_th = 0.02 * dist + 0.05 * turn;
+        const double model_xy = _odom_model_xy_per_m * dist + _odom_model_xy_per_rad * turn;
+        const double model_th = _odom_model_th_per_m * dist + _odom_model_th_per_rad * turn;
 
-        const double sx = std::max({drift_x, model_xy, 0.02});
-        const double sy = std::max({drift_y, model_xy, 0.02});
-        const double st = std::max({drift_th, model_th, 0.005});
+        const double sx = std::max({drift_x, model_xy, _odom_sigma_floor_xy});
+        const double sy = std::max({drift_y, model_xy, _odom_sigma_floor_xy});
+        const double st = std::max({drift_th, model_th, _odom_sigma_floor_th});
 
         return gtsam::Vector3(sx, sy, st);
     }
@@ -607,7 +723,7 @@ private:
         else
         {
             const double dt = std::clamp((now - _last_broadcast).seconds(), 0.0, 1.0);
-            const double alpha = 1.0 - std::exp(-dt / CORRECTION_TIME_CONSTANT_S);
+            const double alpha = 1.0 - std::exp(-dt / _correction_time_constant_s);
             _published_correction =
                 gtsam::interpolate<gtsam::Pose2>(_published_correction, map_to_odom, alpha);
         }
@@ -658,7 +774,7 @@ private:
             // that had not produced a keyframe in five seconds: this field was
             // the constant "WORKING".
             const double since_update = (this->now() - _last_update_timestamp).seconds();
-            const bool stale = _has_keyframe && since_update > REPORT_STALE_AFTER_S;
+            const bool stale = _has_keyframe && since_update > _report_stale_after_s;
             report_json["status_state"] = !_healthy ? "NOT_WORKING"
                                           : !_has_keyframe ? "IDLE"
                                           : (stale ? "PARTIAL" : "WORKING");
