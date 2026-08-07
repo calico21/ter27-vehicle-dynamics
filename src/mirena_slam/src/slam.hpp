@@ -169,9 +169,56 @@ namespace mirena
 
         /// How far the odometry may drift, in metres, before the pose needs
         /// pinning with a keyframe of its own.
-        double keyframe_odom_sigma = 0.15;
+        ///
+        /// 0.30, not the 0.15 this used to be, and the reason is map quality
+        /// rather than cost. Measured over the 270 s and thirteen laps of
+        /// rosbag2_2026_08_05-20_26_23, replayed through the trackdrive
+        /// pipeline:
+        ///
+        ///                        0.15        0.30
+        ///   landmarks (graph)     210         103
+        ///   published             129          92
+        ///   hidden                 81          11
+        ///   pairs under 0.9 m       8           0
+        ///   worst gap in cover   9.4 m       2.6 m
+        ///
+        /// The tighter value looks better on the landmark count and is not: the
+        /// extra hundred are the first lap, laid down before the graph had
+        /// converged and left standing beside the cones the later laps agreed
+        /// on. That is what the 81 hidden and the eight touching pairs are, and
+        /// the 9.4 m is a hole in the middle of the driven line where the smear
+        /// left nothing the car could see. At 0.30 the cones line the whole lap
+        /// and nothing is ever further than a track width away.
+        ///
+        /// Keyframing more often than the odometry deserves is not free: each
+        /// pose is another chance to write down the same cone in a slightly
+        /// different place before the graph has enough constraints to know
+        /// better. The cost went the other way, slightly -- update p99 406 ->
+        /// 660 ms -- so this buys a map, not a budget; see keyframe_max_frames.
+        double keyframe_odom_sigma = 0.30;
         /// Frames between keyframes, at most, whatever else is true. This is what
         /// keeps map->odom fresh rather than what keeps the map accurate.
+        ///
+        /// This is the floor under the size of the graph, and no tuning gets
+        /// under it: at 8 Hz perception it is a permanent pose every half
+        /// second, so a ten-minute run carries at least twelve hundred of them
+        /// however well the map is known. Loosening keyframe_odom_sigma does not
+        /// help, because the two clauses substitute -- measured on
+        /// rosbag2_2026_08_05-20_26_23, doubling it moved 97 keyframes off the
+        /// drift clause and onto this one and left the total within 6%.
+        ///
+        /// That floor is what makes a long run expensive. Over the same replay
+        /// the iSAM2 update grew from 41 ms across the first half of 981 poses
+        /// to 188 ms across the second, and the node reported PARTIAL from
+        /// t=213 s -- the estimator falling behind the perception it is fed.
+        ///
+        /// Bounding that needs a structural answer rather than a threshold:
+        /// either the graph stops growing (fixed-lag smoothing, marginalising
+        /// old poses) or the pose stops needing the graph once the map has
+        /// converged (localise against the finished map instead of extending
+        /// it). `pinned` was the beginning of the second answer, but it is true
+        /// on only 20% of frames here and the drift clause covers most of the
+        /// rest, so it never gets the chance to suppress anything.
         int keyframe_max_frames = 4;
     };
 
@@ -268,6 +315,23 @@ namespace mirena
         int get_candidate_count() const { return static_cast<int>(candidates_.size()); }
         int get_landmark_count() const { return static_cast<int>(landmarks_.size()); }
         int get_pose_count() const { return next_keyframe_; }
+        /// What has been forcing keyframes, since construction.
+        ///
+        /// The pose chain is permanent and dominates the cost of a long run, so
+        /// being able to say *why* it grew -- new cones, drifting odometry, or
+        /// merely the frame timer -- is what turns "SLAM got slow after four
+        /// minutes" into a decision about which threshold to move.
+        int get_keyframes_from_structure() const { return kf_structure_; }
+        int get_keyframes_from_drift() const { return kf_drift_; }
+        int get_keyframes_from_timer() const { return kf_timer_; }
+        /// Fraction of frames where the map already determined the pose, so a
+        /// keyframe of its own would have bought little.
+        double get_pinned_fraction() const
+        {
+            return frames_seen_ > 0
+                       ? static_cast<double>(frames_pinned_) / frames_seen_
+                       : 0.0;
+        }
         /// Straight out of ISAM2Result, so a loop-closure spike is visible in the
         /// heartbeat as work done rather than as an unexplained slow keyframe.
         int get_variables_reeliminated() const { return last_reeliminated_; }
@@ -455,6 +519,11 @@ namespace mirena
         gtsam::Matrix3 pending_odom_cov_ = gtsam::Matrix3::Zero();
         bool wants_keyframe_ = false;
         int frames_since_keyframe_ = 0;
+        int frames_seen_ = 0;
+        int frames_pinned_ = 0;
+        int kf_structure_ = 0;
+        int kf_drift_ = 0;
+        int kf_timer_ = 0;
 
         int next_keyframe_ = 0;
         int next_landmark_ = 0;

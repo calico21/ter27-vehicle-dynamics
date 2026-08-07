@@ -13,16 +13,30 @@ namespace mirena::planning
 
 struct UnknownPlannerParams
 {
-  /// The narrowest the track may get, in metres. Formula Student's floor is 3 m.
+  /// The narrowest an edge may be and still be a gate, in metres.
   ///
-  /// A figure out of the rules rather than off the cones. It could be measured
-  /// across the big cones of the start line instead, and that was tried: it comes
-  /// out at 3.00 m on every one of the exported tracks, so it buys nothing, and
-  /// it costs something. The seed is two *perceived* cones, so on a map carrying
-  /// 0.10 m of landmark error the measurement carries about 0.14 m of its own,
-  /// and every bound derived from it inherits that -- a threshold that ought to
-  /// be fixed jitters from frame to frame instead.
-  double track_width{3.0};
+  /// Deliberately not the rules' 3 m floor, and this is the one bound that must
+  /// not be set to its rulebook value. The rules constrain the *track*; this
+  /// tests a *measurement* of it, taken across two perceived cones. On a map
+  /// carrying 0.10 m of landmark error that measurement carries about 0.14 m of
+  /// its own, and it reads short as often as long.
+  ///
+  /// Measured rather than assumed: with the floor off, the narrowest gate the
+  /// trace actually drives is 2.999 m on a perfect map and 2.469 m on a degraded
+  /// one. So a floor at 3.00 rejects real gates even on a perfect map, and does
+  /// it catastrophically -- coverage falls to 92.6%, closure to 4 of 10, and the
+  /// centreline ends up 1.50 m out, which is on the cones. At 2.90 the degraded
+  /// map loses half its closures and its excursions double.
+  ///
+  /// Anything at or below 2.50 is indistinguishable from having no floor at all
+  /// on every fixture here, hairpin included -- the hairpin is the max's problem,
+  /// not this one. 2.0 sits well clear of the 2.469 m worst case with room for a
+  /// noisier map than the one tested.
+  ///
+  /// So this is a rail, not a filter. It fires on the degenerate edge -- two
+  /// landmarks the mapper has failed to merge, a duplicate cone centimetres from
+  /// its twin -- and on nothing else. That is the whole of what it is for.
+  double min_track_width{2.0};
 
   /// The widest the track may get, in metres, and so the widest an edge may be
   /// and still be a gate. The rules give the floor and leave the ceiling open, so

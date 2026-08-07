@@ -432,9 +432,30 @@ namespace mirena
                 return entry.second.log_odds >= params_.promote_log_odds &&
                        !entry.second.sightings.empty();
             });
-        wants_keyframe_ = frames_since_keyframe_ >= params_.keyframe_max_frames ||
-                          structure ||
-                          (!pinned && drifted > params_.keyframe_odom_sigma);
+        const bool timer = frames_since_keyframe_ >= params_.keyframe_max_frames;
+        const bool drifting = !pinned && drifted > params_.keyframe_odom_sigma;
+        wants_keyframe_ = timer || structure || drifting;
+
+        // Which clause is doing the forcing, counted for the heartbeat.
+        //
+        // The pose chain is permanent and it is what makes a long run expensive,
+        // so "why is it growing" is the question to be able to answer without a
+        // rebuild. Attributed to one reason each, in the order that makes the
+        // count actionable: new structure is the one that is buying something,
+        // and the timer is the one that fires whether or not anything was
+        // learned.
+        ++frames_seen_;
+        if (pinned)
+            ++frames_pinned_;
+        if (wants_keyframe_)
+        {
+            if (structure)
+                ++kf_structure_;
+            else if (drifting)
+                ++kf_drift_;
+            else
+                ++kf_timer_;
+        }
 
         if (debug)
         {

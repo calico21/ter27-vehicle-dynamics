@@ -122,6 +122,10 @@ class MirenaMapping : public rclcpp::Node
     int _poses = 0;
     int _variables_reeliminated = 0;
     int _cliques = 0;
+    int _kf_structure = 0;
+    int _kf_drift = 0;
+    int _kf_timer = 0;
+    double _pinned_fraction = 0.0;
     bool _healthy = true;
     uint64_t _dropped_sync_pairs = 0;
 
@@ -340,6 +344,10 @@ private:
             _poses = _slam->get_pose_count();
             _variables_reeliminated = _slam->get_variables_reeliminated();
             _cliques = _slam->get_cliques();
+            _kf_structure = _slam->get_keyframes_from_structure();
+            _kf_drift = _slam->get_keyframes_from_drift();
+            _kf_timer = _slam->get_keyframes_from_timer();
+            _pinned_fraction = _slam->get_pinned_fraction();
             _healthy = _slam->healthy();
         }
 
@@ -678,6 +686,13 @@ private:
             // done rather than as an unexplained slow keyframe.
             report_json["variables_reeliminated"] = _variables_reeliminated;
             report_json["cliques"] = _cliques;
+            // What has been forcing poses. A chain growing on `structure` is
+            // paying for a map it is still learning; one growing on `timer`
+            // after the map has converged is paying for nothing.
+            report_json["keyframes_from_structure"] = _kf_structure;
+            report_json["keyframes_from_drift"] = _kf_drift;
+            report_json["keyframes_from_timer"] = _kf_timer;
+            report_json["pinned_fraction"] = _pinned_fraction;
             report_json["dropped_sync_pairs"] = _dropped_sync_pairs;
 
             report_json["car_pos_x"] = this->_current_car_x;

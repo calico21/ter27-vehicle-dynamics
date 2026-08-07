@@ -187,6 +187,18 @@ UnknownPlanner::Trace UnknownPlanner::trace(
   // fill rather than by reaching over it. Cutting a hairpin is not recoverable
   // that way.
   const double max_width = params_.max_track_width;
+
+  // And the floor, which is a different kind of thing and carries a different
+  // kind of number. The ceiling is a real discriminator -- it is what refuses the
+  // hairpin chord. The floor refuses nothing the tracks here contain: swept from
+  // 0 to 2.50 it changes not one figure on any fixture. It is set for the edge
+  // between two landmarks the mapper failed to merge, which is a defect upstream
+  // and has no width worth speaking of.
+  //
+  // It must stay well under the rules' 3 m. This tests a measurement, not the
+  // track, and the measurement reads short: the narrowest gate the trace really
+  // drives is 2.999 m on a perfect map and 2.469 m on a degraded one.
+  const double min_width = params_.min_track_width;
   const double width = distance(seed.a, seed.b);
 
   const int seed_index = static_cast<int>(edges.size());
@@ -231,7 +243,7 @@ UnknownPlanner::Trace UnknownPlanner::trace(
   const auto worth = [&](const Step & from, int index) {
       const GateEdge & gate = edges[index];
       if (spent[gate.a] || spent[gate.b]) {return 0.0;}
-      if (gate.width > max_width) {return 0.0;}
+      if (gate.width < min_width || gate.width > max_width) {return 0.0;}
 
       const Vec2 travel = gate.mid - from.mid;
       const double reach = norm(travel);
