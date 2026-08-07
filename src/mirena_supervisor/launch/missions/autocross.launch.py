@@ -73,7 +73,7 @@ def generate_launch_description():
         # laps is what mission_config carried: one lap of the unknown circuit, then stop past the line.
         Node(
             package='mirena_control',
-            executable='mirena_control',
+            executable='mirena_control_pid',
             name='mirena_control',
             parameters=[{
                 'use_sim_time': use_sim_time,

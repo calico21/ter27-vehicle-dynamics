@@ -2,7 +2,7 @@
 """Emit the acados C sources for the Mirena contouring-control OCP.
 
 Run at CMake configure time; the C it produces is compiled straight into the
-mirena_control executable, so no Python or CasADi is loaded at runtime.
+mirena_control_mpc executable, so no Python or CasADi is loaded at runtime.
 
     generate_solver.py --output <dir> [--path-points N] [--horizon N]
                        [--horizon-time T] [--solve-budget S]

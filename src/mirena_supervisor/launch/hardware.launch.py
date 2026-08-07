@@ -55,6 +55,11 @@ def generate_launch_description():
                 'lidar_ip': '192.168.1.200',
                 'msop_port': 6699,
                 'difop_port': 7788,
+                # De-skew: the sweep takes 100 ms and the car covers metres in
+                # it, so the points are motion-corrected against /sensors/lidar/imu
+                # before they leave the driver. Off means perception sees a
+                # smeared cloud at speed. Live-reconfigurable in the node.
+                'use_imu': True,
             }],
         ),
 
@@ -81,12 +86,35 @@ def generate_launch_description():
             parameters=[{
                 'use_sim_time': False,
                 'imu_device': '/dev/ter_IMU',
+                # The VN-300's own IMU runs at 400 Hz; this is what it is asked
+                # to emit. 100 Hz is what mirena_state's predict step expects.
+                'imu_output_rate_hz': 100,
+                # Antenna geometry, in metres, car/cog-relative. These are the
+                # only genuinely per-car numbers in this driver -- they say where
+                # the antennas are bolted, and the VN-300's onboard filter is
+                # wrong without them, so they belong here in the vehicle's own
+                # launch file rather than buried as node defaults. Remeasure and
+                # update if either antenna moves.
+                'antenna_a_offset': [-0.11, 0.0, 0.52],
+                'gnss_compass_baseline': [1.50, 0.0, -0.36],
+                'gnss_compass_uncertainty': [0.04, 0.04, 0.04],
             }],
         ),
 
         # -- Vehicle bus ------------------------------------------------------
         # Also the source of /as_status, which is what selects the mission and
-        # what the car uses to decide when to act on our commands.
+        # what the car uses to decide when to act on our commands, and of
+        # /sensors/wheel_speeds off the rear WheelInfo frame.
+        #
+        # can0 must already be up. This node does NOT bring it up: it opens the
+        # socket and nothing more, and if the link is down it logs one error and
+        # runs inactive -- which looks like a healthy stack that never gets a
+        # mission, because /as_status never arrives. Bringing the link up is
+        # systemd-networkd's job (or `ip link set can0 up type can bitrate
+        # 1000000`). This block used to pass can_bitrate and auto_bringup with a
+        # comment claiming the node did it itself; neither parameter was ever
+        # declared, so rclcpp discarded both silently and the bitrate here had no
+        # effect on anything.
         Node(
             package='mirena_hardware',
             executable='mirena_can',
@@ -94,9 +122,17 @@ def generate_launch_description():
             parameters=[{
                 'use_sim_time': False,
                 'can_interface': 'can0',
-                'can_bitrate': 1000000,
-                # The node runs `ip link set can0 up type can bitrate ...` itself.
-                'auto_bringup': True,
+                # Record the bus. A session is one file, opened when TER_STATUS
+                # reaches PRECHARGED and closed when it returns to WAIT_SL, named
+                # for the moment it opened. Format is candump -L, so canplayer
+                # and cantools read it directly.
+                #
+                # This makes the socket run unfiltered (error frames included),
+                # which is the point -- but it means the node reads every frame
+                # on the bus rather than the two it decodes. Set log False to put
+                # the narrow kernel filter back.
+                'log': True,
+                'log_path': '/home/mirena/logs',
             }],
         ),
 
@@ -112,6 +148,17 @@ def generate_launch_description():
                 'mission_launch_package': 'mirena_supervisor',
                 'mission_launch_directory': 'launch/missions',
                 'mission_launch_arguments': ['use_sim_time:=false'],
+                # How long the pipeline gets to come up before its silence is a
+                # failed mission. Sized for the slowest node in any mission --
+                # control building its acados solver.
+                'startup_timeout_sec': 60.0,
+                # The pipeline is discovered from whoever publishes /health, so
+                # CONFIGURING ends when that set has held still this long.
+                'discovery_settle_sec': 2.0,
+                # Past CONFIGURING, a mission node quiet for this long is dead
+                # and the mission fails. Nodes beat at 10 Hz, so this is 30
+                # missed heartbeats.
+                'heartbeat_timeout_sec': 3.0,
             }],
         ),
     ])

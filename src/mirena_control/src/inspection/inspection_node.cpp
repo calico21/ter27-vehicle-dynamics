@@ -1,27 +1,35 @@
 // Inspection controller for the Mirena driverless car.
 //
 // The static inspection mission: the car is on stands, the steering is swept
-// with a sine and the drivetrain is run through a short throttle profile, for a
-// fixed window, to demonstrate that both actuators respond. Nothing is planned
-// and nothing is solved, so this node replaces the MPC one for the length of
-// that mission -- it is the alternative occupant of the same slot in the stack,
-// which is why it carries the same default node name, subscribes to nothing
-// else and publishes the same /control and health topics.
+// with a sine and the drivetrain is held at a target wheel speed, for a fixed
+// window, to demonstrate that both actuators respond. Nothing is planned and
+// nothing is solved, so this node replaces the MPC one for the length of that
+// mission -- it is the alternative occupant of the same slot in the stack,
+// which is why it carries the same default node name and publishes the same
+// /control and health topics.
 //
-// The throttle profile is three parameterised stages, timed from the same clock
-// as the sweep: launch_gas until launch_time to get the wheels turning against
-// their inertia, then hold_gas until hold_time, then full braking for whatever
-// is left of the sweep. Every edge is a parameter because the numbers are what
-// the scrutineers ask to see changed, and a profile compiled into the binary is
-// one nobody can change on the day.
+// The drivetrain runs closed-loop. The rear wheel speeds arrive from the CAN
+// bridge on /sensors/wheel_speeds in RPM, and their mean is the feedback of a
+// PID whose output is gas. What the scrutineers are shown is therefore a wheel
+// speed that is asked for and reached, rather than a throttle opening that
+// happens to produce one: inspection_target_rpm is the number on the sheet, and
+// it holds whatever the drivetrain's losses on the day turn out to be.
 //
-// Two loops run on their own callback groups:
-//   * 100 Hz sweep      -- publishes the open-loop steering and gas command;
+// Three loops run on their own callback groups:
+//   * 100 Hz command    -- publishes the swept steering and the PID's gas;
+//   * on demand         -- the wheel-speed subscription;
 //   * 10 Hz  heartbeat  -- reports liveness and progress to the supervisor.
 //
-// Like the MPC node, this one is the sole authority on when its run is over: it
-// latches mission_finished in the heartbeat once the window closes, and the
-// supervisor ends the mission off that flag.
+// The wheel speed is the only thing standing between the loop and a drivetrain
+// commanded open-loop, so it is treated the way the other controllers treat a
+// state estimate: an integrating loop fed a measurement that stopped arriving
+// winds up and pins the throttle, on a car whose wheels are off the ground. A
+// measurement older than wheel_speed_timeout therefore stops the loop, brakes
+// and drops the integrator, and the sweep runs on so the mission still ends.
+//
+// Like the other controllers, this one is the sole authority on when its run is
+// over: it latches mission_finished in the heartbeat once the window closes,
+// and the supervisor ends the mission off that flag.
 
 #include <algorithm>
 #include <atomic>
@@ -37,6 +45,10 @@
 #include "mirena_common/msg/as_info.hpp"
 #include "mirena_common/msg/car_control.hpp"
 #include "mirena_common/msg/heartbeat.hpp"
+#include "mirena_common/msg/wheel_speeds.hpp"
+
+#include "common/pid.hpp"
+#include "common/seqlock.hpp"
 
 namespace mirena
 {
@@ -44,20 +56,32 @@ namespace mirena
 namespace
 {
 
-/// Sentinel for "the car has not started driving yet".  Zero will not do: under
-/// sim time the clock legitimately starts at zero, so a zero sentinel would
-/// make a sweep that began at t = 0 look like one that never began.
+/// Sentinel for "this has not happened yet".  Zero will not do: under sim time
+/// the clock legitimately starts at zero, so a zero sentinel would make a sweep
+/// that began at t = 0 look like one that never began.
 constexpr int64_t kUnsetTime = std::numeric_limits<int64_t>::min();
 
-/// Held once the window closes, and whenever a stage boundary leaves nothing
-/// else to command: wheels straight, full braking.
+/// Held once the window closes, and whenever the loop has nothing it can
+/// safely close on: wheels straight, full braking.
 constexpr double kFailsafeGas = -1.0;
 constexpr double kFailsafeSteer = 0.0;
 
 /// Topic naming follows the stack's convention -- see the MPC node.
 constexpr char kAsStatusTopic[] = "/as_status";
+constexpr char kWheelSpeedTopic[] = "/sensors/wheel_speeds";
 constexpr char kControlTopic[] = "/control";
 constexpr char kHealthTopic[] = "health";
+
+/// The rear wheel speeds as last heard, kept as a small POD so the
+/// subscription callback can publish it without allocating.
+struct WheelState
+{
+  int64_t stamp_ns;
+  double rl;        // RPM
+  double rr;        // RPM
+  double mean;      // RPM, the loop's feedback
+  bool valid;
+};
 
 }  // namespace
 
@@ -76,12 +100,26 @@ public:
     declare_parameter<double>("inspection_frequency", 0.5);   // Hz
     declare_parameter<double>("inspection_amplitude", 0.3);   // rad, ~17 deg
     declare_parameter<double>("inspection_duration", 25.0);   // s
-    // Throttle profile, in seconds from the same start as the sweep.
-    declare_parameter<double>("inspection_launch_gas", 0.24);
-    declare_parameter<double>("inspection_launch_time", 4.0);
-    declare_parameter<double>("inspection_hold_gas", 0.18);
-    declare_parameter<double>("inspection_hold_time", 20.0);
+
+    // The wheel-speed loop.  The target is the number the scrutineers read off
+    // the sheet; everything else shapes how the drivetrain gets there.
+    declare_parameter<double>("inspection_target_rpm", 200.0);
+    declare_parameter<double>("inspection_rpm_kp", 0.0015);
+    declare_parameter<double>("inspection_rpm_ki", 0.0020);
+    declare_parameter<double>("inspection_rpm_kd", 0.0001);
+    declare_parameter<double>("inspection_rpm_tau_d", 0.08);
+    // The loop's authority.  Deliberately short of full: the car is on stands
+    // with no road load, so the speed the drivetrain reaches for a given gas is
+    // far higher than on the ground and there is no reason to hand the loop the
+    // whole pedal to find that out with.
+    declare_parameter<double>("inspection_gas_max", 0.5);
+    declare_parameter<double>("inspection_gas_min", -0.5);
+    declare_parameter<double>("inspection_gas_rate", 2.0);    // per second
+    // Gas held once the window closes, and whenever the loop cannot run.
     declare_parameter<double>("inspection_brake_gas", -1.0);
+    // How stale the wheel speed may be before the loop stops trusting it.
+    declare_parameter<double>("wheel_speed_timeout", 0.2);
+
     declare_parameter<double>("command_period", 0.01);
     declare_parameter<double>("heartbeat_period", 0.1);
 
@@ -90,29 +128,34 @@ public:
     frequency_ = get_parameter("inspection_frequency").as_double();
     amplitude_ = get_parameter("inspection_amplitude").as_double();
     duration_ = get_parameter("inspection_duration").as_double();
-    launch_gas_ = get_parameter("inspection_launch_gas").as_double();
-    launch_time_ = get_parameter("inspection_launch_time").as_double();
-    hold_gas_ = get_parameter("inspection_hold_gas").as_double();
-    hold_time_ = get_parameter("inspection_hold_time").as_double();
+    target_rpm_ = get_parameter("inspection_target_rpm").as_double();
+    gas_max_ = get_parameter("inspection_gas_max").as_double();
+    gas_min_ = get_parameter("inspection_gas_min").as_double();
+    gas_rate_ = std::max(get_parameter("inspection_gas_rate").as_double(), 0.01);
     brake_gas_ = get_parameter("inspection_brake_gas").as_double();
-    const double command_period = get_parameter("command_period").as_double();
+    wheel_speed_timeout_ =
+      std::max(get_parameter("wheel_speed_timeout").as_double(), 0.0);
+    command_period_ = get_parameter("command_period").as_double();
     const double heartbeat_period = get_parameter("heartbeat_period").as_double();
 
-    // The stages have to be ordered and have to fit inside the sweep, or the
-    // profile silently means something other than it reads: a hold_time past
-    // the end of the window is a brake stage that never runs, and a launch_time
-    // past hold_time is a hold stage that never runs.  Shortening the sweep
-    // must shorten the profile with it rather than quietly drop a stage.
-    hold_time_ = std::min(std::max(hold_time_, 0.0), duration_);
-    launch_time_ = std::min(std::max(launch_time_, 0.0), hold_time_);
+    Pid::Gains gains;
+    gains.kp = get_parameter("inspection_rpm_kp").as_double();
+    gains.ki = get_parameter("inspection_rpm_ki").as_double();
+    gains.kd = get_parameter("inspection_rpm_kd").as_double();
+    gains.tau_d = get_parameter("inspection_rpm_tau_d").as_double();
+    rpm_pid_.configure(gains, gas_min_, gas_max_);
 
     RCLCPP_INFO(
       get_logger(), "Inspection mission: %.1f s steering sweep at %.2f Hz, +-%.2f rad.",
       duration_, frequency_, amplitude_);
     RCLCPP_INFO(
       get_logger(),
-      "Throttle profile: gas %.2f to %.1f s, %.2f to %.1f s, %.2f thereafter.",
-      launch_gas_, launch_time_, hold_gas_, hold_time_, brake_gas_);
+      "Wheel-speed loop: %.0f RPM target, gains (%.4f, %.4f, %.4f), gas in [%.2f, %.2f].",
+      target_rpm_, gains.kp, gains.ki, gains.kd, gas_min_, gas_max_);
+    RCLCPP_INFO(
+      get_logger(),
+      "Feedback is the mean of %s; older than %.2f s and the loop brakes.",
+      kWheelSpeedTopic, wheel_speed_timeout_);
 
     // The car's own state machine is what starts the clock. The sweep must be
     // a window of the wheel actually moving, and the wheel does not move until
@@ -122,21 +165,32 @@ public:
       kAsStatusTopic, 10,
       std::bind(&InspectionNode::asCallback, this, std::placeholders::_1));
 
+    // SensorDataQoS, matching what the CAN bridge publishes with.  A default
+    // (reliable) subscription would silently never match a best-effort
+    // publisher, and the first sign of it would be a loop that never gets a
+    // measurement -- which now reads as a fault rather than as silence.
+    rclcpp::SubscriptionOptions wheel_opts;
+    wheel_opts.callback_group =
+      create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    wheel_sub_ = create_subscription<mirena_common::msg::WheelSpeeds>(
+      kWheelSpeedTopic, rclcpp::SensorDataQoS(),
+      std::bind(&InspectionNode::wheelCallback, this, std::placeholders::_1), wheel_opts);
+
     control_pub_ = create_publisher<mirena_common::msg::CarControl>(kControlTopic, 10);
     heartbeat_pub_ = create_publisher<mirena_common::msg::Heartbeat>(kHealthTopic, 10);
 
-    sweep_group_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    command_group_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 
     heartbeat_timer_ = rclcpp::create_timer(
       this, get_clock(), rclcpp::Duration::from_seconds(heartbeat_period),
       std::bind(&InspectionNode::publishHeartbeat, this));
-    sweep_timer_ = rclcpp::create_timer(
-      this, get_clock(), rclcpp::Duration::from_seconds(command_period),
-      std::bind(&InspectionNode::sweepIteration, this), sweep_group_);
+    command_timer_ = rclcpp::create_timer(
+      this, get_clock(), rclcpp::Duration::from_seconds(command_period_),
+      std::bind(&InspectionNode::commandIteration, this), command_group_);
   }
 
 private:
-  // ------------------------------------------------------------- sweep loop
+  // ---------------------------------------------------------------- callbacks
 
   /// Latches the moment the car starts driving; the sweep is timed from there.
   void asCallback(const mirena_common::msg::AsInfo::SharedPtr msg)
@@ -152,20 +206,38 @@ private:
     }
   }
 
-  /// The commanded throttle at `elapsed` seconds into the sweep.  Boundaries
-  /// belong to the stage that is ending, so no instant falls into two stages.
-  double gasAt(double elapsed) const
+  void wheelCallback(const mirena_common::msg::WheelSpeeds::SharedPtr msg)
   {
-    if (elapsed <= launch_time_) {
-      return launch_gas_;
+    // A non-finite wheel speed has to be dropped here or it is never caught
+    // again: NaN compares false against every threshold downstream, so it would
+    // reach the PID as an error and take the integrator with it.  The last good
+    // reading is kept instead and simply ages out if nothing better arrives.
+    if (!std::isfinite(msg->rl) || !std::isfinite(msg->rr)) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 1000,
+        "Discarding a wheel-speed message with a non-finite reading.");
+      return;
     }
-    if (elapsed <= hold_time_) {
-      return hold_gas_;
-    }
-    return brake_gas_;
+
+    WheelState w;
+    // The CAN bridge stamps these; an unstamped message would read as
+    // infinitely old and hold the loop off forever, so fall back to arrival.
+    const int64_t stamped = rclcpp::Time(msg->header.stamp).nanoseconds();
+    w.stamp_ns = stamped == 0 ? get_clock()->now().nanoseconds() : stamped;
+    w.rl = msg->rl;
+    w.rr = msg->rr;
+    // The mean of the two driven wheels.  Averaging is what makes this a
+    // drivetrain measurement rather than a wheel one: on stands the two are
+    // free to differ through the diff, and either one alone would have the loop
+    // chase whichever happens to be spinning.
+    w.mean = 0.5 * (static_cast<double>(msg->rl) + static_cast<double>(msg->rr));
+    w.valid = true;
+    wheels_.store(w);
   }
 
-  void sweepIteration()
+  // ------------------------------------------------------------- command loop
+
+  void commandIteration()
   {
     const int64_t start_ns = start_ns_.load(std::memory_order_relaxed);
     if (start_ns == kUnsetTime) {
@@ -173,31 +245,112 @@ private:
     }
 
     const auto stamp = get_clock()->now();
-    const double elapsed = static_cast<double>(stamp.nanoseconds() - start_ns) * 1e-9;
+    const int64_t now_ns = stamp.nanoseconds();
+    const double elapsed = static_cast<double>(now_ns - start_ns) * 1e-9;
     elapsed_.store(elapsed, std::memory_order_relaxed);
 
     command_msg_.header.stamp = stamp;
 
-    if (elapsed <= duration_) {
-      command_msg_.gas = gasAt(elapsed);
-      command_msg_.steer_angle = amplitude_ * std::sin(2.0 * M_PI * frequency_ * elapsed);
+    // Past the window: hold neutral and latch.  Keep publishing afterwards --
+    // the supervisor tears the stack down on the flag, but until it does the
+    // vehicle interface must not be left without a fresh command.
+    if (elapsed > duration_) {
+      rpm_pid_.reset();
+      last_gas_ = brake_gas_;
+      command_msg_.steer_angle = kFailsafeSteer;
+      command_msg_.gas = brake_gas_;
       control_pub_->publish(command_msg_);
-      RCLCPP_INFO_THROTTLE(
-        get_logger(), *get_clock(), 500, "Sweep active: %.2f rad, gas %.2f (%.1f/%.1f s)",
-        command_msg_.steer_angle, command_msg_.gas, elapsed, duration_);
+      commanded_gas_.store(brake_gas_, std::memory_order_relaxed);
+      if (!finished_.exchange(true, std::memory_order_relaxed)) {
+        RCLCPP_INFO(get_logger(), "Sweep finished after %.1f s. Mission complete.", elapsed);
+      }
       return;
     }
 
-    // Past the window: hold neutral and latch. Keep publishing afterwards --
-    // the supervisor tears the stack down on the flag, but until it does the
-    // vehicle interface must not be left without a fresh command.
-    command_msg_.steer_angle = kFailsafeSteer;
-    command_msg_.gas = kFailsafeGas;
+    // The loop's own step, measured rather than assumed, so timer jitter does
+    // not show up in the integral and the derivative.
+    double dt = command_period_;
+    if (last_command_ns_ != kUnsetTime) {
+      const double measured = static_cast<double>(now_ns - last_command_ns_) * 1e-9;
+      if (measured > 0.0) {
+        dt = measured;
+      }
+    }
+    last_command_ns_ = now_ns;
+
+    // The steering sweep is open-loop and runs regardless: it is the half of the
+    // demonstration that does not depend on the drivetrain, and a wheel-speed
+    // dropout is no reason to stop showing the rack works.
+    command_msg_.steer_angle = amplitude_ * std::sin(2.0 * M_PI * frequency_ * elapsed);
+
+    const WheelState wheels = wheels_.load();
+    const double age = wheels.valid ?
+      static_cast<double>(now_ns - wheels.stamp_ns) * 1e-9 : -1.0;
+    const bool fresh = wheels.valid && age <= wheel_speed_timeout_;
+
+    if (!fresh) {
+      // No feedback, no closed loop.  Braking rather than holding the last gas
+      // is the point: the alternative is a drivetrain driven open-loop by an
+      // integrator that has stopped being corrected.
+      rpm_pid_.reset();
+      last_gas_ = brake_gas_;
+      command_msg_.gas = brake_gas_;
+      control_pub_->publish(command_msg_);
+      commanded_gas_.store(brake_gas_, std::memory_order_relaxed);
+      measured_rpm_.store(0.0, std::memory_order_relaxed);
+      feedback_ok_.store(false, std::memory_order_relaxed);
+      if (!wheel_fault_.exchange(true, std::memory_order_relaxed)) {
+        RCLCPP_ERROR(
+          get_logger(),
+          "No usable wheel speed (age %.2f s, limit %.2f s): braking, the sweep runs on.",
+          age, wheel_speed_timeout_);
+      }
+      return;
+    }
+
+    if (wheel_fault_.exchange(false, std::memory_order_relaxed)) {
+      RCLCPP_INFO(get_logger(), "Wheel speed is fresh again; closing the loop.");
+    }
+
+    // The loop itself: mean rear wheel speed to gas.  Derivative on the
+    // measurement rather than the error, since the target is a constant here
+    // and the measurement is the noisy one.
+    const double error = target_rpm_ - wheels.mean;
+    double gas = rpm_pid_.update(error, wheels.mean, dt);
+
+    // Slew limit, so a target the drivetrain is far from does not become a step
+    // on the pedal.  On stands this is the difference between demonstrating a
+    // controlled spin-up and shock-loading the driveline.
+    const double step = gas_rate_ * dt;
+    gas = std::min(std::max(gas, last_gas_ - step), last_gas_ + step);
+    last_gas_ = gas;
+
+    command_msg_.gas = gas;
     control_pub_->publish(command_msg_);
 
-    if (!finished_.exchange(true, std::memory_order_relaxed)) {
-      RCLCPP_INFO(get_logger(), "Sweep finished after %.1f s. Mission complete.", elapsed);
+    measured_rpm_.store(wheels.mean, std::memory_order_relaxed);
+    commanded_gas_.store(gas, std::memory_order_relaxed);
+    feedback_ok_.store(true, std::memory_order_relaxed);
+
+    // A loop pinned at its authority limit and still short of target is not
+    // mistuned, it is asking for more pedal than it has been given -- and the
+    // two look identical from outside.  Saying so is what stops the day being
+    // spent on the gains when the answer is inspection_gas_max.
+    const bool saturated = gas >= gas_max_ - 1e-6 || gas <= gas_min_ + 1e-6;
+    const bool off_target = std::fabs(error) > 0.05 * std::fabs(target_rpm_);
+    saturated_.store(saturated && off_target, std::memory_order_relaxed);
+    if (saturated && off_target) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 2000,
+        "Wheel-speed loop is at its gas limit (%.2f) and still %.0f RPM short of "
+        "%.0f: raise inspection_gas_max or lower the target.",
+        gas, error, target_rpm_);
     }
+
+    RCLCPP_INFO_THROTTLE(
+      get_logger(), *get_clock(), 500,
+      "Sweep active: %.2f rad | %.0f/%.0f RPM (err %+.0f) | gas %.2f | %.1f/%.1f s",
+      command_msg_.steer_angle, wheels.mean, target_rpm_, error, gas, elapsed, duration_);
   }
 
   // --------------------------------------------------------------- heartbeat
@@ -212,17 +365,31 @@ private:
     msg.node_name = get_name();
 
     const bool finished = finished_.load(std::memory_order_relaxed);
+    const bool fault = wheel_fault_.load(std::memory_order_relaxed);
+    const WheelState wheels = wheels_.load();
 
     nlohmann::json report;
 
     // "mission_finished" is the exact key the supervisor ends the mission off,
-    // spelled exactly as the MPC node spells it -- the supervisor watches one
-    // control node and does not care which of the two it got.
+    // spelled exactly as the other controllers spell it -- the supervisor
+    // watches one control node and does not care which of them it got.
     report["mission_finished"] = finished;
     report["mode"] = "inspection";
-    report["status_state"] = finished ? "IDLE" : "WORKING";
+    // A sweep whose drivetrain loop cannot run is not a healthy one, and the
+    // difference is worth reporting: the steering half is still being
+    // demonstrated, but the wheel-speed half is not.
+    report["status_state"] = finished ? "IDLE" : (fault ? "NOT_WORKING" : "WORKING");
     report["sweep_elapsed_s"] = elapsed_.load(std::memory_order_relaxed);
     report["sweep_duration_s"] = duration_;
+
+    report["target_rpm"] = target_rpm_;
+    report["measured_rpm"] = measured_rpm_.load(std::memory_order_relaxed);
+    report["rpm_error"] = target_rpm_ - measured_rpm_.load(std::memory_order_relaxed);
+    report["wheel_rl_rpm"] = wheels.valid ? wheels.rl : 0.0;
+    report["wheel_rr_rpm"] = wheels.valid ? wheels.rr : 0.0;
+    report["have_wheel_speed"] = feedback_ok_.load(std::memory_order_relaxed);
+    report["gas"] = commanded_gas_.load(std::memory_order_relaxed);
+    report["gas_saturated"] = saturated_.load(std::memory_order_relaxed);
 
     msg.report = report.dump();
     heartbeat_pub_->publish(msg);
@@ -234,28 +401,47 @@ private:
   double frequency_;
   double amplitude_;
   double duration_;
-  double launch_gas_;
-  double launch_time_;
-  double hold_gas_;
-  double hold_time_;
+  double target_rpm_;
+  double gas_max_;
+  double gas_min_;
+  double gas_rate_;
   double brake_gas_;
+  double wheel_speed_timeout_;
+  double command_period_;
 
-  rclcpp::CallbackGroup::SharedPtr sweep_group_;
+  rclcpp::CallbackGroup::SharedPtr command_group_;
 
   rclcpp::Subscription<mirena_common::msg::AsInfo>::SharedPtr as_sub_;
+  rclcpp::Subscription<mirena_common::msg::WheelSpeeds>::SharedPtr wheel_sub_;
 
   rclcpp::Publisher<mirena_common::msg::CarControl>::SharedPtr control_pub_;
   rclcpp::Publisher<mirena_common::msg::Heartbeat>::SharedPtr heartbeat_pub_;
 
-  rclcpp::TimerBase::SharedPtr sweep_timer_;
+  rclcpp::TimerBase::SharedPtr command_timer_;
   rclcpp::TimerBase::SharedPtr heartbeat_timer_;
 
-  // Written by the AS callback, read by the sweep loop and the heartbeat.
+  // Cross-thread hand-off: written by the wheel subscription, read by the
+  // command loop and the heartbeat.
+  Seqlock<WheelState> wheels_{WheelState{0, 0.0, 0.0, 0.0, false}};
+
+  // Written by the AS callback, read by the command loop and the heartbeat.
   std::atomic<int64_t> start_ns_{kUnsetTime};
   std::atomic<double> elapsed_{0.0};
   std::atomic<bool> finished_{false};
 
-  // Reused outgoing message, so the sweep loop does not allocate.
+  // Written by the command loop, read by the heartbeat.
+  std::atomic<double> measured_rpm_{0.0};
+  std::atomic<double> commanded_gas_{0.0};
+  std::atomic<bool> feedback_ok_{false};
+  std::atomic<bool> wheel_fault_{false};
+  std::atomic<bool> saturated_{false};
+
+  // Command-thread only.
+  Pid rpm_pid_;
+  double last_gas_ = 0.0;
+  int64_t last_command_ns_ = kUnsetTime;
+
+  // Reused outgoing message, so the command loop does not allocate.
   mirena_common::msg::CarControl command_msg_;
 };
 
@@ -274,7 +460,9 @@ int main(int argc, char ** argv)
     return 1;
   }
 
-  rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 2);
+  // One thread per mutually-exclusive callback group, so the command loop's
+  // deadline never waits on a wheel-speed callback or a heartbeat.
+  rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 3);
   executor.add_node(node);
 
   try {

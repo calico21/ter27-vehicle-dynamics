@@ -1,4 +1,4 @@
-#include "mirena_control/cubic_spline.hpp"
+#include "common/cubic_spline.hpp"
 
 #include <algorithm>
 #include <cmath>

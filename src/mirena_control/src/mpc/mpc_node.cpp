@@ -45,9 +45,10 @@
 #include "mirena_common/msg/heartbeat.hpp"
 #include "mirena_common/msg/track.hpp"
 
-#include "mirena_control/cubic_spline.hpp"
-#include "mirena_control/mpc_controller.hpp"
-#include "mirena_control/seqlock.hpp"
+#include "common/cubic_spline.hpp"
+#include "common/seqlock.hpp"
+
+#include "mpc_controller.hpp"
 
 namespace mirena
 {
@@ -541,8 +542,17 @@ private:
     // current lap is measured from the start gate, which does not move, so a
     // track that simply grew at its far end must not drag it along.  Whatever
     // the seed is still off by, the projection resolves inside its window.
+    // Only on a closed track.  On an open one s_max is not a lap, it is just how
+    // much has been mapped so far, and dividing by it is meaningless: a car
+    // sitting at the end of the mapped track has seed == last_s_max_ exactly, so
+    // floor(seed / last_s_max_) is 1 and the re-basing credits it with a lap it
+    // never drove, teleporting progress a whole track-length forward.  The rate
+    // limiter below cannot catch that, because it brackets the re-based seed and
+    // so measures the jump as zero.  An open track that grew at its far end
+    // needs no re-basing at all -- every arc length it already had still means
+    // the same place.
     if (track.generation != last_track_generation_) {
-      if (last_s_max_ > 0.0) {
+      if (wrap && last_s_max_ > 0.0) {
         const double laps_part = std::floor(seed / last_s_max_);
         const double within = std::min(seed - laps_part * last_s_max_, s_max);
         seed = laps_part * s_max + within;

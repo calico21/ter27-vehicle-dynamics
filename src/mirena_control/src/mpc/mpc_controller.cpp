@@ -1,4 +1,4 @@
-#include "mirena_control/mpc_controller.hpp"
+#include "mpc_controller.hpp"
 
 #include <algorithm>
 #include <cmath>

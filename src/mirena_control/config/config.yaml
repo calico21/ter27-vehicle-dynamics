@@ -9,7 +9,7 @@
 # nothing.
 #
 # The horizon length, number of shooting nodes and number of reference points
-# are fixed by the generated acados solver (codegen/generate_solver.py) and are
+# are fixed by the generated acados solver (src/mpc/codegen/generate_solver.py) and are
 # deliberately not runtime parameters.
 #
 # The inspection node takes this same node name for the INSPECTION mission, so

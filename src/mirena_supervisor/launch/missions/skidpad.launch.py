@@ -73,7 +73,7 @@ def generate_launch_description():
         # laps is what mission_config carried: 0 selects open-track behaviour -- the unrolled path ends at its last gate.
         Node(
             package='mirena_control',
-            executable='mirena_control',
+            executable='mirena_control_mpc',
             name='mirena_control',
             parameters=[{
                 'use_sim_time': use_sim_time,
