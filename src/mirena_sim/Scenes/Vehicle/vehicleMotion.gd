@@ -25,6 +25,13 @@ var path : Path3D
 
 # --- ROS Variables ---
 @export var frame_id: String = "car/cog"
+## Rate the rear wheel speeds go out at, in Hz.
+##
+## Deliberately not the physics rate: physics runs at 400 Hz here, while on the
+## car these numbers arrive as the WheelInfo CAN frame and a consumer sees them
+## at whatever rate the ECU broadcasts. Publishing every physics tick would give
+## the sim a sensor four times livelier than the real one.
+@export var wheel_speed_rate: float = 100.0
 var _node: RosNode
 # Publishers
 var _state_pub: RosPublisher
@@ -32,7 +39,9 @@ var _as_info_pub : RosPublisher
 var _perception_pub: RosPublisher
 var _slam_pub: RosPublisher
 var _inferred_control_pub: RosPublisher
+var _wheel_speeds_pub: RosPublisher
 var _debug_tim : RosTimer
+var _wheel_speeds_tim : RosTimer
 # Subscribers
 var _control_sub: RosSubscriber
 var _mission_info_sub: RosSubscriber
@@ -48,6 +57,7 @@ var _as_info : RosMirenaCommonAsInfo
 var _mission_info
 
 @onready var car_state : RosMirenaCommonCar = RosMirenaCommonCar.new()
+@onready var wheel_speeds : RosMirenaCommonWheelSpeeds = RosMirenaCommonWheelSpeeds.new()
 
 func _ready():
 	## ROS — no namespace: all topic names below are absolute
@@ -59,6 +69,17 @@ func _ready():
 	_perception_pub       = _node.create_publisher("/debug/perception",  "mirena_common/msg/EntityList")
 	_slam_pub             = _node.create_publisher("/debug/slam",        "mirena_common/msg/EntityList")
 	_inferred_control_pub = _node.create_publisher("/inferred_control",  "mirena_common/msg/CarControl")
+	## Rear wheel speeds. Not a debug topic -- this is the same /sensors/*
+	## interface mirena_can serves on the car, so nothing downstream can tell
+	## which one it is talking to. Best-effort/volatile to match the
+	## SensorDataQoS the hardware node publishes with.
+	var wheel_qos := RosQoS.new()
+	wheel_qos.history = RosQoS.KEEP_LAST
+	wheel_qos.depth = 5
+	wheel_qos.reliability = RosQoS.BEST_EFFORT
+	wheel_qos.durability = RosQoS.VOLATILE
+	_wheel_speeds_pub = _node.create_publisher(
+		"/sensors/wheel_speeds", "mirena_common/msg/WheelSpeeds", wheel_qos)
 
 	# State setup
 	_as_info = RosMirenaCommonAsInfo.new()
@@ -67,6 +88,7 @@ func _ready():
 	_mission_info.status = 0
 	## Publisher timers
 	_debug_tim = _node.create_timer(0.1, _debug_publish)
+	_wheel_speeds_tim = _node.create_timer(1.0 / wheel_speed_rate, _publish_wheel_speeds)
 	# Subscribers
 	_control_sub = _node.create_subscription("/control", "mirena_common/msg/CarControl", _on_control)
 	_mission_info_sub = _node.create_subscription("/system/mission_status","mirena_common/msg/MissionInfo",_on_mission_info)
@@ -152,6 +174,33 @@ func _publish_car_state():
 
 	_state_pub.publish(car_state)
 
+
+
+## Rear wheel speeds, the same contract mirena_can publishes from the bus.
+##
+## Rear only, because that is all the car measures: WheelInfo (0x27) carries
+## rl_rpm and rr_rpm and nothing for the front axle. The front wheels exist in
+## this scene and Godot knows their speed perfectly well, and reporting it would
+## hand the pipeline a sensor the vehicle does not have -- which is exactly the
+## kind of difference that makes something work in the sim and not on the car.
+##
+## RPM rather than m/s, matching WheelSpeeds.msg: the conversion needs a rolling
+## radius, which is a tyre property that belongs to whoever fuses the number and
+## not to the thing reporting it. Each wheel is reported on its own, so the two
+## can disagree under yaw exactly as they do on the real axle.
+##
+## NEGATED, and for the same reason everything else in this file is. Godot
+## derives wheel rotation from `up.cross(m_wheelAxleWS)`, which with its default
+## axle of (-1, 0, 0) points at +Z -- while the car's forward is -Z. So
+## get_rpm() reads negative on a car driving forwards, and handing that straight
+## to ROS would tell the pipeline the car is reversing down the track. Same
+## swizzle as car_state.u = -local_vel.z just above.
+func _publish_wheel_speeds():
+	wheel_speeds.header.stamp = _node.now()
+	wheel_speeds.header.frame_id = frame_id  # "car/cog"
+	wheel_speeds.rl = -$RL_WHEEL.get_rpm()
+	wheel_speeds.rr = -$RR_WHEEL.get_rpm()
+	_wheel_speeds_pub.publish(wheel_speeds)
 
 
 func _publish_perception():
