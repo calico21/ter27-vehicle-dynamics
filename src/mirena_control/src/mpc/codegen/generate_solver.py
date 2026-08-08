@@ -95,11 +95,11 @@ def build_ocp(path_points: int, horizon: int, horizon_time: float,
 
     # Maximizamos el progreso (vp) y penalizamos errores y cambios de control.
     cost_expr = (
-        3 * e_d +
-        2 * e_psi +
-        -0.08 * vp +        # Maximizar progreso (MINIMIZAR -vp)
-        0.005 * g_dot**2 +  # Penalización a tasa de gas
-        0.7 * d_dot**2 +    # Penalización a tasa de volante
+        4 * e_d +
+        3 * e_psi +
+        -0.01 * vp +        # Maximizar progreso (MINIMIZAR -vp)
+        0.002 * g_dot**2 +  # Penalización a tasa de gas
+        0.001 * d_dot**2 +    # Penalización a tasa de volante
         0.001 * vp_dot**2   # Penalización a tasa de vp
     )
 
@@ -164,17 +164,17 @@ def build_ocp(path_points: int, horizon: int, horizon_time: float,
         -1,      # g (gas/throttle command)
         -RAD30,  # delta (steering angle)
         0,       # p (progress)
-        -33,     # vp (progress velocity)
+        -10,     # vp (progress velocity)
     ])
 
     ocp.constraints.ubx = np.array([
-        33,             # u (max speed)
+        10,             # u (max speed)
         2,              # v
         3,              # omega
         1,              # g (gas/throttle command)
         RAD30,          # delta (steering angle)
         ACADOS_INFTY,   # p (progress)
-        33,             # vp (progress velocity)
+        10,             # vp (progress velocity)
     ])
 
     # ---------------- Control constraints (rate of change) ----------------

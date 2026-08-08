@@ -120,7 +120,7 @@ def generate_launch_description():
                         # -- Existence, in log-odds. Both measurable from a labelled run
                         "p_detect": 0.55,  # how often perception reports a cone genuinely in view
                         "p_false": 0.05,  # how often it reports one where there is none
-                        "promote_log_odds": 9.0,  # evidence before a candidate is written into the graph (~4 looks)
+                        "promote_log_odds": 6.0,  # evidence before a candidate is written into the graph (~4 looks)
                         "publish_log_odds": 1.0,  # evidence to stay in the published map; below promote, for hysteresis
                         # -- Promotion
                         "separability_k": 2.0,  # sigmas of separation before two estimates are two objects
@@ -220,70 +220,70 @@ def generate_launch_description():
             #        'publish_markers': True,                       # horizon and reference markers
             #    }],
             # ),
+            # -- Control ---------------------------------------------------------
+            # One lap of the unknown circuit, then stop past the line.
             Node(
-                package="mirena_control",
-                executable="mirena_control_pid",
-                name="mirena_control",
-                parameters=[
-                    {
-                        "use_sim_time": use_sim_time,
-                        "laps": 10,
-                        # -- Mission end. Laps are counted from arc-length progress along the centreline
-                        "stop_distance": 20.0,  # m past the final crossing; closed tracks only
-                        "min_path_length": 5.0,  # m, floor on the reference window
-                        "stop_speed_eps": 0.3,  # m/s below which the car counts as stationary
-                        "stop_hold_time": 0.5,  # s stationary before the run is reported done
-                        # -- Reference window
-                        "lookahead_base": 15.0,  # m
-                        "lookahead_gain": 1.2,  # m per (m/s)
-                        # -- Frames
-                        "robot_frame": "car/cog",
-                        "work_frame": "odom",
-                        "map_frame": "map",
-                        # -- Loop rates. solver_period paces guidance; the PID closes at command_period
-                        "solver_period": 0.05,  # s, 20 Hz guidance
-                        "command_period": 0.01,  # s, 100 Hz command
-                        "heartbeat_period": 0.1,  # s, 10 Hz supervisor report
-                        "tf_timeout": 0.005,  # s
-                        # -- Centreline projection search
-                        "projection_window_back": 5.0,  # m
-                        "projection_window_forward": 20.0,  # m
-                        "projection_coarse_step": 0.25,  # m
-                        # -- Safety envelope. Every reason to stop producing plans ends in braking
-                        "state_timeout": 0.15,  # s; /state/car arrives at 100 Hz
-                        "plan_timeout": 0.25,  # s without a new plan before full braking
-                        "mission_timeout": 600.0,  # s of driving; backstop for a loop that never closes
-                        # -- Guards on the progress estimate, which a SLAM jump would otherwise move
-                        "finish_confirm_count": 3,  # consecutive solves agreeing the car is past the line
-                        "progress_rate_margin": 1.5,  # multiple of |u| * dt progress may advance by
-                        "progress_rate_slack": 0.5,  # m added to that allowance
-                        "publish_markers": True,  # reference and predicted-path markers
-                        # -- Longitudinal: speed error -> gas
-                        "speed_kp": 0.35,
-                        "speed_ki": 0.15,
-                        "speed_kd": 0.02,
-                        "speed_tau_d": 0.05,  # s, low-pass on the derivative
-                        # -- Lateral: cross-track error -> steering angle, rad per m
-                        "cross_track_kp": 0.2,
-                        "cross_track_ki": 0.02,
-                        "cross_track_kd": 0.05,
-                        "cross_track_tau_d": 0.08,  # s
-                        "heading_gain": 0.8,  # rad of steer per rad of heading error; this is the damping
-                        "curvature_feedforward": 1.0,  # fraction of atan(wheelbase * kappa) supplied open-loop
-                        "wheelbase": 1.55,  # m, L_F + L_R of the model in codegen/dbm_model.py
-                        "cross_track_limit": 3.0,  # m; error saturates here before it reaches the PID
-                        # -- Actuator envelope, matching the bounds the OCP puts on delta and g
-                        "steer_limit": radians(30.0),  # rad
-                        "steer_rate": radians(5.0 * 30.0),  # rad/s
-                        "gas_rate": 5.0,  # per second
-                        # -- Speed profile, which the MPC gets from its cost function instead
-                        "max_speed": 20.0,  # m/s ceiling regardless of geometry
-                        "min_speed": 1.5,  # m/s floor away from a stop, so the car keeps rolling
-                        "max_lateral_accel": 6.0,  # m/s^2 the tyres are trusted with in a corner
-                        "max_decel": 4.0,  # m/s^2 planned for a corner or the finish
-                        "track_end_margin": 3.0,  # m short of the last mapped gate the braking curve aims
-                    }
-                ],
+                package='mirena_control',
+                executable='mirena_control_pid',
+                name='mirena_control',
+                parameters=[{
+                    'use_sim_time': use_sim_time,
+                    'laps': 10,
+                    # -- Mission end. Laps are counted from arc-length progress along the centreline
+                    'stop_distance': 5.0,                         # m past the final crossing; closed tracks only
+                    'min_path_length': 5.0,                        # m, floor on the reference window
+                    'stop_speed_eps': 0.3,                         # m/s below which the car counts as stationary
+                    'stop_hold_time': 0.5,                         # s stationary before the run is reported done
+                    # -- Reference window
+                    'lookahead_base': 15.0,                        # m
+                    'lookahead_gain': 1.2,                         # m per (m/s)
+                    # -- Frames
+                    'robot_frame': 'car/cog',
+                    'work_frame': 'odom',
+                    'map_frame': 'map',
+                    # -- Loop rates. solver_period paces guidance; the PID closes at command_period
+                    'solver_period': 0.05,                         # s, 20 Hz guidance
+                    'command_period': 0.01,                        # s, 100 Hz command
+                    'heartbeat_period': 0.1,                       # s, 10 Hz supervisor report
+                    'tf_timeout': 0.005,                           # s
+                    # -- Centreline projection search
+                    'projection_window_back': 5.0,                 # m
+                    'projection_window_forward': 20.0,             # m
+                    'projection_coarse_step': 0.25,                # m
+                    # -- Safety envelope. Every reason to stop producing plans ends in braking
+                    'state_timeout': 0.15,                         # s; /state/car arrives at 100 Hz
+                    'plan_timeout': 0.25,                          # s without a new plan before full braking
+                    'mission_timeout': 600.0,                      # s of driving; backstop for a loop that never closes
+                    # -- Guards on the progress estimate, which a SLAM jump would otherwise move
+                    'finish_confirm_count': 3,                     # consecutive solves agreeing the car is past the line
+                    'progress_rate_margin': 1.5,                   # multiple of |u| * dt progress may advance by
+                    'progress_rate_slack': 0.5,                    # m added to that allowance
+                    'publish_markers': True,                       # reference and predicted-path markers
+                    # -- Longitudinal: speed error -> gas
+                    'speed_kp': 0.35,
+                    'speed_ki': 0.15,
+                    'speed_kd': 0.02,
+                    'speed_tau_d': 0.05,                           # s, low-pass on the derivative
+                    # -- Lateral: cross-track error -> steering angle, rad per m
+                    'cross_track_kp': 0.2,
+                    'cross_track_ki': 0.02,
+                    'cross_track_kd': 0.05,
+                    'cross_track_tau_d': 0.08,                     # s
+                    'heading_gain': 0.8,                           # rad of steer per rad of heading error; this is the damping
+                    'curvature_feedforward': 1.0,                  # fraction of atan(wheelbase * kappa) supplied open-loop
+                    'wheelbase': 1.7,                             # m, L_F + L_R of the model in codegen/dbm_model.py
+                    'cross_track_limit': 3.0,                      # m; error saturates here before it reaches the PID
+                    # -- Actuator envelope, matching the bounds the OCP puts on delta and g
+                    'steer_limit': radians(30.0),                  # rad
+                    'steer_rate': radians(5.0 * 30.0),             # rad/s
+                    'gas_rate': 5.0,                               # per second
+                    # -- Speed profile, which the MPC gets from its cost function instead
+                    'max_speed': 5.0,                             # m/s ceiling regardless of geometry
+                    'min_speed': 0.2,                              # m/s floor away from a stop, so the car keeps rolling
+                    'max_lateral_accel': 2.0,                      # m/s^2 the tyres are trusted with in a corner
+                    'max_decel': 2.0,                              # m/s^2 planned for a corner or the finish
+                    'track_end_margin': 3.0,                       # m short of the last mapped gate the braking curve aims
+                }],
             ),
         ]
     )

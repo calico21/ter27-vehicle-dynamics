@@ -63,21 +63,21 @@ def generate_launch_description():
             }],
         ),
 
-        Node(
-            package='mirena_hardware',
-            executable='mirena_camera',
-            name='mirena_camera',
-            parameters=[{
-                'use_sim_time': False,
-                'video_device': '/dev/ter_camera_video',
-                'image_width': 640,
-                'image_height': 480,
-                'fps': 90,
-                'frame_id': 'camera_optical_frame',
-                'camera_name': 'mirena_camera',
-                'camera_info_url': camera_info_url,
-            }],
-        ),
+        #Node(
+        #    package='mirena_hardware',
+        #    executable='mirena_camera',
+        #    name='mirena_camera',
+        #    parameters=[{
+        #        'use_sim_time': False,
+        #        'video_device': '/dev/ter_camera_video',
+        #        'image_width': 640,
+        #        'image_height': 480,
+        #        'fps': 90,
+        #        'frame_id': 'camera_optical_frame',
+        #        'camera_name': 'mirena_camera',
+        #        'camera_info_url': camera_info_url,
+        #    }],
+        #),
 
         Node(
             package='mirena_hardware',

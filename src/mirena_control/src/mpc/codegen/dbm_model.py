@@ -8,14 +8,14 @@ while the car is driving.
 import casadi as ca
 
 # Parametros de vehiculo
-M = 250  # Masa
+M = 230  # Masa
 I_Z = 120  # Momento de Inercia
 L_F = 0.806  # COG a Eje frontal
 L_R = 0.744  # COG a Eje trasero
 
 
 # Parametros powertrain
-C_M = 2000  # Coeficiente de comanda
+C_M = 500  # Coeficiente de comanda
 C_R0 = 0  # Coeficiente de fricción
 C_R2 = 0  # Coeficiente cuadratico de drag
 
