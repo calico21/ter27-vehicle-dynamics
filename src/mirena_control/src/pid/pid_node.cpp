@@ -286,6 +286,7 @@ public:
     cfg.max_decel = std::max(get_parameter("max_decel").as_double(), 0.1);
     controller_ = std::make_unique<PidController>(cfg);
 
+
     if (laps_ > 0) {
       RCLCPP_INFO(
         get_logger(), "Lap mission: %d laps, stopping %.1f m past the final crossing.",
@@ -515,6 +516,7 @@ private:
       const bool finish_active = stop_requested || (laps_ == 0) || track->closed;
       double s_finish;
       double s_stop;
+
       if (stop_requested) {
         // Stop where the car is.
         s_finish = progress;
@@ -525,7 +527,7 @@ private:
         // the following lap when the sampling below wraps.
         s_stop = s_finish + std::min(stop_distance_, 0.5 * s_max);
       } else {
-        s_finish = s_max;
+        s_finish = std::max(0.0, s_max - 5);
         s_stop = s_max;
       }
 
@@ -533,7 +535,6 @@ private:
         updateLapCount(progress, s_max, track->closed);
         updateFinishLatch(progress, s_finish);
       }
-
       // This is where the two controllers genuinely differ.  The MPC stops by
       // truncating its reference and letting the solver discover that it has to
       // brake; there is no stop command anywhere in that node.  A PID has no
@@ -562,6 +563,7 @@ private:
         std::max(s_max - progress - track_end_margin_, 0.0);
 
       out.distance_to_stop = std::min(mission_stop, mapped_ahead);
+      
       if (mapped_ahead < mission_stop) {
         RCLCPP_WARN_THROTTLE(
           get_logger(), *get_clock(), 2000,
