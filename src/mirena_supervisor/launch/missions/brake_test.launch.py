@@ -61,8 +61,11 @@ def generate_launch_description():
                 # -- Noise model. Continuous-time process noise over [x, y, psi, u, v, omega]
                 'process_noise_diag': [0.01, 0.01, 0.005, 0.5, 0.5, 0.5],
                 # -- Floor on INS measurement variances, which guards against zero covariances
-                'odom_meas_floor_diag': [0.01, 0.01, 0.001, 0.01, 0.01, 0.001],
-                'gyro_meas_var': 0.0001,                       # rad^2/s^2
+                'odom_meas_floor_diag': [1e-9, 1e-9, 1e-9, 1e-9, 1e-9, 1e-9],
+                # Seeds P at init; the odom frame's own pose has zero
+                # reported variance by construction.
+                'init_cov_floor_diag': [0.01, 0.01, 0.001, 0.01, 0.01, 0.001],
+                'gyro_meas_var': 1.0e-5,                       # rad^2/s^2
             }],
         ),
 

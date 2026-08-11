@@ -38,7 +38,7 @@ namespace
 
     /// The odom frame is *defined* by the pose the filter starts at, so in odom
     /// that pose has no error by construction. Ekf::init floors this by
-    /// odom_meas_floor_diag regardless, which is what keeps the position gain
+    /// init_cov_floor_diag regardless, which is what keeps the position gain
     /// off zero so the INS can still pull once it anchors.
     constexpr double kInitPoseVar = 0.0;
 
@@ -143,10 +143,31 @@ public:
         // Continuous-time process noise diagonal over [x, y, psi, u, v, omega]
         this->declare_parameter<std::vector<double>>(
             "process_noise_diag", {0.01, 0.01, 0.005, 0.5, 0.5, 0.5});
-        // Floor on INS odometry measurement variances (guards zero covariances)
+        // Floor on INS odometry measurement variances. Purely a guard against a
+        // zero or negative variance reaching the gain.
+        //
+        // It used to be {0.01, 0.01, 0.001, 0.01, 0.01, 0.001}, which was not a
+        // guard but a silent override: measured against the 2026-08-08 log, the
+        // yaw and angular-rate entries replaced the sensor's own uncertainty on
+        // 100% of 27690 messages and the velocity entries on 23%. The VN-300
+        // reported 0.478 deg of yaw uncertainty; the filter was told 1.81 deg.
         this->declare_parameter<std::vector<double>>(
-            "odom_meas_floor_diag", {0.01, 0.01, 0.001, 0.01, 0.01, 0.001});
-        this->declare_parameter<double>("gyro_meas_var", 0.0001);
+            "odom_meas_floor_diag", {1e-9, 1e-9, 1e-9, 1e-9, 1e-9, 1e-9});
+        // Floor on the covariance the filter initialises P with. These are the
+        // values the floor above used to carry, kept here because init() is the
+        // one place they were doing real work: the odom frame is defined by the
+        // initial pose, so its reported variance is zero and P needs seeding
+        // from something.
+        this->declare_parameter<std::vector<double>>(
+            "init_cov_floor_diag", {0.01, 0.01, 0.001, 0.01, 0.01, 0.001});
+        // Variance of the gyro-as-measurement omega update, rad^2/s^2.
+        //
+        // Measured, not assumed: stationary whitened yaw-rate noise on the
+        // 2026-08-08 log was 9.7e-7, and this sits an order of magnitude above
+        // it to cover vibration under load. The previous 1e-4 had no derivation
+        // and was in any case clamped to 1e-3 by the old floor. Keep it in step
+        // with mirena_imu's gyro_variance -- they describe the same gyro.
+        this->declare_parameter<double>("gyro_meas_var", 1.0e-5);
 
         RCLCPP_INFO(this->get_logger(), "Starting Mirena State");
 
@@ -167,6 +188,7 @@ public:
         mirena::Ekf::Config cfg;
         cfg.process_noise_diag = param_vec6("process_noise_diag");
         cfg.odom_meas_floor_diag = param_vec6("odom_meas_floor_diag");
+        cfg.init_cov_floor_diag = param_vec6("init_cov_floor_diag");
         _gyro_meas_var = this->get_parameter("gyro_meas_var").as_double();
         cfg.gyro_meas_var = _gyro_meas_var;
         cfg.max_dt = this->get_parameter("max_predict_dt_sec").as_double();
@@ -396,7 +418,10 @@ private:
     void publish_timer_callback()
     {
         std::lock_guard<std::mutex> lock(_filter_mutex);
-        if (!_ekf->is_initialized()) return; // no state before the first INS fix
+        // No state before the filter is initialised -- which the first IMU
+        // message does via init_at_origin, not the first INS fix. The stack
+        // runs without GNSS; it just runs dead-reckoning (mode NO_INS_YET).
+        if (!_ekf->is_initialized()) return;
 
         // Nothing new since the last tick: the filter clock only moves on an IMU
         // sample, and republishing the same instant is a duplicate, not an update.

@@ -414,6 +414,11 @@ private:
             // Shared with mirena_perception, so a dashboard reading one reads both.
             report["frames_processed"] = _frames_processed;
             report["cones_last_frame"] = _cones_last_frame;
+            // The same number under the name the supervisor forwards to the car
+            // on DV_info, where "actual" is what the car can see right now. Kept
+            // as its own key rather than renaming the one above, which is what a
+            // dashboard already plots.
+            report["cones_count_actual"] = _cones_last_frame;
             // The start line, as far as this node is concerned. Four is the
             // number to expect once it is in view.
             report["big_cones_last_frame"] = _big_cones_last_frame;

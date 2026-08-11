@@ -49,6 +49,7 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(mirena_common REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(camera_info_manager REQUIRED)
@@ -119,12 +120,12 @@ target_include_directories(mirena_imu SYSTEM PRIVATE
 )
 ament_target_dependencies(mirena_imu
   rclcpp
-  rclcpp_lifecycle
   tf2_ros
   tf2
   tf2_geometry_msgs
   sensor_msgs
   nav_msgs
+  std_srvs
   mirena_common
 )
 

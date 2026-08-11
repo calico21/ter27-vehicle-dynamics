@@ -784,6 +784,10 @@ private:
             report_json["last_update_ms_elapsed"] = this->_last_update_ms_elapsed;
             report_json["last_update_total_landmark_count"] = this->_last_update_total_landmark_count;
             report_json["last_run_cones_seen"] = this->_last_update_total_landmark_count;
+            // The map's size under the name the supervisor forwards to the car on
+            // DV_info: every cone the run has established, as against the handful
+            // perception can see from where the car is standing.
+            report_json["cones_count_total"] = this->_last_update_total_landmark_count;
 
             // Once the track has been driven, new cones should stop appearing. If
             // they keep coming, association is failing to recognise cones already

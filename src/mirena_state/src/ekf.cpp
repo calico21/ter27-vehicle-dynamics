@@ -50,7 +50,7 @@ Ekf::Step Ekf::init(const Vec6 &z, const Vec6 &r_diag, double stamp)
 
     x_ = z;
     x_(2) = wrap_angle(x_(2));
-    P_ = r_diag.cwiseMax(cfg_.odom_meas_floor_diag).asDiagonal();
+    P_ = r_diag.cwiseMax(cfg_.init_cov_floor_diag).asDiagonal();
     stamp_ = stamp;
     initialized_ = true;
     return commit();

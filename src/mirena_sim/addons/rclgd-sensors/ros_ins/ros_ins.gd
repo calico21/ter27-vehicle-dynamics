@@ -10,14 +10,17 @@ class_name RosIns
 ## replaces the separate RosImu and RosGps it was split into -- two nodes with
 ## two clocks and two independent noise draws could not express the one property
 ## that matters most about the real thing: /sensors/imu/odom and
-## /sensors/gps/fix are the *same solution*, and a filter handed both must not
-## treat them as independent observations of where the car is.
+## /sensors/gps/fix come from the *same receiver*, and a filter handed both must
+## not treat them as independent observations of where the car is. The driver
+## reads the fix from the GNSS binary group and the odometry from the INS group,
+## so they are no longer literally the same field -- but the INS solution is
+## built from that receiver, so they stay drawn from one error process here.
 ##
 ## Published, all from one measurement, mirroring ImuNode::publish_loop:
 ##   /sensors/imu        sensor_msgs/Imu       always, in the cog frame
 ##   /sensors/lidar/imu  sensor_msgs/Imu       always, in the lidar frame
 ##   /sensors/imu/odom   nav_msgs/Odometry     only while the INS is tracking
-##   /sensors/gps/fix    sensor_msgs/NavSatFix only while the INS is tracking
+##   /sensors/gps/fix    sensor_msgs/NavSatFix as soon as the receiver has a fix
 ##
 ## NOTE on `linear_acceleration`, carried over verbatim from imu_pipeline.hpp
 ## because it is the single easiest thing to get wrong here: the Imu messages
@@ -55,6 +58,12 @@ class_name RosIns
 ## it sees and an unconverged solution would pin the run's origin on a position
 ## the sensor does not stand behind.
 @export var ins_startup_delay_sec: float = 0.0
+## Acquisition delay for the GNSS receiver itself, which is a different and much
+## shorter job than the INS alignment above -- the driver publishes /sensors/gps/fix
+## as soon as the receiver has a fix, without waiting for the filter. Kept small
+## deliberately: the gap between this and ins_startup_delay_sec is the window in
+## which the stack can see that GNSS is alive while the INS is still aligning.
+@export var gnss_startup_delay_sec: float = 2.0
 
 ## Reported position uncertainty wanders inside this band, in metres of standard
 ## deviation. Defaults are the range measured over a recorded run: posU put
@@ -240,14 +249,32 @@ func _process_measurement() -> void:
 	_fill_imu(_lidar_msg, stamp, lidar_frame_id, _lidar_from_imu, attitude)
 	_imu_in_lidar_pub.publish(_lidar_msg)
 
+	# One position error, two messages -- still. The driver now reads the fix
+	# from the GNSS binary group rather than from posLla, so the two are no
+	# longer literally the same field, but on the device the INS solution is
+	# built from this receiver: they stay drawn from one error process here,
+	# because a filter handed both must not treat them as independent.
+	var lla := _ins_solution()
+
+	# The receiver has a fix long before the INS converges, and the driver
+	# publishes it from that moment. Before this change the whole GNSS side of
+	# the stack was silent until the INS came up, which is precisely when
+	# someone debugging a car that will not converge needs to see it.
+	if _gnss_has_fix():
+		_publish_fix(stamp, lla)
+
 	if not _ins_tracking():
 		return
 
-	# One solution, two messages. The fix is the INS position, so both are built
-	# from the same latitude/longitude/altitude below rather than from two draws.
-	var lla := _ins_solution()
 	_publish_odom(body, stamp, lla, attitude)
-	_publish_fix(stamp, lla)
+
+## Whether the GNSS receiver itself has a position fix.
+##
+## Separate from, and earlier than, _ins_tracking(): acquiring satellites is a
+## receiver job that finishes in seconds, while the INS alignment behind it can
+## take a minute or more.
+func _gnss_has_fix() -> bool:
+	return _ins_elapsed >= gnss_startup_delay_sec
 
 ## VectorNav INS mode 2 is "tracking"; 0, 1 and 3 are no solution, aligning, and
 ## dead reckoning after GPS loss. None of them may publish odometry.
@@ -352,14 +379,20 @@ func _publish_fix(stamp, lla: Vector3) -> void:
 	_fix_msg.longitude = lla.y
 	_fix_msg.altitude = lla.z
 
-	# The filter reports a single position sigma, so the most that can honestly
-	# be said is an isotropic approximation -- the same one, from the same
-	# number, that went onto the odometry's pose covariance a moment ago.
-	var var_pos := pow(_ins_pos_sigma, 2)
-	_fix_msg.position_covariance[0] = var_pos
-	_fix_msg.position_covariance[4] = var_pos
-	_fix_msg.position_covariance[8] = var_pos
-	_fix_msg.position_covariance_type = 1   # COVARIANCE_TYPE_APPROXIMATED
+	# The GNSS group reports a real per-axis uncertainty, unlike the INS's one
+	# isotropic sigma, so this is DIAGONAL_KNOWN rather than APPROXIMATED. In
+	# ENU order, as NavSatFix specifies -- the driver has to swap north and east
+	# coming off the device, which reports NED.
+	#
+	# Vertical is worse than horizontal on any GNSS receiver, because the
+	# satellites are all on one side of the antenna; 1.5x is the usual rule of
+	# thumb for VDOP against HDOP.
+	var var_h := pow(_ins_pos_sigma, 2)
+	var var_v := pow(_ins_pos_sigma * 1.5, 2)
+	_fix_msg.position_covariance[0] = var_h   # east
+	_fix_msg.position_covariance[4] = var_h   # north
+	_fix_msg.position_covariance[8] = var_v   # up
+	_fix_msg.position_covariance_type = 2   # COVARIANCE_TYPE_DIAGONAL_KNOWN
 
 	_fix_pub.publish(_fix_msg)
 

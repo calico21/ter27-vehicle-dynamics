@@ -89,15 +89,66 @@ def generate_launch_description():
                 # The VN-300's own IMU runs at 400 Hz; this is what it is asked
                 # to emit. 100 Hz is what mirena_state's predict step expects.
                 'imu_output_rate_hz': 100,
-                # Antenna geometry, in metres, car/cog-relative. These are the
-                # only genuinely per-car numbers in this driver -- they say where
-                # the antennas are bolted, and the VN-300's onboard filter is
-                # wrong without them, so they belong here in the vehicle's own
-                # launch file rather than buried as node defaults. Remeasure and
-                # update if either antenna moves.
+                # Antenna geometry, in metres, in the VN-300's OWN body axes:
+                # x forward, y right, z DOWN. That is not the ROS convention the
+                # rest of this workspace uses, so a number taken from the URDF
+                # needs its y and z negated first. These are the only genuinely
+                # per-car numbers in this driver -- they say where the antennas
+                # are bolted, and the onboard filter is wrong without them, so
+                # they belong here rather than buried as node defaults.
+                # Remeasure and update if either antenna moves.
+                #
+                # z = +0.52 is BELOW the IMU and that is correct here: the IMU
+                # sits on top of the mainhoop and the antennas are at the nose
+                # and the tail, well under it. Said explicitly because a
+                # positive z reads as "above" in every other frame in this
+                # workspace.
                 'antenna_a_offset': [-0.11, 0.0, 0.52],
-                'gnss_compass_baseline': [1.50, 0.0, -0.36],
-                'gnss_compass_uncertainty': [0.04, 0.04, 0.04],
+                'gnss_compass_baseline': [1.50, 0.0, 0.0],
+                # 1 sigma on the baseline above. This bounds the carrier-phase
+                # ambiguity search: too loose and convergence crawls, too tight
+                # and a wrong baseline never converges at all. Roughly 1-2% of
+                # baseline length if it was measured properly. Call the
+                # ~/estimate_gnss_baseline service to have the unit measure its
+                # own baseline and report what these should be.
+                'gnss_compass_uncertainty': [0.02, 0.02, 0.02],
+                # -- Onboard INS setup (VN registers 67 and 144) --------------
+                # 3 = DualGnssNoPressure. Anything that is not a dual-GNSS
+                # scenario means heading is only observable under acceleration,
+                # which for a car that must be converged while standing at the
+                # line is the wrong trade.
+                'ins_scenario': 3,
+                'ahrs_aiding': True,
+                'use_gnss_compass': True,
+                # 1 or 5 only. This is how often the receiver actually solves,
+                # and so how often /sensors/gps/fix updates -- the 100 Hz binary
+                # stream repeats the same solution in between. At 1 Hz the INS
+                # gets a fifth of the position and compass updates and converges
+                # correspondingly slower.
+                'gnss_rate_hz': 5,
+                # Left off for normal running; the estimation service turns it
+                # on for the duration of a deliberate calibration run.
+                'estimate_baseline': False,
+                # Save the configuration to the unit's flash once it is correct,
+                # so a power cycle boots configured and this driver never has to
+                # rewrite a register -- writing the geometry registers restarts
+                # the GNSS compass alignment, which on a staged car is exactly
+                # the convergence you were waiting for.
+                'persist_config': True,
+                # Per-axis variances the VN does not stream, so the driver has to
+                # supply them: they fill the Imu message covariances (which used
+                # to go out as all zeros, i.e. "unknown") and the odometry
+                # twist's angular block.
+                #
+                # Measured off the 2026-08-08 log with a stationary car, then
+                # given an order of magnitude of margin because idle does not
+                # show the vibration a run does. Re-measure if the IMU mounting
+                # changes. The z entry of the rate vector is what mirena_state
+                # consumes as twist.covariance[35] -- keep it in step with that
+                # node's gyro_meas_var.
+                'angular_velocity_variance': [6.5e-5, 1.3e-5, 1.0e-5],   # rad^2/s^2
+                'linear_acceleration_variance': [3.0e-2, 3.0e-1, 2.0e-2],  # m^2/s^4
+                'baseline_estimation_timeout_sec': 300.0,
             }],
         ),
 

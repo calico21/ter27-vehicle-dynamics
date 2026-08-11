@@ -28,7 +28,21 @@ public:
     struct Config
     {
         Vec6 process_noise_diag;    // continuous-time process noise q (scaled by dt each predict)
-        Vec6 odom_meas_floor_diag;  // minimum measurement variance per odom-update axis
+        // Minimum measurement variance per odom-update axis. A guard against a
+        // zero or negative variance reaching the gain, nothing more.
+        //
+        // This used to double as the seed for P in init(), which quietly made
+        // it load bearing at values far above any guard: at the old 1e-3 on yaw
+        // it exceeded every uncertainty the VN-300 ever reports (0.478 deg
+        // typical, 1.48 deg worst case over a 277 s log) and so replaced the
+        // sensor's number 100% of the time. The two jobs are separate settings
+        // now -- see init_cov_floor_diag.
+        Vec6 odom_meas_floor_diag;
+        // Floor on the covariance init() seeds P with. Genuinely load bearing:
+        // the odom frame is defined by the initial pose, so its reported
+        // variance is zero by construction, and without this the position gain
+        // would start at zero and the INS could never pull the filter.
+        Vec6 init_cov_floor_diag;
         double gyro_meas_var;       // variance of the gyro-as-measurement omega update
         double max_dt;              // predict steps longer than this are clamped [s]
     };
