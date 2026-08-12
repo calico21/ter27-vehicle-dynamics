@@ -112,8 +112,17 @@ namespace mirena
     void Slam::TypeVote::absorb(const TypeVote &other)
     {
         for (const auto &[type, count] : other.counts)
-            for (int i = 0; i < count; ++i)
-                add(type);
+        {
+            if (type.empty() || count <= 0)
+                continue;
+
+            const int total = (counts[type] += count);
+            if (total > best_count)
+            {
+                best_count = total;
+                best = type;
+            }
+        }
     }
 
     double Slam::seen_evidence() const
@@ -181,6 +190,17 @@ namespace mirena
                        const gtsam::Vector3 &odom_sigmas,
                        SlamDebug *debug)
     {
+        // Once the solver has given up, every number this class holds is
+        // furniture and the only honest thing to do with a new frame is nothing.
+        // add_keyframe already refuses, but refusing there alone left this
+        // running: log-odds kept accumulating, landmarks kept crossing
+        // publish_log_odds and vanishing from map_snapshot(), and candidates kept
+        // churning. The positions froze and the published *set* did not, which
+        // made a liar of the caller's "the map is frozen at its last good
+        // values".
+        if (!healthy_)
+            return;
+
         // 1. Where the odometry says we are, measured from the last keyframe, and
         //    how much it could have drifted getting here. That drift is the
         //    caller's own number -- the same one the keyframe factor will carry --
@@ -248,10 +268,46 @@ namespace mirena
         std::vector<size_t> residue;
         std::vector<gtsam::Point2> residue_local;
         std::vector<gtsam::Matrix2> residue_cov;
+        last_out_of_range_ = 0;
         for (size_t i = 0; i < observations.size(); ++i)
         {
             if (!to_landmark.empty() && to_landmark[i] >= 0)
                 continue;
+
+            // Beyond the radius this class works in, and therefore not something
+            // it can reason about at all: both target lists above are filtered by
+            // local_map_radius, so a detection out here can match neither a
+            // landmark nor a candidate however many times it is seen.
+            //
+            // Letting it fall through to candidate creation was not merely
+            // wasteful, it was a ratchet: the candidate it spawned this frame is
+            // out of range next frame too, so it is still not a target and the
+            // same cone spawns another. Nor did they decay -- in_view() is
+            // bounded by the same radius, so they took no missed-evidence
+            // penalty and simply sat at one sighting until max_candidate_age
+            // expired them, seconds later.
+            //
+            // Two ways in, and the second is the one that bites hardest. The
+            // obvious one is reach: perception claims cones to 30 m against this
+            // 20, and every cone in the band between is reported every frame.
+            // The other needs no such gap and survives even when the two numbers
+            // are equal, which is why the fixture never caught it -- the test is
+            // the *reported* position, and across-beam noise at twenty metres is
+            // a sigma of about 0.3 m, so a real cone just inside the edge is
+            // routinely reported just outside it.
+            //
+            // Measured on the exported tracks: with this clause absent, track4
+            // maps 247 landmarks for 164 cones, 207 of them spurious, and
+            // registers 6.4 m out. With it, 164 for 164, none spurious, 0.15 m.
+            // track2 is not fixed but halves its registration error. The cost of
+            // the old behaviour was never the wasted candidate_target() per
+            // frame; it was that those candidates went on to promote.
+            if (local[i].norm() >= params_.local_map_radius)
+            {
+                ++last_out_of_range_;
+                continue;
+            }
+
             residue.push_back(i);
             residue_local.push_back(local[i]);
             residue_cov.push_back(measurement_cov[i]);
@@ -364,8 +420,21 @@ namespace mirena
             Candidate fresh;
             fresh.anchor = next_keyframe_ - 1;
             fresh.anchor_pose = keyframe_pose_;
-            fresh.mu = keyframe_pose_.between(pose).transformFrom(local[i]);
-            fresh.P = measurement_cov[i] + rel.topLeftCorner<2, 2>();
+
+            // Into the anchor's body frame, and the covariance with it.
+            //
+            // Rotating the measurement but not its covariance -- which is what
+            // this used to do -- leaves an ellipse that is long across the beam
+            // pointing the wrong way by however far the car has turned since the
+            // keyframe. The trace is unchanged, so nothing gets more or less
+            // certain; the anisotropy simply stops describing the sensor. The
+            // update path above has always done this properly, and this is the
+            // same Jacobian: GTSAM's Hpoint for transformFrom is the rotation.
+            const gtsam::Pose2 anchor_to_now = keyframe_pose_.between(pose);
+            const gtsam::Matrix2 into_anchor = anchor_to_now.rotation().matrix();
+            fresh.mu = anchor_to_now.transformFrom(local[i]);
+            fresh.P = into_anchor * measurement_cov[i] * into_anchor.transpose() +
+                      rel.topLeftCorner<2, 2>();
             fresh.drift = gtsam::Matrix3::Zero();
             fresh.log_odds = seen_evidence();
             fresh.born = next_keyframe_ - 1;
@@ -791,15 +860,25 @@ namespace mirena
             ++spent;
         }
 
-        if (!landmarks_.empty())
+        // Keyed on the landmark id rather than on a position in the map. The
+        // index form this replaces was correct -- ids only ever increase, so a
+        // promotion appends and never shifts an existing entry out from under the
+        // cursor -- but it had to walk there with std::advance, which is linear in
+        // the map on every one of these, every keyframe, for ever. upper_bound is
+        // a lookup and the id says what it means.
+        //
+        // Bounded by the map size as well as by the budget, which the index form
+        // was not: early in a run, with fewer landmarks than the budget, it wrapped
+        // and spent the rest of the allowance recomputing marginals it had just
+        // done.
+        const size_t sweep = std::min<size_t>(kMarginalBudget - spent, landmarks_.size());
+        for (size_t i = 0; i < sweep; ++i, ++spent)
         {
-            for (; spent < kMarginalBudget; ++spent)
-            {
-                marginal_cursor_ = (marginal_cursor_ + 1) % landmarks_.size();
-                auto it = landmarks_.begin();
-                std::advance(it, static_cast<long>(marginal_cursor_));
-                refresh.push_back(it->first);
-            }
+            auto it = landmarks_.upper_bound(marginal_cursor_);
+            if (it == landmarks_.end())
+                it = landmarks_.begin();
+            marginal_cursor_ = it->first;
+            refresh.push_back(it->first);
         }
 
         for (const int id : refresh)

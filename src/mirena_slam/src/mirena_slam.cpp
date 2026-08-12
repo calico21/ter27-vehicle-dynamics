@@ -117,6 +117,7 @@ class MirenaMapping : public rclcpp::Node
     int _last_matched = 0;
     int _last_promoted = 0;
     int _last_hidden = 0;
+    int _out_of_range = 0;
     int _candidates = 0;
     int _poses = 0;
     int _variables_reeliminated = 0;
@@ -206,12 +207,32 @@ public:
             _debug_pub = this->create_publisher<visualization_msgs::msg::MarkerArray>(DEBUG_TOPIC, 1);
         _tf_broadcaster = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
-        // Filtered Subscribers
+        // Filtered Subscribers.
+        //
+        // Deep histories, and not as insurance. Both subscriptions share
+        // _slam_cb_group with synchronized_callback, which is mutually
+        // exclusive, so *nothing is taken off either topic* for as long as an
+        // iSAM2 update runs -- measured at a p99 of 406 ms. At the 100 Hz
+        // /state/car arrives at, the rmw default depth of 10 is 100 ms of
+        // buffer, so every slow keyframe threw away the poses that the cone
+        // frames arriving during it had to be paired with. The pairs were then
+        // dropped for want of a pose inside max_sync_delta_ms, and the drop
+        // showed up as PARTIAL rather than as anything naming the cause.
+        //
+        // 200 poses is two seconds, comfortably past the worst update; the
+        // synchroniser's own queue of 100 is then what bounds the pose history
+        // it will search, which is one second and far more than the 10 ms it
+        // ever needs to reach back.
+        rmw_qos_profile_t car_qos = rmw_qos_profile_default;
+        car_qos.depth = 200;
+        rmw_qos_profile_t cone_qos = rmw_qos_profile_default;
+        cone_qos.depth = 40;
+
         _sync_car_sub = std::make_shared<message_filters::Subscriber<mirena_common::msg::Car, rclcpp::Node>>(
-            this, CAR_STATE_TOPIC, rmw_qos_profile_default, slam_sub_options);
+            this, CAR_STATE_TOPIC, car_qos, slam_sub_options);
 
         _sync_landmark_sub = std::make_shared<message_filters::Subscriber<mirena_common::msg::EntityList, rclcpp::Node>>(
-            this, LANDMARK_TOPIC, rmw_qos_profile_default, slam_sub_options);
+            this, LANDMARK_TOPIC, cone_qos, slam_sub_options);
 
         _sync = std::make_shared<message_filters::Synchronizer<SyncPolicy>>(
             SyncPolicy(100), *_sync_car_sub, *_sync_landmark_sub);
@@ -400,8 +421,17 @@ private:
                             e.covariance[2], e.covariance[3]}});
         }
 
+        // Nobody watching, nothing gathered. The estimator fills three vectors a
+        // frame for this and the node then serialises a marker per nearby
+        // landmark, all of it on the node with the tightest budget in the stack;
+        // mirena_perception and mirena_planning have both asked this question
+        // before doing that work for as long as they have had debug topics, and
+        // this one was the outlier.
+        const bool want_debug =
+            _publish_debug && _debug_pub && _debug_pub->get_subscription_count() > 0;
+
         mirena::SlamDebug debug;
-        mirena::SlamDebug *sink = _publish_debug ? &debug : nullptr;
+        mirena::SlamDebug *sink = want_debug ? &debug : nullptr;
 
         // How much the odometry could have drifted since the last keyframe.
         // Computed once and used twice: the association gate widens by it now,
@@ -423,9 +453,11 @@ private:
         //    Stamps, not now(): the interval is a property of the data, and it is
         //    what the odometry noise integrates over. Mixing a wall reading into
         //    that would make factor weights depend on how busy this node was.
+        bool keyframed = false;
         if (!_has_keyframe || _slam->wants_keyframe())
         {
             _slam->add_keyframe(odom_sigmas, sink);
+            keyframed = true;
             _last_keyframe_raw_odom = current_raw;
             _last_keyframe_time = car_stamp;
 
@@ -456,6 +488,7 @@ private:
             _last_matched = _slam->get_last_matched_count();
             _last_promoted = _slam->get_last_promoted_count();
             _last_hidden = _slam->get_last_hidden_count();
+            _out_of_range = _slam->get_last_out_of_range_count();
             _candidates = _slam->get_candidate_count();
             _poses = _slam->get_pose_count();
             _variables_reeliminated = _slam->get_variables_reeliminated();
@@ -472,7 +505,7 @@ private:
         // loop closure can make that critical section hundreds of milliseconds
         // long.
         slam_lock.unlock();
-        if (_publish_debug)
+        if (want_debug && keyframed)
             publish_debug(debug, car_msg->header.stamp);
     }
 
@@ -570,6 +603,14 @@ private:
     /// Published straight from the keyframe rather than off the snapshot timer:
     /// this describes one optimisation step, and re-sending it at 10 Hz would
     /// make a single bad association look like a persistent one.
+    ///
+    /// This is what the comment always said and what the caller now does. It did
+    /// not: the call sat at the end of every synchronised frame, so on the three
+    /// frames in four that are not keyframes the whole array was redrawn with a
+    /// `promoted` list that only add_keyframe ever fills. Nothing was wrong with
+    /// the associations drawn on those frames -- they were freshly matched -- but
+    /// the promotion markers blinked out between keyframes, which reads as
+    /// promotions being undone.
     void publish_debug(const mirena::SlamDebug &debug,
                        const builtin_interfaces::msg::Time &stamp)
     {
@@ -795,6 +836,12 @@ private:
             report_json["matched_last_keyframe"] = _last_matched;
             report_json["promoted_last_keyframe"] = _last_promoted;
             report_json["hidden_landmarks"] = _last_hidden;
+            // Detections thrown away for sitting beyond local_map_radius, where
+            // this estimator can match them against nothing. Expected to be
+            // non-zero -- perception claims cones further out than SLAM works --
+            // but a figure that is most of the frame means the two radii have
+            // drifted apart far enough to be discarding usable cones.
+            report_json["out_of_range_last_frame"] = _out_of_range;
             // Candidates that have not earned a place in the graph. A number that
             // climbs and never falls means the promotion test is stuck.
             report_json["candidates"] = _candidates;

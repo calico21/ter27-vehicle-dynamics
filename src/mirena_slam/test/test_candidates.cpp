@@ -25,8 +25,14 @@ namespace
     class Bench
     {
     public:
-        explicit Bench(SlamParams params = {}, unsigned seed = 7)
-            : slam_(gtsam::Pose2(0, 0, 0), params), rng_(seed)
+        /// `sensor` defaults to a detector that stops at the same twenty metres
+        /// the estimator works in, which is what every test here wants. It is a
+        /// parameter because the real one does not: ConeDetectorParams::max_range
+        /// is 30 m against a local_map_radius of 20, and the band between the two
+        /// is a case no fixture could produce while the two numbers were welded
+        /// together.
+        explicit Bench(SlamParams params = {}, unsigned seed = 7, SensorModel sensor = {})
+            : slam_(gtsam::Pose2(0, 0, 0), params), sensor_(sensor), rng_(seed)
         {
         }
 
@@ -106,7 +112,68 @@ namespace
         return w;
     }
 
+    /// Four gates of a straight track, starting well beyond local_map_radius and
+    /// running out past it. Shared by the two tests below, which drive different
+    /// distances down it and want opposite things.
+    Bench::World distant_corridor()
+    {
+        Bench::World w;
+        for (int i = 0; i < 4; ++i)
+        {
+            const double x = 26.0 + 4.0 * static_cast<double>(i);
+            w.cones.push_back({gtsam::Point2(x, +1.5), kSmall});
+            w.cones.push_back({gtsam::Point2(x, -1.5), kSmall});
+        }
+        return w;
+    }
+
+    SensorModel detector_reach()
+    {
+        SensorModel s;
+        s.max_range = 30.0; // ConeDetectorParams::max_range
+        return s;
+    }
+
 } // namespace
+
+TEST(Candidates, ConesBeyondTheLocalMapRadiusDoNotAccumulate)
+{
+    // A detection out past local_map_radius can be matched against nothing: both
+    // target lists the associator is given are filtered by that radius, so
+    // neither a landmark nor a candidate out there is ever a candidate to match.
+    //
+    // Left to fall through to candidate creation, that made the band a ratchet.
+    // Every frame, every cone in it spawned a *fresh* candidate -- the one from
+    // last frame being still out of range and so still not a target. Nor did they
+    // decay, because in_view() is bounded by the same radius, so they took no
+    // missed-evidence penalty and simply sat at one sighting until
+    // max_candidate_age expired them some seconds later.
+    Bench bench({}, 7, detector_reach());
+
+    // Five metres of travel, so the nearest gate is twenty-one metres away at the
+    // end and no cone has been associable at any point in the run.
+    bench.run(distant_corridor(), 100);
+
+    EXPECT_GT(bench.slam().get_last_out_of_range_count(), 0)
+        << "the fixture produced no out-of-range detection, so this proves nothing";
+    EXPECT_EQ(bench.slam().get_candidate_count(), 0)
+        << "out-of-range detections are still accumulating candidates";
+    EXPECT_EQ(bench.slam().get_landmark_count(), 0)
+        << "a cone never once inside the local map radius reached the graph";
+}
+
+TEST(Candidates, ConesEnteringTheLocalMapRadiusAreStillMapped)
+{
+    // The complement, and the one that says the clause above is a filter rather
+    // than a hole: the same cones, driven up to until they come inside the
+    // radius, must map exactly once each.
+    Bench bench({}, 7, detector_reach());
+
+    bench.run(distant_corridor(), 400); // twenty metres: every gate ends up close
+
+    EXPECT_EQ(bench.map().size(), 8u)
+        << "cones first seen beyond the radius are lost once they come inside it";
+}
 
 TEST(Candidates, RealConeIsPromoted)
 {

@@ -312,6 +312,13 @@ namespace mirena
         int get_last_matched_count() const { return last_matched_; }
         int get_last_promoted_count() const { return last_promoted_; }
         int get_last_hidden_count() const { return last_hidden_; }
+        /// Detections the last frame reported from beyond local_map_radius, and
+        /// which were therefore ignored. Perception's max_range is the larger of
+        /// the two numbers, so this is normally non-zero and that is correct; it
+        /// is on the wire because a count that is a large fraction of the frame
+        /// means the two radii have drifted far enough apart to be throwing away
+        /// cones the map could have used.
+        int get_last_out_of_range_count() const { return last_out_of_range_; }
         int get_candidate_count() const { return static_cast<int>(candidates_.size()); }
         int get_landmark_count() const { return static_cast<int>(landmarks_.size()); }
         int get_pose_count() const { return next_keyframe_; }
@@ -528,7 +535,10 @@ namespace mirena
         int next_keyframe_ = 0;
         int next_landmark_ = 0;
         int next_candidate_ = 0;
-        size_t marginal_cursor_ = 0;
+        /// Landmark id the round-robin marginal sweep last refreshed, or -1
+        /// before it has run. An id rather than an index into the map, so a
+        /// promotion inserting ahead of it does not shift the sweep along.
+        int marginal_cursor_ = -1;
         /// Landmarks the solver has touched whose marginal has not been recomputed
         /// yet. Drained a budget at a time so a loop closure, which marks most of
         /// the map at once, cannot spend a whole frame interval on covariances.
@@ -538,6 +548,7 @@ namespace mirena
         int last_matched_ = 0;
         int last_promoted_ = 0;
         int last_hidden_ = 0;
+        int last_out_of_range_ = 0;
         int last_reeliminated_ = 0;
         int last_cliques_ = 0;
         bool healthy_ = true;
