@@ -8,6 +8,10 @@
 // which is why it carries the same default node name and publishes the same
 // /control and health topics.
 //
+// The run is a braked hold of inspection_start_delay from the moment the car
+// reaches DRIVING, and then the sweep. The hold is not charged to the sweep, so
+// the demonstration is still a full inspection_duration of movement.
+//
 // The drivetrain runs closed-loop. The rear wheel speeds arrive from the CAN
 // bridge on /sensors/wheel_speeds in RPM, and their mean is the feedback of a
 // PID whose output is gas. What the scrutineers are shown is therefore a wheel
@@ -100,6 +104,12 @@ public:
     declare_parameter<double>("inspection_frequency", 0.5);   // Hz
     declare_parameter<double>("inspection_amplitude", 0.3);   // rad, ~17 deg
     declare_parameter<double>("inspection_duration", 25.0);   // s
+    // Braked hold between DRIVING and the first sweep command.  DRIVING is
+    // asserted the moment the state machine reaches it, which is not the moment
+    // the car is ready to be driven: the interface is still coming up and the
+    // scrutineers are still watching for the sweep to begin from rest.  Sweeping
+    // into that window is what this holds off.
+    declare_parameter<double>("inspection_start_delay", 3.0); // s
 
     // The wheel-speed loop.  The target is the number the scrutineers read off
     // the sheet; everything else shapes how the drivetrain gets there.
@@ -128,6 +138,7 @@ public:
     frequency_ = get_parameter("inspection_frequency").as_double();
     amplitude_ = get_parameter("inspection_amplitude").as_double();
     duration_ = get_parameter("inspection_duration").as_double();
+    start_delay_ = std::max(get_parameter("inspection_start_delay").as_double(), 0.0);
     target_rpm_ = get_parameter("inspection_target_rpm").as_double();
     gas_max_ = get_parameter("inspection_gas_max").as_double();
     gas_min_ = get_parameter("inspection_gas_min").as_double();
@@ -146,8 +157,10 @@ public:
     rpm_pid_.configure(gains, gas_min_, gas_max_);
 
     RCLCPP_INFO(
-      get_logger(), "Inspection mission: %.1f s steering sweep at %.2f Hz, +-%.2f rad.",
-      duration_, frequency_, amplitude_);
+      get_logger(),
+      "Inspection mission: %.1f s braked hold, then a %.1f s steering sweep at %.2f Hz, "
+      "+-%.2f rad.",
+      start_delay_, duration_, frequency_, amplitude_);
     RCLCPP_INFO(
       get_logger(),
       "Wheel-speed loop: %.0f RPM target, gains (%.4f, %.4f, %.4f), gas in [%.2f, %.2f].",
@@ -161,6 +174,10 @@ public:
     // a window of the wheel actually moving, and the wheel does not move until
     // the car reaches DRIVING, so counting from anything earlier -- launch,
     // mission select -- would short the run by however long that took.
+    //
+    // inspection_start_delay then sits between DRIVING and the first sweep
+    // command, and is not counted against the sweep: the run is still a full
+    // inspection_duration of movement, it just starts a few seconds later.
     as_sub_ = create_subscription<mirena_common::msg::AsInfo>(
       kAsStatusTopic, 10,
       std::bind(&InspectionNode::asCallback, this, std::placeholders::_1));
@@ -192,7 +209,8 @@ public:
 private:
   // ---------------------------------------------------------------- callbacks
 
-  /// Latches the moment the car starts driving; the sweep is timed from there.
+  /// Latches the moment the car starts driving; the hold, and then the sweep,
+  /// are timed from there.
   void asCallback(const mirena_common::msg::AsInfo::SharedPtr msg)
   {
     if (msg->status != mirena_common::msg::AsInfo::AS_STATUS_DRIVING) {
@@ -202,7 +220,9 @@ private:
     if (start_ns_.compare_exchange_strong(
         unset, get_clock()->now().nanoseconds(), std::memory_order_relaxed))
     {
-      RCLCPP_INFO(get_logger(), "AS is DRIVING: starting the %.1f s sweep.", duration_);
+      RCLCPP_INFO(
+        get_logger(), "AS is DRIVING: holding braked for %.1f s, then a %.1f s sweep.",
+        start_delay_, duration_);
     }
   }
 
@@ -239,17 +259,42 @@ private:
 
   void commandIteration()
   {
-    const int64_t start_ns = start_ns_.load(std::memory_order_relaxed);
-    if (start_ns == kUnsetTime) {
-      return;   // not driving yet; the sweep has not begun
+    const int64_t driving_ns = start_ns_.load(std::memory_order_relaxed);
+    if (driving_ns == kUnsetTime) {
+      return;   // not driving yet; the hold has not begun
     }
 
     const auto stamp = get_clock()->now();
     const int64_t now_ns = stamp.nanoseconds();
-    const double elapsed = static_cast<double>(now_ns - start_ns) * 1e-9;
-    elapsed_.store(elapsed, std::memory_order_relaxed);
+    // Elapsed is the sweep's own clock: negative through the hold, zero at the
+    // first sweep command. The hold is therefore not charged to the sweep, and
+    // the window below still closes a full duration_ after movement starts.
+    const double elapsed = static_cast<double>(now_ns - driving_ns) * 1e-9 - start_delay_;
+    elapsed_.store(std::max(elapsed, 0.0), std::memory_order_relaxed);
 
     command_msg_.header.stamp = stamp;
+
+    // The hold. Braking rather than publishing nothing: the vehicle interface
+    // reads silence as a fault, and this is the one branch where the car is
+    // already live but deliberately not being driven yet.
+    if (elapsed < 0.0) {
+      rpm_pid_.reset();
+      last_gas_ = brake_gas_;
+      command_msg_.steer_angle = kFailsafeSteer;
+      command_msg_.gas = brake_gas_;
+      control_pub_->publish(command_msg_);
+      commanded_gas_.store(brake_gas_, std::memory_order_relaxed);
+      measured_rpm_.store(0.0, std::memory_order_relaxed);
+      holding_.store(true, std::memory_order_relaxed);
+      RCLCPP_INFO_THROTTLE(
+        get_logger(), *get_clock(), 500,
+        "Holding braked before the sweep: %.1f/%.1f s", start_delay_ + elapsed, start_delay_);
+      return;
+    }
+
+    if (holding_.exchange(false, std::memory_order_relaxed)) {
+      RCLCPP_INFO(get_logger(), "Hold over: starting the %.1f s sweep.", duration_);
+    }
 
     // Past the window: hold neutral and latch.  Keep publishing afterwards --
     // the supervisor tears the stack down on the flag, but until it does the
@@ -381,6 +426,11 @@ private:
     report["status_state"] = finished ? "IDLE" : (fault ? "NOT_WORKING" : "WORKING");
     report["sweep_elapsed_s"] = elapsed_.load(std::memory_order_relaxed);
     report["sweep_duration_s"] = duration_;
+    // The braked hold is a healthy state, so it does not touch status_state --
+    // it is reported on its own key so a sweep that has not visibly started yet
+    // reads as waiting rather than as stuck.
+    report["holding"] = holding_.load(std::memory_order_relaxed);
+    report["start_delay_s"] = start_delay_;
 
     report["target_rpm"] = target_rpm_;
     report["measured_rpm"] = measured_rpm_.load(std::memory_order_relaxed);
@@ -401,6 +451,7 @@ private:
   double frequency_;
   double amplitude_;
   double duration_;
+  double start_delay_;
   double target_rpm_;
   double gas_max_;
   double gas_min_;
@@ -428,6 +479,10 @@ private:
   std::atomic<int64_t> start_ns_{kUnsetTime};
   std::atomic<double> elapsed_{0.0};
   std::atomic<bool> finished_{false};
+
+  // Written by the command loop, read by the heartbeat: true while the braked
+  // hold between DRIVING and the sweep is running.
+  std::atomic<bool> holding_{false};
 
   // Written by the command loop, read by the heartbeat.
   std::atomic<double> measured_rpm_{0.0};

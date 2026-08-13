@@ -45,6 +45,7 @@ def generate_launch_description():
             parameters=[{
                 'use_sim_time': use_sim_time,
                 # -- The steering sweep
+                'inspection_start_delay': 3.0,                 # s braked after DRIVING, before the sweep starts
                 'inspection_duration': 25.0,                   # s of sweep before the run is done
                 'inspection_frequency': 0.5,                   # Hz
                 'inspection_amplitude': 0.3,                   # rad, ~17 deg at the wheel
