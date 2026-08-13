@@ -187,9 +187,9 @@ def generate_launch_description():
                 parameters=[
                     {
                         "use_sim_time": use_sim_time,
-                        "laps": 1,
+                        "laps": 0,
                         # -- Mission end. Laps are counted from arc-length progress along the centreline
-                        "stop_distance": 5.0,  # m past the final crossing; closed tracks only
+                        "stop_distance": 0.0,  # m past the final crossing; closed tracks only
                         "min_path_length": 5.0,  # m, floor on the reference window
                         "stop_speed_eps": 0.3,  # m/s below which the car counts as stationary
                         "stop_hold_time": 0.5,  # s stationary before the run is reported done
@@ -237,7 +237,7 @@ def generate_launch_description():
                         "steer_rate": radians(5.0 * 30.0),  # rad/s
                         "gas_rate": 5.0,  # per second
                         # -- Speed profile, which the MPC gets from its cost function instead
-                        "max_speed": 8.0,  # m/s ceiling regardless of geometry
+                        "max_speed": 10.0,  # m/s ceiling regardless of geometry
                         "min_speed": 0.2,  # m/s floor away from a stop, so the car keeps rolling
                         "max_lateral_accel": 2.0,  # m/s^2 the tyres are trusted with in a corner
                         "max_decel": 2.0,  # m/s^2 planned for a corner or the finish

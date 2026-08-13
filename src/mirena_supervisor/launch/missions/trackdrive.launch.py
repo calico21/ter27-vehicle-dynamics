@@ -130,7 +130,7 @@ def generate_launch_description():
                         "max_candidate_age": 20,  # keyframes a candidate may stay unresolved before promoting anyway
                         "max_promotion_factors": 10,  # most measurements one promotion may bring into the graph
                         # -- When a pose is worth its keep
-                        "keyframe_odom_sigma": 0.15,  # m of odometry drift before the pose needs pinning
+                        "keyframe_odom_sigma": 0.30,  # m of odometry drift before the pose needs pinning
                         "keyframe_max_frames": 4,  # frames between keyframes, at most, whatever else is true
                         # -- Node timing
                         "map_publish_period": 0.1,  # s, 10 Hz map republish
@@ -281,7 +281,7 @@ def generate_launch_description():
                     'steer_rate': radians(5.0 * 30.0),             # rad/s
                     'gas_rate': 5.0,                               # per second
                     # -- Speed profile, which the MPC gets from its cost function instead
-                    'max_speed': 5.0,                             # m/s ceiling regardless of geometry
+                    'max_speed': 10.0,                             # m/s ceiling regardless of geometry
                     'min_speed': 0.2,                              # m/s floor away from a stop, so the car keeps rolling
                     'max_lateral_accel': 2.0,                      # m/s^2 the tyres are trusted with in a corner
                     'max_decel': 2.0,                              # m/s^2 planned for a corner or the finish

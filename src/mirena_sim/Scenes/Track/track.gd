@@ -221,8 +221,9 @@ func load_track(path : String):
 	if data.has('path'):
 		track_curve.clear_points()
 		for p in data['path']['points']:
-			# Mapping ROS path points back to Godot space
-			track_curve.add_point(Vector3(p['y'], 0.0, p['x']))
+			# Mapping ROS path points back to Godot space, the same way the
+			# cones and the origin above are mapped: ROS X is -Z, ROS Y is -X.
+			track_curve.add_point(Vector3(-p['y'], 0.0, -p['x']))
 			track_curve.closed = data['path']['closed']
 
 	# Start pose directly assigned from ROS 2 input
