@@ -32,8 +32,10 @@
 // and drops the integrator, and the sweep runs on so the mission still ends.
 //
 // Like the other controllers, this one is the sole authority on when its run is
-// over: it latches mission_finished in the heartbeat once the window closes,
-// and the supervisor ends the mission off that flag.
+// over: it latches mission_finished in the heartbeat and the supervisor ends
+// the mission off that flag. It does not latch the moment the window closes,
+// though -- it brakes for inspection_brake_duration first, so the wheels are
+// stopped rather than still spinning when the supervisor tears the stack down.
 
 #include <algorithm>
 #include <atomic>
@@ -127,6 +129,9 @@ public:
     declare_parameter<double>("inspection_gas_rate", 2.0);    // per second
     // Gas held once the window closes, and whenever the loop cannot run.
     declare_parameter<double>("inspection_brake_gas", -1.0);
+    // Braking between the end of the sweep and mission_finished, so the wheels
+    // are down before the supervisor acts on the flag.
+    declare_parameter<double>("inspection_brake_duration", 5.0);   // s
     // How stale the wheel speed may be before the loop stops trusting it.
     declare_parameter<double>("wheel_speed_timeout", 0.2);
 
@@ -144,6 +149,8 @@ public:
     gas_min_ = get_parameter("inspection_gas_min").as_double();
     gas_rate_ = std::max(get_parameter("inspection_gas_rate").as_double(), 0.01);
     brake_gas_ = get_parameter("inspection_brake_gas").as_double();
+    brake_duration_ =
+      std::max(get_parameter("inspection_brake_duration").as_double(), 0.0);
     wheel_speed_timeout_ =
       std::max(get_parameter("wheel_speed_timeout").as_double(), 0.0);
     command_period_ = get_parameter("command_period").as_double();
@@ -159,8 +166,8 @@ public:
     RCLCPP_INFO(
       get_logger(),
       "Inspection mission: %.1f s braked hold, then a %.1f s steering sweep at %.2f Hz, "
-      "+-%.2f rad.",
-      start_delay_, duration_, frequency_, amplitude_);
+      "+-%.2f rad, then %.1f s braking before the mission is reported finished.",
+      start_delay_, duration_, frequency_, amplitude_, brake_duration_);
     RCLCPP_INFO(
       get_logger(),
       "Wheel-speed loop: %.0f RPM target, gains (%.4f, %.4f, %.4f), gas in [%.2f, %.2f].",
@@ -296,9 +303,12 @@ private:
       RCLCPP_INFO(get_logger(), "Hold over: starting the %.1f s sweep.", duration_);
     }
 
-    // Past the window: hold neutral and latch.  Keep publishing afterwards --
-    // the supervisor tears the stack down on the flag, but until it does the
-    // vehicle interface must not be left without a fresh command.
+    // Past the window: brake, and only latch once the wheels have had
+    // inspection_brake_duration to come down -- the supervisor tears the stack
+    // down on the flag, and a flag raised the instant the sweep ends would
+    // raise it on a car still spinning.  Keep publishing afterwards, since
+    // until the teardown comes the vehicle interface must not be left without a
+    // fresh command.
     if (elapsed > duration_) {
       rpm_pid_.reset();
       last_gas_ = brake_gas_;
@@ -306,8 +316,15 @@ private:
       command_msg_.gas = brake_gas_;
       control_pub_->publish(command_msg_);
       commanded_gas_.store(brake_gas_, std::memory_order_relaxed);
-      if (!finished_.exchange(true, std::memory_order_relaxed)) {
-        RCLCPP_INFO(get_logger(), "Sweep finished after %.1f s. Mission complete.", elapsed);
+      if (elapsed <= duration_ + brake_duration_) {
+        RCLCPP_INFO_THROTTLE(
+          get_logger(), *get_clock(), 500,
+          "Sweep over: braking for %.1f/%.1f s before finishing.",
+          elapsed - duration_, brake_duration_);
+      } else if (!finished_.exchange(true, std::memory_order_relaxed)) {
+        RCLCPP_INFO(
+          get_logger(), "Sweep finished after %.1f s, wheels braked. Mission complete.",
+          duration_);
       }
       return;
     }
@@ -457,6 +474,7 @@ private:
   double gas_min_;
   double gas_rate_;
   double brake_gas_;
+  double brake_duration_;
   double wheel_speed_timeout_;
   double command_period_;
 

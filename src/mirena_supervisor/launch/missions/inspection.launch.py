@@ -62,6 +62,7 @@ def generate_launch_description():
                 'inspection_gas_min': -0.5,
                 'inspection_gas_rate': 2.0,                    # per second, so a far target is not a step on the pedal
                 'inspection_brake_gas': -1.0,                  # held once the window closes and whenever the loop cannot run
+                'inspection_brake_duration': 5.0,              # s of braking after the sweep, before mission_finished
                 # -- Feedback freshness. Older than this and the loop brakes rather than
                 #    driving the drivetrain open-loop on a stale measurement
                 'wheel_speed_timeout': 0.2,                    # s
