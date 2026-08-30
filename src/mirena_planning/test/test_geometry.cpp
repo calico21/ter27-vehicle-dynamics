@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cmath>
 #include <set>
 
 #include "mirena_planning/geometry.hpp"
@@ -60,16 +61,16 @@ TEST(RigidFit, IsExactForTwoCorrespondences)
   EXPECT_NEAR(fit.t.y, truth.t.y, 1e-9);
 }
 
-TEST(ConeFromString, MatchesThePerceptionVocabulary)
+TEST(ConeSizeFromString, MatchesThePerceptionVocabulary)
 {
-  EXPECT_EQ(coneFromString("cone_blue"), Cone::Blue);
-  EXPECT_EQ(coneFromString("cone_yellow"), Cone::Yellow);
-  EXPECT_EQ(coneFromString("cone_orange"), Cone::Orange);
-  // The big variant must win: its name contains the small one's.
-  EXPECT_EQ(coneFromString("cone_big_orange"), Cone::BigOrange);
-  EXPECT_EQ(coneFromString("BLUE"), Cone::Blue);
-  EXPECT_EQ(coneFromString("unknown_cone"), Cone::Unknown);
-  EXPECT_EQ(coneFromString(""), Cone::Unknown);
+  EXPECT_EQ(coneSizeFromString("cone_big_orange"), ConeSize::Big);
+  EXPECT_EQ(coneSizeFromString("BIG_ORANGE"), ConeSize::Big);
+  // Everything that is not big is a cone of ordinary size. Nothing is rejected:
+  // a colourless pipeline reports no colour, so a type that names none is the
+  // normal case rather than a failure.
+  EXPECT_EQ(coneSizeFromString("unknown_cone"), ConeSize::Small);
+  EXPECT_EQ(coneSizeFromString("cone_blue"), ConeSize::Small);
+  EXPECT_EQ(coneSizeFromString(""), ConeSize::Small);
 }
 
 TEST(Grid, FindsTheNearestPointAndRespectsTheRadius)
@@ -169,4 +170,46 @@ TEST(BuildGates, WrapsHeadingOnAClosedTrack)
   // On a closed loop the first sample's heading comes from its neighbours on
   // both sides, so it is tangential rather than pointing at the next corner.
   EXPECT_NEAR(std::abs(wrapAngle(gates[0].psi - M_PI / 2.0)), 0.0, 1e-9);
+}
+
+TEST(TurnRadius, RecoversTheRadiusOfTheCircleItSampled)
+{
+  // Car at the origin facing +x, on a circle of radius 8 curving left. Every
+  // point of that circle should read back as an 8 m corner, however far round it
+  // sits -- that scale invariance is the whole reason the search tests a radius
+  // instead of an angle.
+  constexpr double kR = 8.0;
+  const Vec2 heading{1.0, 0.0};
+  for (const double arc : {0.2, 0.8, 1.5, 2.5}) {
+    const Vec2 on_circle{kR * std::sin(arc), kR * (1.0 - std::cos(arc))};
+    EXPECT_NEAR(turnRadius({0.0, 0.0}, heading, on_circle), kR, 1e-9) << "arc " << arc;
+  }
+}
+
+TEST(TurnRadius, IsBlindToWhichWayTheCornerGoes)
+{
+  const Vec2 heading{0.0, 1.0};
+  EXPECT_NEAR(
+    turnRadius({0.0, 0.0}, heading, {2.0, 4.0}),
+    turnRadius({0.0, 0.0}, heading, {-2.0, 4.0}), 1e-12);
+}
+
+TEST(TurnRadius, IsInfiniteStraightAheadAndZeroStraightBack)
+{
+  const Vec2 heading{1.0, 0.0};
+  EXPECT_TRUE(std::isinf(turnRadius({0.0, 0.0}, heading, {5.0, 0.0})));
+  EXPECT_EQ(turnRadius({0.0, 0.0}, heading, {-5.0, 0.0}), 0.0);
+  // A point on top of the query is not a corner at all, and must not divide by
+  // the zero-length chord.
+  EXPECT_TRUE(std::isinf(turnRadius({1.0, 2.0}, heading, {1.0, 2.0})));
+}
+
+TEST(TurnRadius, TightensAsTheStepShortens)
+{
+  // The same 45 degree kink: a sweep at 5 m, a pivot at 0.5 m.
+  const Vec2 heading{1.0, 0.0};
+  const Vec2 far{5.0 * std::cos(M_PI / 4.0), 5.0 * std::sin(M_PI / 4.0)};
+  const Vec2 near{0.5 * std::cos(M_PI / 4.0), 0.5 * std::sin(M_PI / 4.0)};
+  EXPECT_GT(turnRadius({0.0, 0.0}, heading, far), 3.0);
+  EXPECT_LT(turnRadius({0.0, 0.0}, heading, near), 0.5);
 }

@@ -1,8 +1,8 @@
 #include <rviz_common/message_filter_display.hpp>
+#include <rviz_common/display_context.hpp>
+#include <rviz_common/frame_manager_iface.hpp>
 #include <rviz_rendering/objects/shape.hpp>
 #include <rviz_rendering/objects/mesh_shape.hpp>
-
-#include <tf2_ros/transform_listener.h>
 
 #include "mirena_common/msg/flat_pose_dist.hpp"
 
@@ -16,8 +16,7 @@ namespace mirena
   class FlatPoseDistDisplay : public rviz_common::MessageFilterDisplay<mirena_common::msg::FlatPoseDist>
   {
   public:
-    FlatPoseDistDisplay() : tf_buffer_(std::make_shared<tf2_ros::Buffer>(rclcpp::Clock::make_shared())),
-                     tf_listener_(std::make_shared<tf2_ros::TransformListener>(*tf_buffer_)) {}
+    FlatPoseDistDisplay() {}
 
     ~FlatPoseDistDisplay() override
     {
@@ -54,27 +53,18 @@ namespace mirena
 
     void processMessage(mirena_common::msg::FlatPoseDist::ConstSharedPtr msg) override
     {
-      // Transformar la posición del coche al frame fijo de RViz2
-      geometry_msgs::msg::TransformStamped transform;
-      try
+      // Transformar la posición del coche al frame fijo de RViz2. Se usa el
+      // frame manager de RViz y no un buffer propio: es el que se vacía cuando
+      // el reloj salta hacia atrás, que es lo que ocurre cada vez que se
+      // reinicia el simulador y el tiempo de simulación vuelve a cero.
+      Ogre::Vector3 origin_position;
+      Ogre::Quaternion origin_orientation;
+      if (!this->context_->getFrameManager()->getTransform(msg->header, origin_position, origin_orientation))
       {
-        transform = tf_buffer_->lookupTransform(this->fixed_frame_.toStdString(), msg->header.frame_id, msg->header.stamp);
-      }
-      catch (tf2::TransformException &ex)
-      {
-        RCLCPP_WARN(rclcpp::get_logger("CarDisplay"), "Transform failed: %s", ex.what());
-        setStatus(rviz_common::properties::StatusProperty::Error, "Transform", ex.what());
+        setMissingTransformToFixedFrame(msg->header.frame_id);
         return;
       }
-
-      // Get the translation to be applied to the main node
-      Ogre::Vector3 origin_position(transform.transform.translation.x,
-                                    transform.transform.translation.y,
-                                    transform.transform.translation.z);
-      Ogre::Quaternion origin_orientation(transform.transform.rotation.w,
-                                          transform.transform.rotation.x,
-                                          transform.transform.rotation.y,
-                                          transform.transform.rotation.z);
+      setTransformOk();
 
       Ogre::Vector3 bell_position(msg->mean.at(0), msg->mean.at(1), 0);
       Ogre::Quaternion bell_orientation(Ogre::Radian(0), Ogre::Vector3::UNIT_Z);
@@ -91,8 +81,6 @@ namespace mirena
     }
 
   private:
-    std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
-    std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
     Ogre::SceneNode *main_node_;
     Ogre::SceneNode *direction_cone_node_;
 

@@ -1,4 +1,4 @@
-#include "mirena_planning/track_template.hpp"
+#include "mirena_planning/known/track_template.hpp"
 
 #include <fstream>
 #include <stdexcept>
@@ -38,8 +38,7 @@ TrackTemplate loadTrackTemplate(const std::string & path)
     track.cones.push_back(
       Observation{
         {cone["x"].get<double>(), cone["y"].get<double>()},
-        coneFromString(cone.value("type", std::string{})),
-        1.0});
+        coneSizeFromString(cone.value("type", std::string{}))});
   }
 
   const auto & path_json = json["path"];

@@ -10,8 +10,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Off by default: -march=native bakes the build machine's instruction set into
+# the solver, and a binary built on a workstation then dies with SIGILL inside
+# acados on a car whose compute unit is older. Turn it on only when the build
+# happens on the machine that will run it.
 option(MIRENA_CONTROL_NATIVE_ARCH
-  "Tune the controller and the generated solver for the build machine" ON)
+  "Tune the controller and the generated solver for the build machine" OFF)
 
 # ---------------------------------------------------------------------------
 # Dependencies
@@ -54,14 +58,14 @@ set(ACADOS_INCLUDE_DIRS
 # ---------------------------------------------------------------------------
 # acados code generation
 #
-# The vehicle model and the OCP live in codegen/*.py, but only as a source
-# language: acados turns them into C that is compiled into the executable
-# below, so the running node never loads Python, CasADi or ctypes.
+# The vehicle model and the OCP live in src/mpc/codegen/*.py, but only as a
+# source language: acados turns them into C that is compiled into the
+# executable below, so the running node never loads Python, CasADi or ctypes.
 # Generation reruns whenever those scripts change.
 # ---------------------------------------------------------------------------
 set(SOLVER_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/acados_generated")
-set(SOLVER_GEN_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/codegen/generate_solver.py")
-set(SOLVER_MODEL_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/codegen/dbm_model.py")
+set(SOLVER_GEN_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/src/mpc/codegen/generate_solver.py")
+set(SOLVER_MODEL_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/src/mpc/codegen/dbm_model.py")
 
 file(SHA256 "${SOLVER_GEN_SCRIPT}" _gen_hash)
 file(SHA256 "${SOLVER_MODEL_SCRIPT}" _model_hash)
@@ -116,48 +120,96 @@ target_link_libraries(mpc_solver_generated PUBLIC
 target_compile_options(mpc_solver_generated PRIVATE -O3 -w)
 
 # ---------------------------------------------------------------------------
-# Controller library
+# Shared code
+#
+# src/common holds what more than one controller needs: the centreline spline
+# and the seqlock both the MPC and the PID node hand their plans across on.
+# Everything specific to one controller lives beside that controller's node.
+# ---------------------------------------------------------------------------
+add_library(mirena_control_common STATIC
+  src/common/cubic_spline.cpp
+  src/common/pid.cpp
+)
+target_include_directories(mirena_control_common PUBLIC
+  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>")
+target_compile_options(mirena_control_common PRIVATE -O3 -Wall -Wextra -Wpedantic)
+
+# ---------------------------------------------------------------------------
+# MPC controller library
+#
+# Headers sit next to their sources in src/mpc: nothing outside this package
+# includes them, so they are private to the MPC executable rather than an
+# installed interface.
 # ---------------------------------------------------------------------------
 add_library(mirena_control_core STATIC
-  src/mpc/cubic_spline.cpp
   src/mpc/mpc_controller.cpp
 )
 target_include_directories(mirena_control_core PUBLIC
-  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>")
-target_link_libraries(mirena_control_core PUBLIC mpc_solver_generated)
+  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/mpc>")
+target_link_libraries(mirena_control_core PUBLIC mirena_control_common mpc_solver_generated)
 target_compile_options(mirena_control_core PRIVATE -O3 -Wall -Wextra -Wpedantic)
+
+# ---------------------------------------------------------------------------
+# PID controller library
+#
+# Deliberately free of acados: the PID exists to be the controller that still
+# builds and still runs when the solver is the thing under suspicion, so it must
+# not acquire a dependency on it.
+# ---------------------------------------------------------------------------
+add_library(mirena_control_pid_core STATIC
+  src/pid/pid_controller.cpp
+)
+target_include_directories(mirena_control_pid_core PUBLIC
+  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/pid>")
+target_link_libraries(mirena_control_pid_core PUBLIC mirena_control_common)
+target_compile_options(mirena_control_pid_core PRIVATE -O3 -Wall -Wextra -Wpedantic)
 
 if(MIRENA_CONTROL_NATIVE_ARCH)
   include(CheckCXXCompilerFlag)
   check_cxx_compiler_flag(-march=native HAVE_MARCH_NATIVE)
   if(HAVE_MARCH_NATIVE)
     target_compile_options(mpc_solver_generated PRIVATE -march=native)
+    target_compile_options(mirena_control_common PRIVATE -march=native)
     target_compile_options(mirena_control_core PRIVATE -march=native)
+    target_compile_options(mirena_control_pid_core PRIVATE -march=native)
   endif()
 endif()
 
 # ---------------------------------------------------------------------------
 # Executables
 #
-# Two alternative occupants of the same slot in the stack: exactly one runs per
-# mission, under the node name the supervisor monitors. mirena_control drives
-# the track; mirena_control_inspection sweeps the steering on stands. Both
-# report mission_finished in their heartbeat, which is all the supervisor reads.
+# Three alternative occupants of the same slot in the stack: exactly one runs
+# per mission, all three under the node name `mirena_control` that the
+# supervisor monitors -- which is why none of them is named that.
+# mirena_control_mpc drives the track under the solver; mirena_control_pid
+# drives the same track with PID loops instead, on the same topics and the same
+# mission parameters; mirena_control_inspection sweeps the steering on stands.
+# All three report mission_finished in their heartbeat, which is all the
+# supervisor reads.
 # ---------------------------------------------------------------------------
-add_executable(mirena_control src/mpc/mpc_node.cpp)
-target_link_libraries(mirena_control mirena_control_core nlohmann_json::nlohmann_json)
-target_compile_options(mirena_control PRIVATE -O3 -Wall -Wextra -Wpedantic)
-ament_target_dependencies(mirena_control
+add_executable(mirena_control_mpc src/mpc/mpc_node.cpp)
+target_link_libraries(mirena_control_mpc mirena_control_core nlohmann_json::nlohmann_json)
+target_compile_options(mirena_control_mpc PRIVATE -O3 -Wall -Wextra -Wpedantic)
+ament_target_dependencies(mirena_control_mpc
   rclcpp geometry_msgs visualization_msgs tf2 tf2_ros mirena_common)
 
-# No solver, no track, no TF: the inspection node needs none of the above.
+add_executable(mirena_control_pid src/pid/pid_node.cpp)
+target_link_libraries(mirena_control_pid mirena_control_pid_core nlohmann_json::nlohmann_json)
+target_compile_options(mirena_control_pid PRIVATE -O3 -Wall -Wextra -Wpedantic)
+ament_target_dependencies(mirena_control_pid
+  rclcpp geometry_msgs visualization_msgs tf2 tf2_ros mirena_common)
+
+# No solver, no track, no TF: the inspection node needs none of those. It does
+# need the scalar PID out of src/common, which it closes on the CAN bridge's
+# wheel speeds.
 add_executable(mirena_control_inspection src/inspection/inspection_node.cpp)
-target_link_libraries(mirena_control_inspection nlohmann_json::nlohmann_json)
+target_link_libraries(mirena_control_inspection
+  mirena_control_common nlohmann_json::nlohmann_json)
 target_compile_options(mirena_control_inspection PRIVATE -O2 -Wall -Wextra -Wpedantic)
 ament_target_dependencies(mirena_control_inspection
   rclcpp mirena_common)
 
-install(TARGETS mirena_control mirena_control_inspection
+install(TARGETS mirena_control_mpc mirena_control_pid mirena_control_inspection
   DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY config DESTINATION share/${PROJECT_NAME})

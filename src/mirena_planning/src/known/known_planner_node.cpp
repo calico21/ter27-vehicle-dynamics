@@ -1,5 +1,5 @@
-// Track planner for the missions whose layout is surveyed in advance: skidpad
-// and acceleration.
+// Track planner for the missions whose layout is surveyed in advance: skidpad,
+// acceleration and brake_test.
 //
 // Loads the mission's template from resource/<mission>.json and registers it
 // against the mapped cones with RANSAC + ICP, so the centreline comes from the
@@ -42,9 +42,9 @@
 #include "mirena_common/msg/heartbeat.hpp"
 #include "mirena_common/msg/track.hpp"
 
-#include "mirena_planning/known_planner.hpp"
+#include "mirena_planning/known/known_planner.hpp"
 #include "mirena_planning/planner.hpp"
-#include "mirena_planning/track_template.hpp"
+#include "mirena_planning/known/track_template.hpp"
 
 namespace mirena::planning
 {
@@ -81,15 +81,12 @@ std_msgs::msg::ColorRGBA toColor(Rgba c)
   return out;
 }
 
-Rgba coneColor(Cone c)
+/// Nothing here reads cone colour, so the marker colour says the one thing that
+/// is actually known: orange for the big cones of the start line, grey for the
+/// rest.
+Rgba coneColor(ConeSize s)
 {
-  switch (c) {
-    case Cone::Blue: return {0.1f, 0.3f, 1.0f, 0.9f};
-    case Cone::Yellow: return {0.95f, 0.9f, 0.1f, 0.9f};
-    case Cone::Orange: return {1.0f, 0.5f, 0.0f, 0.9f};
-    case Cone::BigOrange: return {1.0f, 0.35f, 0.0f, 0.9f};
-    default: return kGrey;
-  }
+  return s == ConeSize::Big ? Rgba{1.0f, 0.35f, 0.0f, 0.9f} : kGrey;
 }
 
 Marker makeMarker(
@@ -138,7 +135,10 @@ public:
 
     // The mission launch file picks the planner, so the two should never
     // disagree -- but a hand-rolled `ros2 run` can still get it wrong.
-    if (mission_ != "skidpad" && mission_ != "acceleration") {
+    //
+    // brake_test drives the acceleration straight, so it is surveyed like the
+    // other two and registers resource/brake_test.json.
+    if (mission_ != "skidpad" && mission_ != "acceleration" && mission_ != "brake_test") {
       RCLCPP_ERROR(
         get_logger(),
         "Mission '%s' has no surveyed layout. Launch mirena_planning for it.",
@@ -147,7 +147,6 @@ public:
     }
 
     republish_tolerance_ = get_parameter("republish_tolerance").as_double();
-    min_confidence_ = get_parameter("min_cone_confidence").as_double();
     fallback_frame_ = get_parameter("fallback_frame").as_string();
     publish_debug_ = get_parameter("publish_debug").as_bool();
 
@@ -216,7 +215,6 @@ private:
     declare_parameter<std::string>("fallback_frame", "map");
     declare_parameter<double>("plan_period", 0.1);
     declare_parameter<double>("heartbeat_period", 0.1);
-    declare_parameter<double>("min_cone_confidence", 0.0);
     declare_parameter<bool>("publish_debug", true);
     // Below this the centreline has not meaningfully moved, so republishing it
     // would only make the controller re-fit its spline and shift the arc length
@@ -242,7 +240,6 @@ private:
     p.ransac_iterations = static_cast<int>(get_parameter("ransac_iterations").as_int());
     p.max_position_drift = get_parameter("max_position_drift").as_double();
     p.max_heading_drift = get_parameter("max_heading_drift").as_double();
-    p.min_confidence = min_confidence_;
 
     // One template per mission, installed with the package.
     const std::string path = ament_index_cpp::get_package_share_directory("mirena_planning") +
@@ -281,10 +278,11 @@ private:
     std::vector<Observation> observations;
     observations.reserve(map->entities.size());
     for (const auto & entity : map->entities) {
-      const Cone color = coneFromString(entity.type);
-      if (color == Cone::Unknown || entity.confidence < min_confidence_) {continue;}
+      // Every cone counts. A colourless pipeline never reports a colour, so
+      // discarding cones that fail to name one would discard all of them.
+      const ConeSize size = coneSizeFromString(entity.type);
       observations.push_back(
-        Observation{{entity.position.x, entity.position.y}, color, entity.confidence});
+        Observation{{entity.position.x, entity.position.y}, size});
     }
 
     std_msgs::msg::Header header = map->header;
@@ -362,7 +360,7 @@ private:
     Marker cones = makeMarker(header, "template", Marker::SPHERE_LIST, 0.35, kWhite);
     for (const Observation & cone : debug.fitted_template) {
       cones.points.push_back(toPoint(cone.p));
-      cones.colors.push_back(toColor(coneColor(cone.color)));
+      cones.colors.push_back(toColor(coneColor(cone.size)));
     }
     array.markers.push_back(std::move(cones));
 
@@ -431,7 +429,6 @@ private:
   std::string mission_;
   std::string fallback_frame_{"map"};
   double republish_tolerance_{0.25};
-  double min_confidence_{0.0};
   bool publish_debug_{true};
 
   std::unique_ptr<Planner> planner_;

@@ -40,7 +40,7 @@
 #include "mirena_common/msg/track.hpp"
 
 #include "mirena_planning/planner.hpp"
-#include "mirena_planning/unknown_planner.hpp"
+#include "mirena_planning/unknown/unknown_planner.hpp"
 
 namespace mirena::planning
 {
@@ -133,7 +133,6 @@ public:
     }
 
     republish_tolerance_ = get_parameter("republish_tolerance").as_double();
-    min_confidence_ = get_parameter("min_cone_confidence").as_double();
     fallback_frame_ = get_parameter("fallback_frame").as_string();
     publish_debug_ = get_parameter("publish_debug").as_bool();
 
@@ -202,37 +201,35 @@ private:
     declare_parameter<std::string>("fallback_frame", "map");
     declare_parameter<double>("plan_period", 0.1);
     declare_parameter<double>("heartbeat_period", 0.1);
-    declare_parameter<double>("min_cone_confidence", 0.0);
     declare_parameter<bool>("publish_debug", true);
     // Below this the centreline has not meaningfully moved, so republishing it
     // would only make the controller re-fit its spline and shift the arc length
     // its lap counter rides on.
     declare_parameter<double>("republish_tolerance", 0.25);
 
-    declare_parameter<double>("max_gate_width", u.max_gate_width);
+    declare_parameter<double>("curvature_weight", u.curvature_weight);
+    declare_parameter<int>("lookahead", u.lookahead);
+    declare_parameter<double>("min_track_width", u.min_track_width);
+    declare_parameter<double>("max_track_width", u.max_track_width);
+    declare_parameter<double>("cone_spacing", u.cone_spacing);
     declare_parameter<double>("max_gate_gap", u.max_gate_gap);
-    declare_parameter<double>("turn_penalty", u.turn_penalty);
-    declare_parameter<double>("min_progress_cos", u.min_progress_cos);
-    declare_parameter<double>("closure_radius", u.closure_radius);
-    declare_parameter<double>("merge_radius", u.merge_radius);
     declare_parameter<double>("start_gate_radius", u.start_gate_radius);
-    declare_parameter<int>("min_path_points", u.min_path_points);
     declare_parameter<int>("closure_hysteresis", u.closure_hysteresis);
+    declare_parameter<int>("max_path_points", u.max_path_points);
   }
 
   std::unique_ptr<Planner> makePlanner()
   {
     UnknownPlannerParams p;
-    p.max_gate_width = get_parameter("max_gate_width").as_double();
+    p.curvature_weight = get_parameter("curvature_weight").as_double();
+    p.lookahead = static_cast<int>(get_parameter("lookahead").as_int());
+    p.min_track_width = get_parameter("min_track_width").as_double();
+    p.max_track_width = get_parameter("max_track_width").as_double();
+    p.cone_spacing = get_parameter("cone_spacing").as_double();
     p.max_gate_gap = get_parameter("max_gate_gap").as_double();
-    p.turn_penalty = get_parameter("turn_penalty").as_double();
-    p.min_progress_cos = get_parameter("min_progress_cos").as_double();
-    p.closure_radius = get_parameter("closure_radius").as_double();
-    p.merge_radius = get_parameter("merge_radius").as_double();
     p.start_gate_radius = get_parameter("start_gate_radius").as_double();
-    p.min_path_points = static_cast<int>(get_parameter("min_path_points").as_int());
     p.closure_hysteresis = static_cast<int>(get_parameter("closure_hysteresis").as_int());
-    p.min_confidence = min_confidence_;
+    p.max_path_points = static_cast<int>(get_parameter("max_path_points").as_int());
 
     RCLCPP_INFO(get_logger(), "Planning an unknown track by Delaunay triangulation.");
     return std::make_unique<UnknownPlanner>(p);
@@ -260,10 +257,11 @@ private:
     std::vector<Observation> observations;
     observations.reserve(map->entities.size());
     for (const auto & entity : map->entities) {
-      const Cone color = coneFromString(entity.type);
-      if (color == Cone::Unknown || entity.confidence < min_confidence_) {continue;}
+      // Every cone counts. A colourless pipeline never reports a colour, so
+      // discarding cones that fail to name one would discard all of them.
+      const ConeSize size = coneSizeFromString(entity.type);
       observations.push_back(
-        Observation{{entity.position.x, entity.position.y}, color, entity.confidence});
+        Observation{{entity.position.x, entity.position.y}, size});
     }
 
     std_msgs::msg::Header header = map->header;
@@ -407,7 +405,6 @@ private:
   std::string mission_;
   std::string fallback_frame_{"map"};
   double republish_tolerance_{0.25};
-  double min_confidence_{0.0};
   bool publish_debug_{true};
 
   std::unique_ptr<Planner> planner_;

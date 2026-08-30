@@ -1,9 +1,16 @@
 // SocketCAN bridge node for the TER DBC (hardware).
 //
-// Implements three paths:
+// Implements four paths:
 //   * CarControl (ROS) -> DV_Dynamic_Req_1 (CAN)        [output]
 //   * MissionInfo (ROS) -> DV_info (CAN)                [output]
 //   * DV_system_status (CAN) -> AsInfo (ROS)            [input]
+//   * WheelInfo (CAN) -> WheelSpeeds (ROS)              [input]
+//
+// ...and, optionally, records the whole bus to disk. See can_logger.hpp for how
+// that is kept off this node's rx path; the policy of when to record lives here,
+// because it is a fact about the TER state machine rather than about logging:
+// a session runs from TER_STATUS reaching PRECHARGED until it returns to
+// WAIT_SL, which is exactly the window in which the HV system is live.
 //
 // The CAN interface is expected to be already up (bitrate configured, link up);
 // bringing it up is the responsibility of the system (e.g. systemd-networkd / ip link).
@@ -14,6 +21,7 @@
 #include <string>
 #include <memory>
 #include <chrono>
+#include <optional>
 #include <algorithm>
 
 #include <unistd.h>
@@ -21,14 +29,18 @@
 #include <net/if.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <linux/can.h>
 #include <linux/can/raw.h>
+
+#include "can_logger.hpp"
 
 #include "rclcpp/rclcpp.hpp"
 
 #include "mirena_common/msg/car_control.hpp"
 #include "mirena_common/msg/as_info.hpp"
 #include "mirena_common/msg/mission_info.hpp"
+#include "mirena_common/msg/wheel_speeds.hpp"
 
 extern "C" {
 #include "ter.h"
@@ -37,6 +49,13 @@ extern "C" {
 using namespace std::chrono_literals;
 using std::placeholders::_1;
 
+namespace
+{
+// Wheel speeds are a body-frame quantity, so they are stamped against the frame
+// every other body-frame quantity in this stack uses (Car.u/v, the IMU).
+constexpr const char * kWheelFrame = "car/cog";
+}  // namespace
+
 class MirenaCan : public rclcpp::Node
 {
 public:
@@ -44,6 +63,22 @@ public:
   : rclcpp::Node("mirena_can")
   {
     iface_ = declare_parameter<std::string>("can_interface", "can1");
+
+    // Recording is off unless asked for, and asking for it without saying where
+    // is a configuration mistake rather than a reason to pick a directory on
+    // the user's behalf -- a log written somewhere nobody looks is worse than
+    // no log, because it is believed to exist.
+    const bool log_enabled = declare_parameter<bool>("log", false);
+    const std::string log_path = declare_parameter<std::string>("log_path", "");
+    if (log_enabled && log_path.empty()) {
+      RCLCPP_ERROR(get_logger(), "log is set but log_path is empty; not recording.");
+    } else if (log_enabled) {
+      logger_ = std::make_unique<mirena::CanLogger>(log_path, iface_);
+      RCLCPP_INFO(
+        get_logger(),
+        "Recording to '%s'. A session opens when TER_STATUS reaches PRECHARGED "
+        "and closes when it returns to WAIT_SL.", log_path.c_str());
+    }
 
     if (!open_can(iface_)) {
       // Keep the node alive so the rest of the stack still launches; CAN I/O is gated on the fd.
@@ -60,11 +95,26 @@ public:
 
     as_info_pub_ = create_publisher<mirena_common::msg::AsInfo>("/as_status", 10);
 
+    // Sensor data, so it follows the same best-effort contract as the other
+    // /sensors topics: a wheel speed that arrived late describes a speed the car
+    // is no longer doing, and is better dropped than queued.
+    wheel_speeds_pub_ = create_publisher<mirena_common::msg::WheelSpeeds>(
+      "/sensors/wheel_speeds", rclcpp::SensorDataQoS());
+
     // Poll the socket regularly; reads are non-blocking and drain all pending frames.
     rx_timer_ = create_wall_timer(5ms, std::bind(&MirenaCan::rx_poll, this));
   }
 
-  ~MirenaCan() override { close_can(); }
+  ~MirenaCan() override
+  {
+    // A run cut short by Ctrl-C or a supervisor teardown never sees WAIT_SL, so
+    // the session is closed here too rather than left to the logger's own
+    // destructor -- same flush, but it says so in the log.
+    if (logger_) {
+      close_session();
+    }
+    close_can();
+  }
 
 private:
   // --- CAN socket ---
@@ -84,14 +134,45 @@ private:
       return false;
     }
 
-    // Only deliver DV_system_status frames to this socket.
-    struct can_filter rfilter[1];
-    rfilter[0].can_id = TER_DV_SYSTEM_STATUS_FRAME_ID;
-    rfilter[0].can_mask = CAN_SFF_MASK;  // DV_system_status is a standard (11-bit) frame
-    if (setsockopt(can_fd_, SOL_CAN_RAW, CAN_RAW_FILTER, &rfilter, sizeof(rfilter)) < 0) {
-      RCLCPP_ERROR(get_logger(), "Failed to set CAN filter: %s", std::strerror(errno));
-      close_can();
-      return false;
+    // What the kernel is allowed to hand us depends on whether we are recording.
+    //
+    // Not recording: only the frames this node decodes. Everything else is
+    // discarded in the kernel and never costs us a read.
+    //
+    // Recording: no filter at all, because "log all CAN frames" cannot be done
+    // behind a filter that drops most of them -- and TER_STATUS, which decides
+    // when a session runs, is itself one of the frames a narrow filter would
+    // throw away. Error frames are enabled too: bus-off, error-passive and
+    // arbitration-lost are the events worth having a log for in the first
+    // place, and they are invisible without CAN_RAW_ERR_FILTER.
+    if (logger_) {
+      const can_err_mask_t err_mask = CAN_ERR_MASK;
+      if (setsockopt(can_fd_, SOL_CAN_RAW, CAN_RAW_ERR_FILTER, &err_mask, sizeof(err_mask)) < 0) {
+        // Not fatal: the log is merely poorer for it.
+        RCLCPP_WARN(
+          get_logger(), "Could not subscribe to CAN error frames: %s", std::strerror(errno));
+      }
+    } else {
+      struct can_filter rfilter[2];
+      rfilter[0].can_id = TER_DV_SYSTEM_STATUS_FRAME_ID;
+      rfilter[0].can_mask = CAN_SFF_MASK;
+      rfilter[1].can_id = TER_WHEEL_INFO_FRAME_ID;
+      rfilter[1].can_mask = CAN_SFF_MASK;
+      if (setsockopt(can_fd_, SOL_CAN_RAW, CAN_RAW_FILTER, &rfilter, sizeof(rfilter)) < 0) {
+        RCLCPP_ERROR(get_logger(), "Failed to set CAN filter: %s", std::strerror(errno));
+        close_can();
+        return false;
+      }
+    }
+
+    // Kernel receive timestamps. Without these every frame drained in one poll
+    // would carry the same userspace instant, quantising the log to the 5 ms
+    // timer and destroying exactly the timing detail a bus trace is kept for.
+    const int on = 1;
+    if (setsockopt(can_fd_, SOL_SOCKET, SO_TIMESTAMP, &on, sizeof(on)) < 0) {
+      RCLCPP_WARN(
+        get_logger(), "SO_TIMESTAMP unavailable (%s); falling back to arrival time.",
+        std::strerror(errno));
     }
 
     struct sockaddr_can addr {};
@@ -182,7 +263,40 @@ private:
     }
   }
 
-  // --- CAN DV_system_status -> ROS AsInfo ---
+  /// Kernel receive time of the frame just read, in nanoseconds since the
+  /// epoch, falling back to now if the socket did not supply one.
+  static uint64_t receive_stamp_ns(const struct msghdr & msg)
+  {
+    for (const struct cmsghdr * cmsg = CMSG_FIRSTHDR(&msg); cmsg != nullptr;
+      cmsg = CMSG_NXTHDR(const_cast<struct msghdr *>(&msg), const_cast<struct cmsghdr *>(cmsg)))
+    {
+      if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SO_TIMESTAMP &&
+        cmsg->cmsg_len >= CMSG_LEN(sizeof(struct timeval)))
+      {
+        struct timeval tv;
+        std::memcpy(&tv, CMSG_DATA(cmsg), sizeof(tv));
+        return static_cast<uint64_t>(tv.tv_sec) * 1000000000ull +
+               static_cast<uint64_t>(tv.tv_usec) * 1000ull;
+      }
+    }
+    // System clock, not the node clock: these stamps are compared against
+    // candump output and other machines' logs, so they have to be wall time.
+    return static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count());
+  }
+
+  /// The TER_STATUS state signal, if this frame is a TER_STATUS that unpacks.
+  static std::optional<uint8_t> ter_state(const struct can_frame & frame)
+  {
+    struct ter_ter_status_t dst;
+    if (ter_ter_status_unpack(&dst, frame.data, frame.can_dlc) != 0) {
+      return std::nullopt;
+    }
+    return dst.state;
+  }
+
+  // --- CAN -> ROS ---
   void rx_poll()
   {
     if (can_fd_ < 0) {
@@ -190,28 +304,152 @@ private:
     }
 
     struct can_frame frame;
+    struct iovec iov;
+    struct msghdr msg;
+    char control[CMSG_SPACE(sizeof(struct timeval))];
+
     while (true) {
-      const ssize_t n = read(can_fd_, &frame, sizeof(frame));
+      iov.iov_base = &frame;
+      iov.iov_len = sizeof(frame);
+      std::memset(&msg, 0, sizeof(msg));
+      msg.msg_iov = &iov;
+      msg.msg_iovlen = 1;
+      msg.msg_control = control;
+      msg.msg_controllen = sizeof(control);
+
+      const ssize_t n = recvmsg(can_fd_, &msg, 0);
       if (n < 0) {
         break;  // EAGAIN / EWOULDBLOCK: no more frames pending
       }
       if (n < static_cast<ssize_t>(sizeof(frame))) {
         continue;
       }
-      if ((frame.can_id & CAN_SFF_MASK) != TER_DV_SYSTEM_STATUS_FRAME_ID) {
-        continue;
+
+      // Only a standard data frame can be one of ours. This matters now that
+      // recording runs the socket unfiltered: CAN_SFF_MASK keeps the low 11
+      // bits of an extended id too, so without this test a 29-bit frame ending
+      // in 0x27 would be decoded as WheelInfo, and an error frame would be
+      // decoded as whatever its flags happened to alias onto.
+      const bool standard_data =
+        (frame.can_id & (CAN_EFF_FLAG | CAN_RTR_FLAG | CAN_ERR_FLAG)) == 0u;
+      const canid_t id = frame.can_id & CAN_SFF_MASK;
+
+      // The session opens before this frame is logged and closes after it, so
+      // the PRECHARGED frame that starts a recording and the WAIT_SL frame that
+      // ends it are both inside the file rather than straddling its edges.
+      std::optional<uint8_t> state;
+      if (logger_ && standard_data && id == TER_TER_STATUS_FRAME_ID) {
+        state = ter_state(frame);
+        if (state == TER_TER_STATUS_STATE_PRECHARGED_CHOICE) {
+          open_session();
+        }
       }
 
-      struct ter_dv_system_status_t dst;
-      if (ter_dv_system_status_unpack(&dst, frame.data, frame.can_dlc) != 0) {
-        continue;
+      if (logger_) {
+        logger_->write(receive_stamp_ns(msg), frame.can_id, frame.can_dlc, frame.data);
       }
 
-      mirena_common::msg::AsInfo out;
-      out.status = map_as_status(dst.as_status);
-      out.mission = map_ami_mission(dst.ami_state);
-      as_info_pub_->publish(out);
+      if (state == TER_TER_STATUS_STATE_WAIT_SL_CHOICE) {
+        close_session();
+      }
+
+      if (!standard_data) {
+        continue;
+      }
+      switch (id) {
+        case TER_DV_SYSTEM_STATUS_FRAME_ID:
+          handle_system_status(frame);
+          break;
+        case TER_WHEEL_INFO_FRAME_ID:
+          handle_wheel_info(frame);
+          break;
+        default:
+          break;  // not ours; only reachable while recording runs unfiltered
+      }
     }
+  }
+
+  // --- Recording sessions, driven by the TER state machine ---
+  //
+  // Both are idempotent in CanLogger, so they can be called from every
+  // TER_STATUS broadcast without tracking edges here; these wrappers exist only
+  // to say something in the log the first time each way.
+
+  void open_session()
+  {
+    if (logger_->active()) {
+      return;
+    }
+    if (logger_->start()) {
+      RCLCPP_INFO(get_logger(), "PRECHARGED: recording to '%s'.", logger_->stats().file.c_str());
+    } else {
+      RCLCPP_ERROR(get_logger(), "PRECHARGED but recording failed: %s",
+        logger_->last_error().c_str());
+    }
+  }
+
+  void close_session()
+  {
+    if (!logger_->active()) {
+      return;
+    }
+    const auto before = logger_->stats();
+    logger_->stop();
+    if (before.frames_dropped > 0) {
+      RCLCPP_WARN(
+        get_logger(),
+        "WAIT_SL: closed '%s' with %lu frames, %lu DROPPED -- the writer could not keep up.",
+        before.file.c_str(),
+        static_cast<unsigned long>(before.frames_written),
+        static_cast<unsigned long>(before.frames_dropped));
+    } else {
+      RCLCPP_INFO(
+        get_logger(), "WAIT_SL: closed '%s' with %lu frames.",
+        before.file.c_str(), static_cast<unsigned long>(before.frames_written));
+    }
+  }
+
+  // --- CAN DV_system_status -> ROS AsInfo ---
+  void handle_system_status(const struct can_frame & frame)
+  {
+    struct ter_dv_system_status_t dst;
+    if (ter_dv_system_status_unpack(&dst, frame.data, frame.can_dlc) != 0) {
+      return;
+    }
+
+    mirena_common::msg::AsInfo out;
+    out.status = map_as_status(dst.as_status);
+    out.mission = map_ami_mission(dst.ami_state);
+    as_info_pub_->publish(out);
+  }
+
+  // --- CAN WheelInfo -> ROS WheelSpeeds ---
+  //
+  // WheelInfo carries the two driven wheels, which is all this car instruments:
+  // rl_rpm and rr_rpm, signed int16 in raw RPM. The generated decode is a plain
+  // cast (scale 1, offset 0), so the sign survives and reverse rotation is a
+  // negative speed rather than a wrapped one.
+  //
+  // Published as RPM, exactly as the bus reports it. Converting to m/s here
+  // would bake a rolling radius into the driver, and that is a tyre property --
+  // it moves with compound, pressure and wear -- so it belongs to whoever fuses
+  // the measurement, not to the layer that reads the wire.
+  void handle_wheel_info(const struct can_frame & frame)
+  {
+    struct ter_wheel_info_t dst;
+    if (ter_wheel_info_unpack(&dst, frame.data, frame.can_dlc) != 0) {
+      return;
+    }
+
+    mirena_common::msg::WheelSpeeds out;
+    // Stamped on arrival. The bus carries no timestamp of its own, so this is
+    // the earliest moment the sample can be attributed to; the polling delay it
+    // hides is bounded by the 5 ms rx timer.
+    out.header.stamp = now();
+    out.header.frame_id = kWheelFrame;
+    out.rl = ter_wheel_info_rl_rpm_decode(dst.rl_rpm);
+    out.rr = ter_wheel_info_rr_rpm_decode(dst.rr_rpm);
+    wheel_speeds_pub_->publish(out);
   }
 
   // DBC AS_status choices use a different enumeration than the ROS AsInfo status constants.
@@ -240,7 +478,7 @@ private:
       case Msg::MISSION_STATUS_READY:       return TER_DV_INFO_MISSION_STATUS_READY_CHOICE;
       case Msg::MISSION_STATUS_RUNNING:     return TER_DV_INFO_MISSION_STATUS_RUNNING_CHOICE;
       case Msg::MISSION_STATUS_FINISHED:    return TER_DV_INFO_MISSION_STATUS_FINISHED_CHOICE;
-      case Msg::MISSION_STATUS_FAILED:      return TER_DV_INFO_MISSION_STATUS_FINISHED_CHOICE;
+      case Msg::MISSION_STATUS_FAILED:      return TER_DV_INFO_MISSION_STATUS_FAILED_CHOICE;
       default:                              return TER_DV_INFO_MISSION_STATUS_NONE_CHOICE;
     }
   }
@@ -262,9 +500,13 @@ private:
 
   std::string iface_;
   int can_fd_ {-1};
+  /// Null unless the `log` parameter asked for recording. Its presence is also
+  /// what decides whether the socket runs filtered.
+  std::unique_ptr<mirena::CanLogger> logger_;
   rclcpp::Subscription<mirena_common::msg::CarControl>::SharedPtr control_sub_;
   rclcpp::Subscription<mirena_common::msg::MissionInfo>::SharedPtr mission_info_sub_;
   rclcpp::Publisher<mirena_common::msg::AsInfo>::SharedPtr as_info_pub_;
+  rclcpp::Publisher<mirena_common::msg::WheelSpeeds>::SharedPtr wheel_speeds_pub_;
   rclcpp::TimerBase::SharedPtr rx_timer_;
 };
 

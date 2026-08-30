@@ -3,7 +3,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
-#include "common/udp_listener.hpp"
+#include "udp_listener.hpp"
 
 namespace mirena
 {

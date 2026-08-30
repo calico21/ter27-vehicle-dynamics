@@ -68,3 +68,8 @@ testing
 .claude 
 
 core.*
+# Exclude rosbags and archives
+*.mcap
+*.tar.gz
+*.pdf
+rosbag2_*/

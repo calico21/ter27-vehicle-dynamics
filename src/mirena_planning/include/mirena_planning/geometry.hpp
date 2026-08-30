@@ -35,7 +35,6 @@ inline double cross(Vec2 a, Vec2 b) {return a.x * b.y - a.y * b.x;}
 inline double squaredNorm(Vec2 v) {return v.x * v.x + v.y * v.y;}
 inline double norm(Vec2 v) {return std::hypot(v.x, v.y);}
 inline double distance(Vec2 a, Vec2 b) {return norm(a - b);}
-inline Vec2 perp(Vec2 v) {return {-v.y, v.x};}          // rotate +90 degrees
 
 inline Vec2 normalized(Vec2 v)
 {
@@ -47,6 +46,21 @@ inline double wrapAngle(double a)
 {
   return std::remainder(a, 2.0 * M_PI);
 }
+
+/// Radius of the corner being asked for: the circle that leaves `from` pointing
+/// along `heading` and passes through `to`. Infinite when `to` is already
+/// straight ahead, zero when it is directly behind.
+///
+/// This is the quantity the turning rule caps, and it is a much better test of
+/// whether two points can be consecutive on a centreline than the angle between
+/// them, because it accounts for how far apart they are: the same 40 degree kink
+/// is an easy sweep over 6 m and impossible over 1 m.
+///
+/// Only meaningful for a `to` that is ahead of `from`. Geometrically the circle
+/// through a point behind still exists -- the car goes almost all the way round
+/// it -- so this returns a large radius there and callers are expected to have
+/// rejected backwards steps on their own.
+double turnRadius(Vec2 from, Vec2 heading, Vec2 to);
 
 // ---------------------------------------------------------------- transforms
 
@@ -83,16 +97,21 @@ Transform2 rigidFit(const std::vector<Vec2> & src, const std::vector<Vec2> & dst
 
 // --------------------------------------------------------------------- cones
 
-enum class Cone : std::uint8_t {Blue = 0, Yellow, Orange, BigOrange, Unknown};
-inline constexpr std::size_t kConeCount = 5;
-
-inline std::size_t coneIndex(Cone c) {return static_cast<std::size_t>(c);}
+/// What the car can tell about a cone without reading its colour.
+///
+/// The pipeline is colourless end to end: nothing measures blue or yellow, so
+/// nothing here can encode them. Height it can measure, and the two Formula
+/// Student cones stand 505 mm and 325 mm tall, which is why the one distinction
+/// worth carrying is the big cone. The four of those on the start line are what
+/// the unknown-track planner roots the track on.
+enum class ConeSize : std::uint8_t {Small = 0, Big};
 
 /// Maps the perception/SLAM `Entity.type` strings onto the enum. Matching is
-/// case insensitive and by substring, so `cone_blue`, `blue` and `BLUE_CONE`
-/// all land on the same class.
-Cone coneFromString(std::string_view type);
-const char * coneName(Cone c);
+/// case insensitive and by substring, so `cone_big_orange`, `BIG_ORANGE` and
+/// `big` all land on Big; everything else, `unknown_cone` included, is a Small.
+/// Nothing is rejected -- an unrecognised type is still a cone, and a colourless
+/// pipeline has no business discarding a cone for not naming a colour.
+ConeSize coneSizeFromString(std::string_view type);
 
 // ---------------------------------------------------------------------- grid
 

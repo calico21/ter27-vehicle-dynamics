@@ -1,4 +1,4 @@
-#include "mirena_planning/known_planner.hpp"
+#include "mirena_planning/known/known_planner.hpp"
 
 #include <algorithm>
 #include <utility>
@@ -9,15 +9,10 @@ namespace mirena::planning
 KnownPlanner::KnownPlanner(TrackTemplate track, KnownPlannerParams params)
 : track_(std::move(track)), params_(params)
 {
-  std::array<std::vector<Vec2>, kConeCount> by_color;
-  for (std::size_t i = 0; i < track_.cones.size(); ++i) {
-    const std::size_t c = coneIndex(track_.cones[i].color);
-    by_color[c].push_back(track_.cones[i].p);
-    grid_index_[c].push_back(static_cast<int>(i));
-  }
-  for (std::size_t c = 0; c < kConeCount; ++c) {
-    grids_[c] = Grid(std::move(by_color[c]), std::max(params_.inlier_distance, 1.0));
-  }
+  std::vector<Vec2> points;
+  points.reserve(track_.cones.size());
+  for (const Observation & cone : track_.cones) {points.push_back(cone.p);}
+  grid_ = Grid(std::move(points), std::max(params_.inlier_distance, 1.0));
 
   for (std::size_t i = 0; i < track_.cones.size(); ++i) {
     for (std::size_t j = i + 1; j < track_.cones.size(); ++j) {
@@ -39,11 +34,9 @@ void KnownPlanner::reset()
   locked_ = false;
 }
 
-int KnownPlanner::match(Vec2 point, Cone color) const
+int KnownPlanner::match(Vec2 point) const
 {
-  const std::size_t c = coneIndex(color);
-  const int local = grids_[c].nearest(point, params_.inlier_distance);
-  return local < 0 ? -1 : grid_index_[c][local];
+  return grid_.nearest(point, params_.inlier_distance);
 }
 
 KnownPlanner::Fit KnownPlanner::evaluate(
@@ -52,7 +45,7 @@ KnownPlanner::Fit KnownPlanner::evaluate(
   const Transform2 to_template = guess.inverse();
   int inliers = 0;
   for (const Observation & o : observations) {
-    if (match(to_template * o.p, o.color) >= 0) {++inliers;}
+    if (match(to_template * o.p) >= 0) {++inliers;}
   }
 
   Fit fit;
@@ -80,7 +73,7 @@ KnownPlanner::Fit KnownPlanner::refine(
     to.clear();
     for (const Observation & o : observations) {
       const Vec2 q = to_template * o.p;
-      const int m = match(q, o.color);
+      const int m = match(q);
       if (m >= 0) {
         from.push_back(track_.cones[m].p);
         to.push_back(q);
@@ -130,8 +123,6 @@ KnownPlanner::Fit KnownPlanner::recover(const std::vector<Observation> & observa
       for (const bool swapped : {false, true}) {
         const int i = swapped ? it->j : it->i;
         const int j = swapped ? it->i : it->j;
-        if (track_.cones[i].color != observations[a].color) {continue;}
-        if (track_.cones[j].color != observations[b].color) {continue;}
         if (++tried > params_.ransac_candidates) {break;}
 
         const Fit hypothesis = evaluate(
@@ -177,21 +168,13 @@ bool KnownPlanner::plausible(const Fit & fit) const
 std::optional<Plan> KnownPlanner::plan(
   const std::vector<Observation> & observations, PlanDebug * debug)
 {
-  std::vector<Observation> usable;
-  usable.reserve(observations.size());
-  for (const Observation & o : observations) {
-    if (o.color != Cone::Unknown && o.confidence >= params_.min_confidence) {
-      usable.push_back(o);
-    }
-  }
-
   // Start from what the geometry already tells us: the nominal transform on the
   // first attempt, the previous solution afterwards. RANSAC is the recovery
   // path, not the primary one.
-  Fit fit = refine(usable, locked_ ? last_fit_ : track_.map_from_template);
+  Fit fit = refine(observations, locked_ ? last_fit_ : track_.map_from_template);
   bool from_ransac = false;
   if (!plausible(fit)) {
-    const Fit recovered = recover(usable);
+    const Fit recovered = recover(observations);
     if (recovered.score > fit.score) {
       fit = recovered;
       from_ransac = true;
@@ -208,8 +191,8 @@ std::optional<Plan> KnownPlanner::plan(
 
   if (debug && debug->verbose) {
     const Transform2 to_template = fit.map_from_template.inverse();
-    for (const Observation & o : usable) {
-      const int m = match(to_template * o.p, o.color);
+    for (const Observation & o : observations) {
+      const int m = match(to_template * o.p);
       if (m >= 0) {
         debug->correspondences.emplace_back(o.p, fit.map_from_template * track_.cones[m].p);
       } else {
@@ -218,7 +201,7 @@ std::optional<Plan> KnownPlanner::plan(
     }
     for (const Observation & cone : track_.cones) {
       debug->fitted_template.push_back(
-        Observation{fit.map_from_template * cone.p, cone.color, 1.0});
+        Observation{fit.map_from_template * cone.p, cone.size});
     }
     for (const Vec2 & p : track_.path) {
       debug->fitted_path.push_back(fit.map_from_template * p);

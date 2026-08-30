@@ -15,8 +15,7 @@ namespace mirena::planning
 struct Observation
 {
   Vec2 p{};
-  Cone color{Cone::Unknown};
-  double confidence{1.0};
+  ConeSize size{ConeSize::Small};
 };
 
 /// A centreline sample: position plus the tangent heading at that point.

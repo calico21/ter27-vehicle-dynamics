@@ -10,6 +10,11 @@ const GEAR_RATIO = 5 # 1:5
 const WHEEL_RADIUS = 0.23 # m
 const BRAKE_F = 20
 const MAX_STEER = deg_to_rad(30)
+## Forward speed over which regen is at full strength. Below it regen fades out
+## and the friction brakes take over, so a braking command can only ever remove
+## speed: /control carries a [-1, 1] throttle where -1 is full braking, never
+## reverse, and the car must not drive backwards on one.
+const REGEN_FADE_SPEED = 0.5 # m/s
 
 # --- Pilot Settings ---
 @export var pilot: PilotMode = PilotMode.NO_PILOT
@@ -20,6 +25,13 @@ var path : Path3D
 
 # --- ROS Variables ---
 @export var frame_id: String = "car/cog"
+## Rate the rear wheel speeds go out at, in Hz.
+##
+## Deliberately not the physics rate: physics runs at 400 Hz here, while on the
+## car these numbers arrive as the WheelInfo CAN frame and a consumer sees them
+## at whatever rate the ECU broadcasts. Publishing every physics tick would give
+## the sim a sensor four times livelier than the real one.
+@export var wheel_speed_rate: float = 100.0
 var _node: RosNode
 # Publishers
 var _state_pub: RosPublisher
@@ -27,7 +39,9 @@ var _as_info_pub : RosPublisher
 var _perception_pub: RosPublisher
 var _slam_pub: RosPublisher
 var _inferred_control_pub: RosPublisher
+var _wheel_speeds_pub: RosPublisher
 var _debug_tim : RosTimer
+var _wheel_speeds_tim : RosTimer
 # Subscribers
 var _control_sub: RosSubscriber
 var _mission_info_sub: RosSubscriber
@@ -43,6 +57,7 @@ var _as_info : RosMirenaCommonAsInfo
 var _mission_info
 
 @onready var car_state : RosMirenaCommonCar = RosMirenaCommonCar.new()
+@onready var wheel_speeds : RosMirenaCommonWheelSpeeds = RosMirenaCommonWheelSpeeds.new()
 
 func _ready():
 	## ROS — no namespace: all topic names below are absolute
@@ -54,6 +69,17 @@ func _ready():
 	_perception_pub       = _node.create_publisher("/debug/perception",  "mirena_common/msg/EntityList")
 	_slam_pub             = _node.create_publisher("/debug/slam",        "mirena_common/msg/EntityList")
 	_inferred_control_pub = _node.create_publisher("/inferred_control",  "mirena_common/msg/CarControl")
+	## Rear wheel speeds. Not a debug topic -- this is the same /sensors/*
+	## interface mirena_can serves on the car, so nothing downstream can tell
+	## which one it is talking to. Best-effort/volatile to match the
+	## SensorDataQoS the hardware node publishes with.
+	var wheel_qos := RosQoS.new()
+	wheel_qos.history = RosQoS.KEEP_LAST
+	wheel_qos.depth = 5
+	wheel_qos.reliability = RosQoS.BEST_EFFORT
+	wheel_qos.durability = RosQoS.VOLATILE
+	_wheel_speeds_pub = _node.create_publisher(
+		"/sensors/wheel_speeds", "mirena_common/msg/WheelSpeeds", wheel_qos)
 
 	# State setup
 	_as_info = RosMirenaCommonAsInfo.new()
@@ -62,6 +88,7 @@ func _ready():
 	_mission_info.status = 0
 	## Publisher timers
 	_debug_tim = _node.create_timer(0.1, _debug_publish)
+	_wheel_speeds_tim = _node.create_timer(1.0 / wheel_speed_rate, _publish_wheel_speeds)
 	# Subscribers
 	_control_sub = _node.create_subscription("/control", "mirena_common/msg/CarControl", _on_control)
 	_mission_info_sub = _node.create_subscription("/system/mission_status","mirena_common/msg/MissionInfo",_on_mission_info)
@@ -120,7 +147,7 @@ func _publish_car_state():
 	car_state.y = -odom_transform.origin.x
 	car_state.psi = odom_transform.basis.get_euler().y
 	
-	var local_vel = basis.inverse() * linear_velocity
+	var local_vel = _body_velocity()
 	car_state.u = -local_vel.z
 	car_state.v = -local_vel.x
 	car_state.omega = angular_velocity.y
@@ -147,6 +174,33 @@ func _publish_car_state():
 
 	_state_pub.publish(car_state)
 
+
+
+## Rear wheel speeds, the same contract mirena_can publishes from the bus.
+##
+## Rear only, because that is all the car measures: WheelInfo (0x27) carries
+## rl_rpm and rr_rpm and nothing for the front axle. The front wheels exist in
+## this scene and Godot knows their speed perfectly well, and reporting it would
+## hand the pipeline a sensor the vehicle does not have -- which is exactly the
+## kind of difference that makes something work in the sim and not on the car.
+##
+## RPM rather than m/s, matching WheelSpeeds.msg: the conversion needs a rolling
+## radius, which is a tyre property that belongs to whoever fuses the number and
+## not to the thing reporting it. Each wheel is reported on its own, so the two
+## can disagree under yaw exactly as they do on the real axle.
+##
+## NEGATED, and for the same reason everything else in this file is. Godot
+## derives wheel rotation from `up.cross(m_wheelAxleWS)`, which with its default
+## axle of (-1, 0, 0) points at +Z -- while the car's forward is -Z. So
+## get_rpm() reads negative on a car driving forwards, and handing that straight
+## to ROS would tell the pipeline the car is reversing down the track. Same
+## swizzle as car_state.u = -local_vel.z just above.
+func _publish_wheel_speeds():
+	wheel_speeds.header.stamp = _node.now()
+	wheel_speeds.header.frame_id = frame_id  # "car/cog"
+	wheel_speeds.rl = -$RL_WHEEL.get_rpm()
+	wheel_speeds.rr = -$RR_WHEEL.get_rpm()
+	_wheel_speeds_pub.publish(wheel_speeds)
 
 
 func _publish_perception():
@@ -247,19 +301,42 @@ func _process_track_rail(delta: float) -> void:
 	).orthonormalized()
 # --- Physics & Low Level Control ---
 
+## Velocity in the car's own frame. Godot's forward is -Z, so the forward speed
+## is -z and the leftward speed is -x -- the same quantities ROS calls u and v.
+## Both the drivetrain and the published state read the car's motion through
+## here so they cannot end up disagreeing about which way the car is pointing.
+func _body_velocity() -> Vector3:
+	return global_basis.inverse() * linear_velocity
+
+
 func _apply_vehicle_physics(_delta: float) -> void:
-	var u = linear_velocity.z
+	# Forward speed in the car's own frame. Reading linear_velocity.z straight
+	# off gives the *world's* z, which only means "forward speed" while the car
+	# happens to point down that axis, and carries the opposite sign besides --
+	# Godot's forward is -Z. Both mistakes together are what turned a braking
+	# command into reverse throttle: driving forward it read negative and killed
+	# the regen entirely, at a standstill it read zero and pushed the car
+	# backwards, and once rolling backwards it read positive and pushed harder.
+	var u = -_body_velocity().z
 	var max_fx_motor = MOTOR_PEAK_TRQ * GEAR_RATIO / WHEEL_RADIUS
-	var max_fx_regen = 0.5 * (1.0 + tanh(u / 0.01)) * max_fx_motor
-	
-	var fx = min(gas, 0) * max_fx_regen + max(gas, 0) * max_fx_motor
-	
+
+	# Regen can only take away speed that is there, so it scales with the speed
+	# there is to take: full strength above REGEN_FADE_SPEED, nothing at rest or
+	# already rolling backwards. This is what bounds braking at zero.
+	var throttle = max(gas, 0.0)
+	var braking = max(-gas, 0.0)
+	var regen_scale = clamp(u / REGEN_FADE_SPEED, 0.0, 1.0)
+	var fx = (throttle - braking * regen_scale) * max_fx_motor
+
 	$RL_WHEEL.engine_force = fx / 2.0
 	$RR_WHEEL.engine_force = fx / 2.0
-	
-	# Apply braking force to wheels
-	$RL_WHEEL.brake = brake
-	$RR_WHEEL.brake = brake
+
+	# Apply braking force to wheels. The friction brakes pick up exactly what
+	# regen gives up as the car slows, so a stopped car under a braking command
+	# is held there instead of left to creep or roll away down a slope.
+	var brake_force = min(brake + braking * (1.0 - regen_scale) * BRAKE_F, BRAKE_F)
+	$RL_WHEEL.brake = brake_force
+	$RR_WHEEL.brake = brake_force
 
 func _smooth_steer(current: float, target: float, delta: float, speed: float) -> float:
 	var diff = target - current

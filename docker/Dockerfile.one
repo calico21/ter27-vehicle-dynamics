@@ -98,6 +98,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update \
  && apt-get install -y --no-install-recommends \
       libopencv-dev libopenblas-dev python3-opencv \
+      # Point Cloud Library — LiDAR perception (mirena_perception_lidar)
+      libpcl-dev \
       v4l-utils libv4l-dev \
       libsocketcan-dev can-utils \
       mesa-vulkan-drivers vulkan-tools
@@ -113,6 +115,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
       ros-dev-tools \
       ros-jazzy-desktop \
       ros-jazzy-cv-bridge \
+      ros-jazzy-pcl-conversions \
       ros-jazzy-camera-info-manager \
       ros-jazzy-tf-transformations \
       ros-jazzy-ros-babel-fish \

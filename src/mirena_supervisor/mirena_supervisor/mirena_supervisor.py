@@ -52,6 +52,18 @@ HEALTH_TOPIC: str = '/health'
 # Any node of the mission setting this in its report ends the run.
 MISSION_FINISHED_KEY: str = 'mission_finished'
 
+# The run's telemetry, forwarded to the car on DV_info and read off the RES
+# display. Like MISSION_FINISHED_KEY these are keys, not nodes: whoever is best
+# placed to know a number publishes it, and the supervisor copies it across
+# without knowing which node that was. Today perception reports the cones it can
+# see, SLAM the size of the map it has built, and the controller the laps it has
+# closed, but that is their business and is not encoded here.
+TELEMETRY_KEYS: Dict[str, str] = {
+    'lap_counter': 'laps',
+    'cones_count_actual': 'cones_count_actual',
+    'cones_count_total': 'cones_count_total',
+}
+
 # A mission is in flight in these and nowhere else. INACTIVE before the first
 # run, FINISHED and FAILED after one: all three mean no pipeline is running and
 # the next mission may be started.
@@ -68,8 +80,8 @@ MISSION_LAUNCH_FILES: Dict[int, str] = {
     AsInfo.AS_MISSION_TRACKDRIVE: 'trackdrive',
     AsInfo.AS_MISSION_INSPECTION: 'inspection',
     AsInfo.AS_MISSION_AUTOCROSS: 'autocross',
-    # AS_MISSION_BRAKE_TEST has no launch file yet; selecting it fails the
-    # mission with a clear message rather than launching something wrong.
+    AsInfo.AS_MISSION_BRAKE_TEST: 'brake_test',
+    AsInfo.AS_MISSION_NONE: 'none',
 }
 
 
@@ -165,6 +177,14 @@ class MirenaSupervisor(Node):
                 self.fail_mission()
 
     def start_mission(self, mission_id: int) -> None:
+        # A terminal status is held so it can be read at the car, and the run's
+        # counters are held with it. Selecting the next mission is what clears
+        # both -- before the launch file is looked for, so that a mission that
+        # never starts cannot leave the last run's laps standing under its
+        # verdict, which would read as laps this car has not driven.
+        for field in TELEMETRY_KEYS:
+            setattr(self._mission_info, field, 0)
+
         name = MISSION_LAUNCH_FILES.get(mission_id)
         launch_file = os.path.join(self._launch_dir, f'{name}.launch.py') if name else None
         if launch_file is None or not os.path.exists(launch_file):
@@ -199,9 +219,35 @@ class MirenaSupervisor(Node):
         except json.JSONDecodeError:
             self.get_logger().warning(f"Malformed JSON report from '{msg.node_name}'.")
             return
+        self._collect_telemetry(msg.node_name, report)
+
         if report.get(MISSION_FINISHED_KEY) is True:
             self.get_logger().info(f"'{msg.node_name}' reported the run complete.")
             self.finish_mission()
+
+    def _collect_telemetry(self, node_name: str, report: Dict[str, Any]) -> None:
+        """Copy whatever of the run's telemetry this report carries.
+
+        A node that does not know a number leaves the key out and the last value
+        stands: these are counters on a display, and blanking one back to zero
+        because the node that owns it happened to beat without it would read as
+        the car having lost its map. The fields are uint32 on the wire, so a
+        value that is not a whole non-negative number is dropped with a warning
+        rather than thrown at the message and taken down with it.
+        """
+        for field, key in TELEMETRY_KEYS.items():
+            if key not in report:
+                continue
+            value = report[key]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                # Throttled: a node wrong about this is wrong on every beat, and
+                # ten lines a second of it would bury the log the run is read from.
+                self.get_logger().warning(
+                    f"'{node_name}' reported {key}={value!r}, "
+                    f"which is not a count; ignoring it.",
+                    throttle_duration_sec=5.0)
+                continue
+            setattr(self._mission_info, field, value)
 
     def monitor(self) -> None:
         self._mission_info_pub.publish(self._mission_info)

@@ -27,9 +27,10 @@ add_library(mirena_rviz2_plugins SHARED
 )
 
 # 3. CRITICAL: Tell CMake and AUTOMOC where your header files are located!
-target_include_directories(mirena_rviz2_plugins PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
+# They sit beside the sources that include them; there is no public include/
+# tree, and pointing at one that does not exist fails the install step.
+target_include_directories(mirena_rviz2_plugins PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/displays
 )
 
 # 4. Add dependencies
@@ -50,10 +51,6 @@ install(TARGETS mirena_rviz2_plugins
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
-)
-
-install(DIRECTORY include/
-  DESTINATION include
 )
 
 # Install Icons

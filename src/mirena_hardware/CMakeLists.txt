@@ -49,6 +49,7 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(mirena_common REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(camera_info_manager REQUIRED)
@@ -99,16 +100,6 @@ ament_target_dependencies(mirena_camera
   mirena_common
 )
 
-# --- GSS -------------------------------------------------------------------
-add_executable(mirena_gss
-  src/gss/gss_node.cpp
-)
-ament_target_dependencies(mirena_gss
-  rclcpp
-  sensor_msgs
-  OpenCV
-)
-
 # --- IMU (VectorNav SDK) ---------------------------------------------------
 # The SDK uses non-ISO extensions (anonymous structs, etc.). We:
 #   1. add its include dir as SYSTEM so its headers don't trip OUR warnings,
@@ -129,12 +120,12 @@ target_include_directories(mirena_imu SYSTEM PRIVATE
 )
 ament_target_dependencies(mirena_imu
   rclcpp
-  rclcpp_lifecycle
   tf2_ros
   tf2
   tf2_geometry_msgs
   sensor_msgs
   nav_msgs
+  std_srvs
   mirena_common
 )
 
@@ -156,6 +147,7 @@ target_link_libraries(mirena_transform yaml-cpp)
 # be already up, so the node only needs raw SocketCAN (kernel) -- no libsocketcan.
 add_executable(mirena_can
   src/can/mirena_can.cpp
+  src/can/can_logger.cpp
   src/can/dbc/ter.c
 )
 target_include_directories(mirena_can PRIVATE src/can/dbc)
@@ -163,6 +155,9 @@ ament_target_dependencies(mirena_can
   rclcpp
   mirena_common
 )
+# The logger writes on its own thread.
+find_package(Threads REQUIRED)
+target_link_libraries(mirena_can Threads::Threads)
 
 # ===========================================================================
 # Install
@@ -170,7 +165,6 @@ ament_target_dependencies(mirena_can
 install(TARGETS
   mirena_lidar
   mirena_camera
-  mirena_gss
   mirena_imu
   mirena_transform
   mirena_can

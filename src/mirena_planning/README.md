@@ -110,9 +110,24 @@ from the seed or from RANSAC, and the fit itself.
 | `publish_debug` | `true` | creates the debug publishers |
 | `fallback_frame` | `map` | used only if the incoming map has no `frame_id` |
 
-Unknown-track planner: `max_gate_width` (4.5), `max_gate_gap` (8.0), `turn_penalty` (1.5),
-`min_progress_cos` (0.1), `closure_radius` (8.0), `merge_radius` (0.10),
-`start_gate_radius` (10.0), `min_path_points` (15), `closure_hysteresis` (5).
+Unknown-track planner: `curvature_weight` (1.0), `lookahead` (5), `min_track_width` (2.0),
+`max_track_width` (5.0), `cone_spacing` (5.0), `max_gate_gap` (8.5),
+`start_gate_radius` (10.0), `closure_hysteresis` (5), `max_path_points` (400).
+
+`min_track_width` and `max_track_width` bound how wide an edge may be and still be driven as
+a gate. They are not symmetric in what they do.
+
+`max_track_width` is the one that discriminates. It stops the trace cutting the inside of a
+hairpin: the ground inside a doubling-back turn carries no cones, the triangulation spans it,
+and those chords are wider than the track by half again — 4.9 m to 5.2 m where an honest gate
+is 3.00 m. Raising it past about 5.5 lets them back in; lowering it starts refusing the
+diagonals that bridge an unmapped cone.
+
+`min_track_width` is a rail against degenerate edges — unmerged duplicate landmarks — and
+fires on nothing else; from 0 to 2.5 it changes no result here. **Do not set it to the rules'
+3 m.** It tests a measurement across two perceived cones, not the track, and that measurement
+reads short: the narrowest gate really driven is 2.999 m on a perfect map and 2.469 m on a
+degraded one. At 3.0 the perfect-map trace loses six of ten closures and ends up on the cones.
 
 Known-track planner: `inlier_distance` (0.6), `min_score` (0.6), `min_inliers` (5),
 `icp_iterations` (25), `ransac_iterations` (200), `max_position_drift` (5.0),

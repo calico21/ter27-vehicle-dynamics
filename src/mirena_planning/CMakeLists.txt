@@ -82,10 +82,13 @@ if(BUILD_TESTING)
     test/test_geometry.cpp
     test/test_unknown_planner.cpp
     test/test_known_planner.cpp
+    test/test_real_tracks.cpp
   )
   target_link_libraries(test_mirena_planning mirena_planning_core)
   target_compile_definitions(test_mirena_planning PRIVATE
-    MIRENA_PLANNING_RESOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/resource")
+    MIRENA_PLANNING_RESOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/resource"
+    # Layouts exported from the sim, with the centreline they were drawn around.
+    MIRENA_PLANNING_TRACK_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test/tracks")
 endif()
 
 ament_package()
