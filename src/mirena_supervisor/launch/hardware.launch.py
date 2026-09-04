@@ -103,7 +103,7 @@ def generate_launch_description():
                 # and the tail, well under it. Said explicitly because a
                 # positive z reads as "above" in every other frame in this
                 # workspace.
-                'antenna_a_offset': [-0.11, 0.0, 0.52],
+                'antenna_a_offset': [-0.413, 0.056, 0.2754],
                 'gnss_compass_baseline': [1.50, 0.0, 0.0],
                 # 1 sigma on the baseline above. This bounds the carrier-phase
                 # ambiguity search: too loose and convergence crawls, too tight
