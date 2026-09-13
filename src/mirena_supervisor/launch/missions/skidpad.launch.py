@@ -44,8 +44,8 @@ def generate_launch_description():
             # Owns /state/car and the odom->car/cog TF.
             Node(
                 package="mirena_state",
-                executable="mirena_state",
-                name="mirena_state",
+                executable="mirena_state_ekf",
+                name="mirena_state_ekf",
                 parameters=[
                     {
                         "use_sim_time": use_sim_time,

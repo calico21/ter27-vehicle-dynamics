@@ -43,8 +43,8 @@ def generate_launch_description():
             # Owns /state/car and the odom->car/cog TF.
             Node(
                 package="mirena_state",
-                executable="mirena_state",
-                name="mirena_state",
+                executable="mirena_state_ekf",
+                name="mirena_state_ekf",
                 parameters=[
                     {
                         "use_sim_time": use_sim_time,
@@ -63,6 +63,23 @@ def generate_launch_description():
                     }
                 ],
             ),
+            # FAST-LIO alternative: start this instead of mirena_state_ekf when the
+            # LiDAR odometry backend is intended to own /sensors/imu/odom. Keep
+            # them off at the same time: both publish the same topic and frame.
+            # Node(
+            #     package="mirena_state",
+            #     executable="mirena_state_fast_lio",
+            #     name="mirena_state_fast_lio",
+            #     parameters=[
+            #         {
+            #             "use_sim_time": use_sim_time,
+            #             "cloud_topic": "/sensors/lidar/points",
+            #             "imu_topic": "/sensors/imu",
+            #             "odom_topic": "/sensors/imu/odom",
+            #             "publish_rate_hz": 20.0,
+            #         }
+            #     ],
+            # ),
             # -- Perception ------------------------------------------------------
             Node(
                 package="mirena_perception",

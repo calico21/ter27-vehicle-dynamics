@@ -174,12 +174,15 @@ func _ready() -> void:
 	_node.init(name.to_snake_case(), ros_namespace.to_snake_case())
 
 	# Sensor-layer outputs only, exactly the four the driver owns. State fusion
-	# (/state/car) and health reporting are mirena_state's job, not this one's.
-	_imu_in_lidar_pub = _node.create_publisher("/sensors/lidar/imu", "sensor_msgs/msg/Imu")
-	_imu_in_cog_pub = _node.create_publisher("/sensors/imu", "sensor_msgs/msg/Imu")
-	_odom_pub = _node.create_publisher("/sensors/imu/odom", "nav_msgs/msg/Odometry")
-	_fix_pub = _node.create_publisher("/sensors/gps/fix", "sensor_msgs/msg/NavSatFix")
-
+	var qos := RosQoS.new()
+	qos.reliability = RosQoS.RELIABLE
+	qos.depth =	10
+	# Sensor-layer outputs using the RosQoS object
+	_imu_in_lidar_pub = _node.create_publisher("/sensors/lidar/imu", "sensor_msgs/msg/Imu", qos)
+	_imu_in_cog_pub = _node.create_publisher("/sensors/imu", "sensor_msgs/msg/Imu", qos)
+	_odom_pub = _node.create_publisher("/sensors/imu/odom", "nav_msgs/msg/Odometry", qos)
+	_fix_pub = _node.create_publisher("/sensors/gps/fix", "sensor_msgs/msg/NavSatFix", qos)	
+	
 	_cog_msg = RosSensorMsgsImu.new()
 	_lidar_msg = RosSensorMsgsImu.new()
 	_odom_msg = RosNavMsgsOdometry.new()
