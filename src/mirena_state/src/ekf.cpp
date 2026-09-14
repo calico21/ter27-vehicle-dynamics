@@ -138,6 +138,39 @@ Ekf::Step Ekf::update_odom(const Vec6 &z, const Vec6 &r_diag)
     symmetrize();
     return commit();
 }
+//Wheel encoder
+/*
+Step Ekf::update_velocity_u(double u_meas, double var_u)
+{
+    if (!initialized_) return Step::Ignored;
+
+    // Estado actual: x_ = [x, y, psi, u, v, omega]^T
+    // Innovación (residuo) de la velocidad longitudinal 'u'
+    double y = u_meas - x_(3);
+
+    // S = H * P * H^T + R  (donde H = [0, 0, 0, 1, 0, 0])
+    double S = P_(3, 3) + var_u;
+
+    if (S <= 0.0 || !std::isfinite(S)) {
+        return Step::Ignored;
+    }
+
+    // Ganancia de Kalman K (columna 3 de la matriz P)
+    Vec6 K = P_.col(3) / S;
+
+    // Actualización de estado y normalización de yaw
+    x_ += K * y;
+    x_(2) = wrap_angle(x_(2));
+
+    // Actualización de Covarianza: P = (I - K*H) * P
+    Mat6 I_KH = Mat6::Identity();
+    I_KH.col(3) -= K;
+    P_ = I_KH * P_;
+
+    return Step::Ok;
+}
+*/
+
 
 void Ekf::symmetrize()
 {

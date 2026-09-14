@@ -21,6 +21,7 @@
 #include <unordered_map>
 #include <tuple>
 #include <chrono>
+#include <algorithm>
 
 #include "mirena_common/msg/entity_list.hpp"
 
@@ -34,6 +35,12 @@ inline Eigen::Matrix3d Exp(const Eigen::Vector3d &v)
     double norm = v.norm();
     if (norm < 1e-7) return Eigen::Matrix3d::Identity();
     return Eigen::AngleAxisd(norm, v / norm).toRotationMatrix();
+}
+
+inline Eigen::Vector3d Log(const Eigen::Matrix3d &R)
+{
+    Eigen::AngleAxisd aa(R);
+    return aa.angle() * aa.axis();
 }
 
 inline Eigen::Matrix3d Skew(const Eigen::Vector3d &v)
@@ -92,6 +99,26 @@ struct alignas(16) State
     Eigen::Vector3d bg  = Eigen::Vector3d::Zero();
     Eigen::Vector3d ba  = Eigen::Vector3d::Zero();
     Eigen::Vector3d grav = Eigen::Vector3d(0.0, 0.0, -9.81);
+
+    // Error-state manifold boxminus operator: self (-) prior
+    Eigen::Matrix<double, 15, 1> boxMinus(const State &prior) const {
+        Eigen::Matrix<double, 15, 1> dx;
+        dx.segment<3>(0) = pos - prior.pos;
+        dx.segment<3>(3) = Log(prior.rot.transpose() * rot);
+        dx.segment<3>(6) = vel - prior.vel;
+        dx.segment<3>(9) = bg - prior.bg;
+        dx.segment<3>(12) = ba - prior.ba;
+        return dx;
+    }
+
+    // Error-state manifold boxplus operator: self (+) dx
+    void boxPlus(const Eigen::Matrix<double, 15, 1> &dx) {
+        pos += dx.segment<3>(0);
+        rot = rot * Exp(dx.segment<3>(3));
+        vel += dx.segment<3>(6);
+        bg  += dx.segment<3>(9);
+        ba  += dx.segment<3>(12);
+    }
 };
 
 class FastLioNode : public rclcpp::Node
@@ -103,8 +130,9 @@ public:
     {
         auto sensor_qos = rclcpp::QoS(rclcpp::KeepLast(10)).best_effort();
 
-        imu_sub_ = create_subscription<nav_msgs::msg::Odometry>(
-            "/sensors/imu/odom", sensor_qos,
+        // Subscribing to raw IMU measurements (angular velocity & acceleration)
+        imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
+            "/sensors/imu/data", sensor_qos,
             std::bind(&FastLioNode::imuCallback, this, std::placeholders::_1));
 
         cloud_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
@@ -123,14 +151,21 @@ public:
 
         tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
-        // 50 Hz Timer for high-frequency odometry publishing
         odom_timer_ = create_wall_timer(20ms, std::bind(&FastLioNode::timerCallback, this));
 
-        P_ = Eigen::Matrix<double, 15, 15>::Identity() * 1e-3;
+        // State covariance and process noise initialization
+        P_ = Eigen::Matrix<double, 15, 15>::Identity() * 1e-2;
+        Q_ = Eigen::Matrix<double, 15, 15>::Zero();
+        Q_.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity() * 1e-4; // Position noise
+        Q_.block<3, 3>(3, 3) = Eigen::Matrix3d::Identity() * 1e-4; // Gyro noise
+        Q_.block<3, 3>(6, 6) = Eigen::Matrix3d::Identity() * 1e-3; // Accel noise
+        Q_.block<3, 3>(9, 9) = Eigen::Matrix3d::Identity() * 1e-6; // Gyro bias drift
+        Q_.block<3, 3>(12, 12) = Eigen::Matrix3d::Identity() * 1e-6; // Accel bias drift
+
         global_map_ = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
         kdtree_map_ = pcl::make_shared<pcl::KdTreeFLANN<pcl::PointXYZ>>();
 
-        RCLCPP_INFO(get_logger(), "FAST-LIO Perception-to-Map Node initialized.");
+        RCLCPP_INFO(get_logger(), "FAST-LIO Perception Node initialized.");
     }
 
     ~FastLioNode() override
@@ -144,7 +179,7 @@ private:
         publishOdometry(this->now());
     }
 
-    void imuCallback(const nav_msgs::msg::Odometry::ConstSharedPtr msg)
+    void imuCallback(const sensor_msgs::msg::Imu::ConstSharedPtr msg)
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
         double stamp = rclcpp::Time(msg->header.stamp).seconds();
@@ -157,29 +192,35 @@ private:
         }
 
         double dt = stamp - last_imu_time_;
-        if (dt <= 0.0 || dt > 2.0) {
+        if (dt <= 0.0 || dt > 1.0) {
             last_imu_time_ = stamp;
             return;
         }
 
-        Eigen::Vector3d gyro(
-            msg->twist.twist.angular.x,
-            msg->twist.twist.angular.y,
-            msg->twist.twist.angular.z
-        );
-
-        Eigen::Vector3d body_vel(
-            msg->twist.twist.linear.x,
-            msg->twist.twist.linear.y,
-            msg->twist.twist.linear.z
-        );
+        Eigen::Vector3d gyro(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
+        Eigen::Vector3d accel(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z);
 
         Eigen::Vector3d un_gyro = gyro - state_.bg;
-        state_.rot = state_.rot * Exp(un_gyro * dt);
+        Eigen::Vector3d un_accel = accel - state_.ba;
 
-        Eigen::Vector3d world_vel = state_.rot * body_vel;
-        state_.pos += world_vel * dt;
-        state_.vel = world_vel;
+        // Discrete IMU integration
+        Eigen::Matrix3d R_prev = state_.rot;
+        Eigen::Matrix3d R_curr = R_prev * Exp(un_gyro * dt);
+
+        Eigen::Vector3d acc_w = R_prev * un_accel + state_.grav;
+        state_.pos += state_.vel * dt + 0.5 * acc_w * dt * dt;
+        state_.vel += acc_w * dt;
+        state_.rot = R_curr;
+
+        // Covariance Propagation F_x
+        Eigen::Matrix<double, 15, 15> F_x = Eigen::Matrix<double, 15, 15>::Identity();
+        F_x.block<3, 3>(0, 6) = Eigen::Matrix3d::Identity() * dt;
+        F_x.block<3, 3>(3, 3) = Exp(-un_gyro * dt);
+        F_x.block<3, 3>(3, 9) = -Eigen::Matrix3d::Identity() * dt;
+        F_x.block<3, 3>(6, 3) = -R_prev * Skew(un_accel) * dt;
+        F_x.block<3, 3>(6, 12) = -R_prev * dt;
+
+        P_ = F_x * P_ * F_x.transpose() + Q_ * dt;
 
         last_imu_time_ = stamp;
     }
@@ -197,10 +238,12 @@ private:
         auto filtered_cloud = downsampleVoxel(raw_cloud, 0.1f);
         if (filtered_cloud->empty()) return;
 
-        State current_state;
+        State state_prior;
+        Eigen::Matrix<double, 15, 15> P_prior;
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
-            current_state = state_;
+            state_prior = state_;
+            P_prior = P_;
         }
 
         pcl::PointCloud<pcl::PointXYZ>::Ptr active_map;
@@ -211,10 +254,10 @@ private:
             active_kdtree = kdtree_map_;
         }
 
-        if (active_map->points.size() < 5) {
+        if (active_map->points.size() < 10) {
             auto init_map = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
             for (const auto &pt : filtered_cloud->points) {
-                Eigen::Vector3d p_w = current_state.rot * Eigen::Vector3d(pt.x, pt.y, pt.z) + current_state.pos;
+                Eigen::Vector3d p_w = state_prior.rot * Eigen::Vector3d(pt.x, pt.y, pt.z) + state_prior.pos;
                 if (p_w.allFinite()) {
                     init_map->push_back(pcl::PointXYZ(static_cast<float>(p_w.x()), 
                                                        static_cast<float>(p_w.y()), 
@@ -222,7 +265,7 @@ private:
                 }
             }
 
-            if (init_map->points.size() >= 5) {
+            if (init_map->points.size() >= 10) {
                 auto new_tree = pcl::make_shared<pcl::KdTreeFLANN<pcl::PointXYZ>>();
                 new_tree->setInputCloud(init_map);
 
@@ -235,11 +278,13 @@ private:
             return;
         }
 
-        State state_iter = current_state;
-        constexpr int kMaxIter = 3;
-        constexpr double kMeasNoiseVar = 1e-3;
+        State state_iter = state_prior;
+        constexpr int kMaxIter = 4;
+        constexpr double kMeasNoiseVar = 1e-2;
         constexpr double kInvNoise = 1.0 / kMeasNoiseVar;
-        const Eigen::Matrix<double, 15, 15> P_inv = P_.inverse();
+        const Eigen::Matrix<double, 15, 15> P_prior_inv = P_prior.inverse();
+
+        Eigen::Matrix<double, 15, 15> Ht_Rinv_H_final = Eigen::Matrix<double, 15, 15>::Zero();
 
         for (int iter = 0; iter < kMaxIter; ++iter) {
             Eigen::Matrix<double, 15, 15> Ht_Rinv_H = Eigen::Matrix<double, 15, 15>::Zero();
@@ -260,6 +305,8 @@ private:
                 std::vector<float> k_sqr_distances(5);
 
                 if (active_kdtree->nearestKSearch(search_pt, 5, k_indices, k_sqr_distances) == 5) {
+                    if (k_sqr_distances[4] > 1.0f) continue;
+
                     Eigen::Matrix<double, 5, 3> A;
                     Eigen::Vector3d center = Eigen::Vector3d::Zero();
 
@@ -287,7 +334,7 @@ private:
                         H_i.block<1, 3>(0, 3) = -norm_vec.transpose() * state_iter.rot * Skew(p_l);
 
                         Ht_Rinv_H += kInvNoise * (H_i.transpose() * H_i);
-                        Ht_Rinv_z += kInvNoise * (H_i.transpose() * res);
+                        Ht_Rinv_z += kInvNoise * (H_i.transpose() * (-res));
                         valid_matches++;
                     }
                 }
@@ -295,27 +342,33 @@ private:
 
             if (valid_matches < 10) break;
 
-            Eigen::Matrix<double, 15, 15> A_mat = P_inv + Ht_Rinv_H;
-            Eigen::Matrix<double, 15, 1> dx = A_mat.ldlt().solve(-Ht_Rinv_z);
+            // Prior state offset check
+            Eigen::Matrix<double, 15, 1> dx_prior = state_iter.boxMinus(state_prior);
 
-            if (!dx.allFinite() || dx.norm() > 5.0) break;
+            // Corrected IEKF System update matrix
+            Eigen::Matrix<double, 15, 15> A_mat = P_prior_inv + Ht_Rinv_H;
+            Eigen::Matrix<double, 15, 1> b_vec = Ht_Rinv_z - P_prior_inv * dx_prior;
 
-            state_iter.pos += dx.segment<3>(0);
-            state_iter.rot  = state_iter.rot * Exp(dx.segment<3>(3));
-            state_iter.vel += dx.segment<3>(6);
-            state_iter.bg  += dx.segment<3>(9);
-            state_iter.ba  += dx.segment<3>(12);
+            Eigen::Matrix<double, 15, 1> dx = A_mat.ldlt().solve(b_vec);
+
+            if (!dx.allFinite() || dx.norm() > 2.0) break;
+
+            state_iter.boxPlus(dx);
+            Ht_Rinv_H_final = Ht_Rinv_H;
 
             if (dx.norm() < 1e-3) break;
         }
 
+        // Post-measurement state and covariance updates
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
             if (state_iter.pos.allFinite() && state_iter.rot.allFinite()) {
                 state_ = state_iter;
+                P_ = (P_prior_inv + Ht_Rinv_H_final).inverse();
             }
         }
 
+        // Global map building
         auto combined_map = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
         *combined_map = *active_map;
 
@@ -331,7 +384,7 @@ private:
         auto downsampled_map = downsampleVoxel(combined_map, 0.2f);
         pcl::removeNaNFromPointCloud(*downsampled_map, *downsampled_map, dummy_indices);
 
-        if (!downsampled_map->empty() && downsampled_map->points.size() >= 5) {
+        if (!downsampled_map->empty() && downsampled_map->points.size() >= 10) {
             auto new_kdtree = pcl::make_shared<pcl::KdTreeFLANN<pcl::PointXYZ>>();
             new_kdtree->setInputCloud(downsampled_map);
 
@@ -354,7 +407,7 @@ private:
             current_pos = state_.pos;
         }
 
-        constexpr double kDupRadiusSq = 0.3 * 0.3;
+        constexpr double kMaxRadiusSq = 0.5 * 0.5; // 0.5m matching radius threshold
         std::lock_guard<std::mutex> lock(cones_mutex_);
 
         for (const auto &entity : msg->entities) {
@@ -363,26 +416,41 @@ private:
 
             if (!p_world.allFinite()) continue;
 
-            bool is_duplicate = false;
-            for (auto &global_entity : global_cones_map_.entities) {
+            int best_match_idx = -1;
+            double min_dist_sq = kMaxRadiusSq;
+
+            for (size_t i = 0; i < global_cones_map_.entities.size(); ++i) {
+                auto &global_entity = global_cones_map_.entities[i];
+
+                // Ensure same class type
+                if (global_entity.type != entity.type) continue;
+
+                // 2D Distance matching check
                 double dx = global_entity.position.x - p_world.x();
                 double dy = global_entity.position.y - p_world.y();
-                double dz = global_entity.position.z - p_world.z();
+                double dist_sq = dx * dx + dy * dy;
 
-                if ((dx * dx + dy * dy + dz * dz) <= kDupRadiusSq) {
-                    global_entity.position.x = 0.8 * global_entity.position.x + 0.2 * p_world.x();
-                    global_entity.position.y = 0.8 * global_entity.position.y + 0.2 * p_world.y();
-                    global_entity.position.z = 0.8 * global_entity.position.z + 0.2 * p_world.z();
-                    is_duplicate = true;
-                    break;
+                if (dist_sq < min_dist_sq) {
+                    min_dist_sq = dist_sq;
+                    best_match_idx = static_cast<int>(i);
                 }
             }
 
-            if (!is_duplicate) {
+            if (best_match_idx >= 0) {
+                // Recursive weighted average to stabilize cone centers
+                auto &matched = global_cones_map_.entities[best_match_idx];
+                matched.confidence += 1.0;
+                double n = std::min(static_cast<double>(matched.confidence), 20.0);
+                
+                matched.position.x = ((n - 1.0) * matched.position.x + p_world.x()) / n;
+                matched.position.y = ((n - 1.0) * matched.position.y + p_world.y()) / n;
+                matched.position.z = ((n - 1.0) * matched.position.z + p_world.z()) / n;
+            } else {
                 mirena_common::msg::Entity new_cone = entity;
                 new_cone.position.x = p_world.x();
                 new_cone.position.y = p_world.y();
                 new_cone.position.z = p_world.z();
+                new_cone.confidence = 1.0;
                 global_cones_map_.entities.push_back(new_cone);
             }
         }
@@ -453,7 +521,7 @@ private:
         tf_broadcaster_->sendTransform(tf);
     }
 
-    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr imu_sub_;
+    rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_sub_;
     rclcpp::Subscription<mirena_common::msg::EntityList>::SharedPtr perception_sub_;
     
@@ -469,6 +537,7 @@ private:
     std::mutex cones_mutex_;
     State state_;
     Eigen::Matrix<double, 15, 15> P_;
+    Eigen::Matrix<double, 15, 15> Q_;
     double last_imu_time_ = -1.0;
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr global_map_;

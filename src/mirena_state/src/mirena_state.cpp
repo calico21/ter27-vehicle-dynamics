@@ -16,6 +16,7 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include "mirena_common/msg/car.hpp"
 #include "mirena_common/msg/heartbeat.hpp"
+#include "mirena_common/msg/wheel_speeds.hpp"
 
 #include "ekf.hpp"
 
@@ -133,12 +134,27 @@ class MirenaState : public rclcpp::Node
     double _odom_timeout_sec = 0.5;
     double _imu_timeout_sec = 0.2;
     double _gyro_meas_var = 0.0001;
+    //(encoder) double _encoder_timeout_sec = 0.2; 
 
+    //Wheel (encoder) (Falta rellenar con los datos)
+/*
+
+    this->declare_parameter<double>("wheel_radius", 0.202);
+    this->declare_parameter<double>("encoder_var", 0.01);
+    _wheel_radius = this->get_parameter("wheel_radius").as_double();
+    _encoder_base_var = this->get_parameter("encoder_var").as_double();
+
+    // Crear la suscripción para que empiece a recibir datos de la CAN
+    _encoder_sub = this->create_subscription<mirena_common::msg::WheelSpeeds>(
+        "/sensors/wheel_speeds", rclcpp::SensorDataQoS(),
+        std::bind(&MirenaState::encoder_callback, this, std::placeholders::_1), filter_sub_options);
+*/
 public:
     MirenaState() : rclcpp::Node("mirena_state")
     {
         this->declare_parameter<double>("odom_timeout_sec", 0.5);
         this->declare_parameter<double>("imu_timeout_sec", 0.2);
+        //(encoder) this->declare_parameter<double>("encoder_timeout_sec", 0.2);
         this->declare_parameter<double>("max_predict_dt_sec", 0.1);
         // Continuous-time process noise diagonal over [x, y, psi, u, v, omega]
         this->declare_parameter<std::vector<double>>(
@@ -169,11 +185,12 @@ public:
         // with mirena_imu's gyro_variance -- they describe the same gyro.
         this->declare_parameter<double>("gyro_meas_var", 1.0e-5);
 
+
         RCLCPP_INFO(this->get_logger(), "Starting Mirena State");
 
         _odom_timeout_sec = this->get_parameter("odom_timeout_sec").as_double();
         _imu_timeout_sec = this->get_parameter("imu_timeout_sec").as_double();
-
+        // (encoder) _encoder_timeout_sec = this->get_parameter("encoder_timeout_sec").as_double();
         _filter_cb_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
         _report_cb_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 
@@ -216,6 +233,7 @@ public:
     }
 
 private:
+
     mirena::Ekf::Vec6 param_vec6(const std::string &name)
     {
         auto v = this->get_parameter(name).as_double_array();
@@ -488,8 +506,11 @@ private:
             // which reads as a number rather than as "nothing has arrived".
             const bool have_odom = _last_odom_stamp.nanoseconds() > 0;
             const bool have_imu = _last_imu_stamp.nanoseconds() > 0;
+            // (encoder) const bool have_encoder = _last_encoder_stamp.nanoseconds() > 0; 
             const double odom_age = now_s - _last_odom_stamp.seconds();
             const double imu_age = now_s - _last_imu_stamp.seconds();
+            // (encoder) const double encoder_age = now_s - _last_encoder_stamp.seconds(); // NUEVO
+
 
             // Both inputs are checked: losing the INS leaves the filter dead
             // reckoning on the accelerometer, losing the IMU leaves it with no
@@ -497,7 +518,7 @@ private:
             // differently rather than collapsing into one "STALE".
             const bool odom_stale = !have_odom || odom_age > _odom_timeout_sec;
             const bool imu_stale = !have_imu || imu_age > _imu_timeout_sec;
-
+        //(encoder)    const bool encoder_stale = !have_encoder || encoder_age > _encoder_timeout_sec; 
             std::string mode;
             if (!_ekf->is_initialized())
                 mode = "INIT";
@@ -521,6 +542,7 @@ private:
             report_json["imu_stale"] = imu_stale;
             if (have_odom) report_json["odom_age_s"] = odom_age;
             if (have_imu) report_json["imu_age_s"] = imu_age;
+            // (encoder) if (have_encoder) report_json["encoder_age_s"] = encoder_age; 
             report_json["ekf_resets"] = _ekf->divergences();
             if (_ekf->is_initialized())
             {

@@ -95,6 +95,9 @@ public:
 
     static double wrap_angle(double a);
 
+    //Wheel encoder 
+//  Step update_velocity_u(double u_meas, double var_u);
+
 private:
     void symmetrize();
 
