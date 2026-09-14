@@ -107,10 +107,10 @@ def generate_launch_description():
               #  'gnss_compass_baseline': [120.59, 0.0, -0.7713],
                 #10º
                 # Offset de Antena A respecto al IMU
-                'antenna_a_offset': [-0.0989, 0.0717, 0.4719],
+                'antenna_a_offset': [-0.1198, 0.0717, 0.4737],
 
                 # Baseline GNSS (Vector de Antena A hacia Antena B)
-                'gnss_compass_baseline': [1.4116, 0.0000, -0.3461],
+                'gnss_compass_baseline': [1.4122, 0.0000, -0.3439],
 
                 # 30º
                 #'antenna_a_offset': [0.1095, 0.0717, 0.4701],
