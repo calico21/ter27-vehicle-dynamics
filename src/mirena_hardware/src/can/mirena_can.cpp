@@ -68,8 +68,8 @@ public:
     // is a configuration mistake rather than a reason to pick a directory on
     // the user's behalf -- a log written somewhere nobody looks is worse than
     // no log, because it is believed to exist.
-    const bool log_enabled = declare_parameter<bool>("log", false);
-    const std::string log_path = declare_parameter<std::string>("log_path", "");
+    const bool log_enabled = declare_parameter<bool>("log", true);
+    const std::string log_path = declare_parameter<std::string>("log_path", "/home/mirena/mirena_ws/src/mirena_hardware/src/can/log");
     if (log_enabled && log_path.empty()) {
       RCLCPP_ERROR(get_logger(), "log is set but log_path is empty; not recording.");
     } else if (log_enabled) {
@@ -98,8 +98,8 @@ public:
     // Sensor data, so it follows the same best-effort contract as the other
     // /sensors topics: a wheel speed that arrived late describes a speed the car
     // is no longer doing, and is better dropped than queued.
-    wheel_speeds_pub_ = create_publisher<mirena_common::msg::WheelSpeeds>(
-      "/sensors/wheel_speeds", rclcpp::SensorDataQoS());
+    wheel_speeds_pub_ = this->create_publisher<mirena_common::msg::WheelSpeeds>(
+    "/sensors/wheel_speeds", rclcpp::SensorDataQoS());
 
     // Poll the socket regularly; reads are non-blocking and drain all pending frames.
     rx_timer_ = create_wall_timer(5ms, std::bind(&MirenaCan::rx_poll, this));

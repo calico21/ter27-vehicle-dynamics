@@ -1,6 +1,7 @@
 extends VehicleBody3D
 class_name MirenaCar
 
+signal cone_hit(count: int)
 enum PilotMode { NO_PILOT, MANUAL, ROS, TRACK_RAIL }
 
 # --- Configuration ---
@@ -26,11 +27,6 @@ var path : Path3D
 # --- ROS Variables ---
 @export var frame_id: String = "car/cog"
 ## Rate the rear wheel speeds go out at, in Hz.
-##
-## Deliberately not the physics rate: physics runs at 400 Hz here, while on the
-## car these numbers arrive as the WheelInfo CAN frame and a consumer sees them
-## at whatever rate the ECU broadcasts. Publishing every physics tick would give
-## the sim a sensor four times livelier than the real one.
 @export var wheel_speed_rate: float = 100.0
 var _node: RosNode
 # Publishers
@@ -40,6 +36,7 @@ var _perception_pub: RosPublisher
 var _slam_pub: RosPublisher
 var _inferred_control_pub: RosPublisher
 var _wheel_speeds_pub: RosPublisher
+var _lap_status_pub: RosPublisher
 var _debug_tim : RosTimer
 var _wheel_speeds_tim : RosTimer
 # Subscribers
@@ -49,30 +46,38 @@ var _ros_gas: float = 0.0
 var _ros_steer: float = 0.0
 
 # --- Internal State ---
-var origin  : Transform3D = Transform3D.IDENTITY
+var origin : Transform3D = Transform3D.IDENTITY
 var gas: float = 0.0
 var _steer_smoothed: float = 0.0
 var slam_cones: Array = [] # Seen cones
+var hit_cones: Array = [] # Unique struck cones
 var _as_info : RosMirenaCommonAsInfo
 var _mission_info
+
+var initial_gate_crossings: int = 0
+var lap_start_ticks: float = 0.0
 
 @onready var car_state : RosMirenaCommonCar = RosMirenaCommonCar.new()
 @onready var wheel_speeds : RosMirenaCommonWheelSpeeds = RosMirenaCommonWheelSpeeds.new()
 
 func _ready():
+	# Enable collision contact reporting
+	contact_monitor = true
+	max_contacts_reported = 4
+	body_entered.connect(_on_body_entered)
+
 	## ROS — no namespace: all topic names below are absolute
 	_node = RosNode.new()
 	_node.init("mirena_car", "")
+	
 	## Publishers (absolute topic names from topic contract)
 	_as_info_pub          = _node.create_publisher("/as_status",        "mirena_common/msg/AsInfo")
 	_state_pub            = _node.create_publisher("/debug/state/car", "mirena_common/msg/Car")
 	_perception_pub       = _node.create_publisher("/debug/perception",  "mirena_common/msg/EntityList")
 	_slam_pub             = _node.create_publisher("/debug/slam",        "mirena_common/msg/EntityList")
 	_inferred_control_pub = _node.create_publisher("/inferred_control",  "mirena_common/msg/CarControl")
-	## Rear wheel speeds. Not a debug topic -- this is the same /sensors/*
-	## interface mirena_can serves on the car, so nothing downstream can tell
-	## which one it is talking to. Best-effort/volatile to match the
-	## SensorDataQoS the hardware node publishes with.
+	_lap_status_pub       = _node.create_publisher("/lap_status",        "mirena_common/msg/LapStatus")
+	
 	var wheel_qos := RosQoS.new()
 	wheel_qos.history = RosQoS.KEEP_LAST
 	wheel_qos.depth = 5
@@ -86,16 +91,60 @@ func _ready():
 	_as_info.status = 0
 	_mission_info = RosMirenaCommonMissionInfo.new()
 	_mission_info.status = 0
+	
 	## Publisher timers
 	_debug_tim = _node.create_timer(0.1, _debug_publish)
 	_wheel_speeds_tim = _node.create_timer(1.0 / wheel_speed_rate, _publish_wheel_speeds)
+	
 	# Subscribers
 	_control_sub = _node.create_subscription("/control", "mirena_common/msg/CarControl", _on_control)
-	_mission_info_sub = _node.create_subscription("/system/mission_status","mirena_common/msg/MissionInfo",_on_mission_info)
+	_mission_info_sub = _node.create_subscription("/system/mission_status", "mirena_common/msg/MissionInfo", _on_mission_info)
 
 	# Camera Registration
 	Sim.register_camera($TPCam)
 	Sim.register_camera($FPCam)
+
+func _on_body_entered(body: Node) -> void:
+	if body.is_in_group("Cones") and not hit_cones.has(body):
+		hit_cones.append(body)
+		cone_hit.emit(hit_cones.size())
+	elif body.is_in_group("InitialGate"):
+		initial_gate_crossings += 1
+		
+		if initial_gate_crossings == 1:
+			# First crossing: start timing
+			lap_start_ticks = Time.get_ticks_msec()
+			print("Lap started!")
+			
+		elif initial_gate_crossings >= 2:
+			# Finishing crossing: calculate lap time and publish
+			var elapsed_ms: float = Time.get_ticks_msec() - lap_start_ticks
+			var lap_time: float = elapsed_ms / 1000.0
+			var total_cones_hit: int = hit_cones.size()
+			
+			_publish_lap_status(total_cones_hit, lap_time)
+			print("Lap finished! Time: %.3f s | Cones hit: %d" % [lap_time, total_cones_hit])
+			
+			# Reset to 1 and update start ticks to time subsequent continuous laps
+			initial_gate_crossings = 1
+			lap_start_ticks = Time.get_ticks_msec()
+
+func _publish_lap_status(cones_hit: int, lap_time: float) -> void:
+	if _lap_status_pub == null:
+		return
+
+	# Dynamic instantiation avoids parser errors when GDExtension classes refresh
+	if not ClassDB.class_exists("RosMirenaCommonLapStatus"):
+		push_error("[ROS] RosMirenaCommonLapStatus class not found in ClassDB! Restart Godot from a sourced ROS workspace.")
+		return
+
+	var msg = ClassDB.instantiate("RosMirenaCommonLapStatus")
+	msg.header.stamp = _node.now()
+	msg.header.frame_id = "map"
+	msg.cones_hit = cones_hit
+	msg.lap_time = lap_time
+	
+	_lap_status_pub.publish(msg)
 
 func _on_control(msg):
 	_ros_gas = msg.gas
@@ -130,11 +179,7 @@ func _debug_publish():
 	_publish_slam()
 	_publish_control()
 	_as_info_pub.publish(_as_info)
-# ROS Publishing
 
-## Ground-truth car state (debug). The fused /state/car and the odom->car/cog
-## TF are owned by mirena_state; this topic feeds its ground_truth_passthrough
-## mode and serves as a reference to compare the EKF against.
 func _publish_car_state():
 	var now = _node.now()
 	car_state.header.stamp = now
@@ -152,56 +197,28 @@ func _publish_car_state():
 	car_state.v = -local_vel.x
 	car_state.omega = angular_velocity.y
 	
-	# 2. Covariance Setup (6x6 matrix flattened)
-	# Indices for diagonal: x=0, y=7, psi=14, u=21, v=28, omega=35
+	# 2. Covariance Setup
 	var cov = []
 	cov.resize(36)
 	for i in range(36):
-		cov[i] = 0.0 # Initialize all to zero
+		cov[i] = 0.0
 		
-	# Set Variances (Standard Deviation squared)
-	# These values represent "how much we trust the simulator"
-	cov[0]  = 0 # x variance (m^2)
-	cov[7]  = 0  # y variance (m^2)
-	cov[14] = 0 # psi variance (rad^2)
-	cov[21] = 0  # u variance (m/s^2)
-	cov[28] = 0  # v variance (m/s^2)
-	cov[35] = 0  # omega variance (rad/s^2)
+	cov[0]  = 0
+	cov[7]  = 0
+	cov[14] = 0
+	cov[21] = 0
+	cov[28] = 0
+	cov[35] = 0
 	
 	car_state.covariance = cov
-	# NOTE: the dynamic odom->car/cog TF is broadcast by mirena_state (the state
-	# estimator owns it per REP-105) — the sim must not double-publish it.
-
 	_state_pub.publish(car_state)
 
-
-
-## Rear wheel speeds, the same contract mirena_can publishes from the bus.
-##
-## Rear only, because that is all the car measures: WheelInfo (0x27) carries
-## rl_rpm and rr_rpm and nothing for the front axle. The front wheels exist in
-## this scene and Godot knows their speed perfectly well, and reporting it would
-## hand the pipeline a sensor the vehicle does not have -- which is exactly the
-## kind of difference that makes something work in the sim and not on the car.
-##
-## RPM rather than m/s, matching WheelSpeeds.msg: the conversion needs a rolling
-## radius, which is a tyre property that belongs to whoever fuses the number and
-## not to the thing reporting it. Each wheel is reported on its own, so the two
-## can disagree under yaw exactly as they do on the real axle.
-##
-## NEGATED, and for the same reason everything else in this file is. Godot
-## derives wheel rotation from `up.cross(m_wheelAxleWS)`, which with its default
-## axle of (-1, 0, 0) points at +Z -- while the car's forward is -Z. So
-## get_rpm() reads negative on a car driving forwards, and handing that straight
-## to ROS would tell the pipeline the car is reversing down the track. Same
-## swizzle as car_state.u = -local_vel.z just above.
 func _publish_wheel_speeds():
 	wheel_speeds.header.stamp = _node.now()
 	wheel_speeds.header.frame_id = frame_id  # "car/cog"
 	wheel_speeds.rl = -$RL_WHEEL.get_rpm()
 	wheel_speeds.rr = -$RR_WHEEL.get_rpm()
 	_wheel_speeds_pub.publish(wheel_speeds)
-
 
 func _publish_perception():
 	var cones = get_cones_in_sight(12.0)
@@ -219,8 +236,7 @@ func _publish_slam():
 	msg.header.stamp = _node.now()
 	msg.header.frame_id = "map"
 	slam_cones = slam_cones.filter(func(c): return is_instance_valid(c))
-	# Use Identity transform for global positions
-	msg.entities = slam_cones.map(func(c): return _to_ent(c,true))
+	msg.entities = slam_cones.map(func(c): return _to_ent(c, true))
 	_slam_pub.publish(msg)
 
 func _publish_control():
@@ -233,9 +249,9 @@ func _publish_control():
 	_inferred_control_pub.publish(msg)
 
 # Conversion helper
-func _to_ent(cone: Node3D, global : bool = false  ) -> RosMirenaCommonEntity:
+func _to_ent(cone: Node3D, global : bool = false) -> RosMirenaCommonEntity:
 	var ent = RosMirenaCommonEntity.new()
-	var pos =  cone.global_position if global else to_local(cone.global_position)
+	var pos = cone.global_position if global else to_local(cone.global_position)
 	ent.type = cone.get_type_as_string()
 	
 	# ROS Swizzle: Forward=Z, Left=-X, Up=Y
@@ -244,14 +260,12 @@ func _to_ent(cone: Node3D, global : bool = false  ) -> RosMirenaCommonEntity:
 	ent.position.z = pos.y
 	return ent
 
-
 # --- Pilot Logic ---
 
 func _process_no_pilot() -> void:
-	# Zero out all inputs to ensure the car stays stationary or coasts to a stop
 	self.gas = 0.0
 	self.steering = 0.0
-	self.brake = BRAKE_F # Keep brakes engaged in No Pilot mode
+	self.brake = BRAKE_F
 
 func _process_manual_pilot(delta: float) -> void:
 	var steer_input = Input.get_action_strength("manual_steer_l") - Input.get_action_strength("manual_steer_r")
@@ -264,65 +278,40 @@ func _process_manual_pilot(delta: float) -> void:
 func _process_ros_pilot() -> void:
 	self.gas = _ros_gas
 	self.steering = _ros_steer 
-	self.brake = 0.0 # Brakes handled by ROS if needed
+	self.brake = 0.0
 
 func _process_track_rail(delta: float) -> void:
 	if not path or not path.curve: 
 		return
 
-	# 1. Advance progress (meters)
 	_rail_progress += rail_speed * delta
-	
-	# 2. Sample the curve math directly (No PathFollow node needed!)
-	# This gives us the local Transform3D (position + orientation)
 	var local_transform = path.curve.sample_baked_with_rotation(_rail_progress, true)
-	
-	# 3. Convert to Global Space
-	# We multiply by the path's transform so the car follows the path where it sits in the world
 	var target_global_transform = path.global_transform * local_transform
 	
-	# 4. Movement (Your move_and_collide approach)
 	var motion = target_global_transform.origin - global_position
 	var collision = move_and_collide(motion)
 	if collision:
 		var remainder = collision.get_remainder().slide(collision.get_normal())
 		move_and_collide(remainder)
 
-	# 5. Look-Ahead Orientation
 	var look_ahead_p = _rail_progress + rail_look_ahead
 	var look_target_local = path.curve.sample_baked_with_rotation(look_ahead_p, true)
 	var look_target_global = path.global_transform * look_target_local
 	
-	
-	# Smoothly rotate the car to face the look-ahead point
 	global_transform.basis = global_transform.basis.slerp(
-		look_target_global.basis .orthonormalized(), 
+		look_target_global.basis.orthonormalized(), 
 		5.0 * delta
 	).orthonormalized()
+
 # --- Physics & Low Level Control ---
 
-## Velocity in the car's own frame. Godot's forward is -Z, so the forward speed
-## is -z and the leftward speed is -x -- the same quantities ROS calls u and v.
-## Both the drivetrain and the published state read the car's motion through
-## here so they cannot end up disagreeing about which way the car is pointing.
 func _body_velocity() -> Vector3:
 	return global_basis.inverse() * linear_velocity
 
-
 func _apply_vehicle_physics(_delta: float) -> void:
-	# Forward speed in the car's own frame. Reading linear_velocity.z straight
-	# off gives the *world's* z, which only means "forward speed" while the car
-	# happens to point down that axis, and carries the opposite sign besides --
-	# Godot's forward is -Z. Both mistakes together are what turned a braking
-	# command into reverse throttle: driving forward it read negative and killed
-	# the regen entirely, at a standstill it read zero and pushed the car
-	# backwards, and once rolling backwards it read positive and pushed harder.
 	var u = -_body_velocity().z
 	var max_fx_motor = MOTOR_PEAK_TRQ * GEAR_RATIO / WHEEL_RADIUS
 
-	# Regen can only take away speed that is there, so it scales with the speed
-	# there is to take: full strength above REGEN_FADE_SPEED, nothing at rest or
-	# already rolling backwards. This is what bounds braking at zero.
 	var throttle = max(gas, 0.0)
 	var braking = max(-gas, 0.0)
 	var regen_scale = clamp(u / REGEN_FADE_SPEED, 0.0, 1.0)
@@ -331,9 +320,6 @@ func _apply_vehicle_physics(_delta: float) -> void:
 	$RL_WHEEL.engine_force = fx / 2.0
 	$RR_WHEEL.engine_force = fx / 2.0
 
-	# Apply braking force to wheels. The friction brakes pick up exactly what
-	# regen gives up as the car slows, so a stopped car under a braking command
-	# is held there instead of left to creep or roll away down a slope.
 	var brake_force = min(brake + braking * (1.0 - regen_scale) * BRAKE_F, BRAKE_F)
 	$RL_WHEEL.brake = brake_force
 	$RR_WHEEL.brake = brake_force
@@ -358,12 +344,17 @@ func set_origin(transform, reset_vel: bool = false) -> void:
 
 func reset_position() -> void:
 	set_origin(Sim.track.origin, true)
-	self.gas = 0;
-	self.steering = 0;
-	self.brake = 0;
+	self.gas = 0
+	self.steering = 0
+	self.brake = 0
 	_rail_progress = 0
-	# Reset slam
 	slam_cones.clear()
+	
+	# Reset gate crossing and cone timing tracking state
+	hit_cones.clear()
+	initial_gate_crossings = 0
+	lap_start_ticks = 0.0
+	cone_hit.emit(0)
 
 func cone_collision_set(enable: bool) -> void:
 	self.collision_layer = (self.collision_layer & ~2) | (2 * int(enable))

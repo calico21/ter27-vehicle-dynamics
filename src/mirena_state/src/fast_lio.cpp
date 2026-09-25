@@ -1,556 +1,556 @@
-#include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/imu.hpp>
-#include <sensor_msgs/msg/point_cloud2.hpp>
-#include <nav_msgs/msg/odometry.hpp>
-#include <geometry_msgs/msg/transform_stamped.hpp>
-#include <tf2_ros/transform_broadcaster.h>
+ 
 
-#include <Eigen/Dense>
-#include <Eigen/Geometry>
+// #include <rclcpp/rclcpp.hpp>
+// #include <chrono>
+// #include <mutex>
+// #include <shared_mutex>
+// #include <vector>
+// #include <deque>
+// #include <unordered_map>
+// #include <cmath>
+// #include <algorithm>
+// #include <memory>
+// #include <stdexcept>
+// #include <omp.h>
 
-#include <pcl/point_cloud.h>
-#include <pcl/point_types.h>
-#include <pcl/kdtree/kdtree_flann.h>
-#include <pcl/filters/filter.h>
-#include <pcl_conversions/pcl_conversions.h>
+// // Transforms
+// #include <tf2_ros/transform_broadcaster.h>
+// #include <geometry_msgs/msg/transform_stamped.hpp>
+// #include <tf2/LinearMath/Quaternion.h>
 
-#include <mutex>
-#include <vector>
-#include <cmath>
-#include <memory>
-#include <unordered_map>
-#include <tuple>
-#include <chrono>
-#include <algorithm>
+// // JSON library for heartbeat monitoring
+// #include <nlohmann/json.hpp>
+// #include <Eigen/Dense>
 
-#include "mirena_common/msg/entity_list.hpp"
+// // Interfaces
+// #include <sensor_msgs/msg/imu.hpp>
+// #include <sensor_msgs/msg/point_cloud2.hpp>
+// #include <sensor_msgs/point_cloud2_iterator.hpp>
+// #include "mirena_common/msg/car.hpp"
+// #include "mirena_common/msg/heartbeat.hpp"
 
-using namespace std::chrono_literals;
+// #include "ekf.hpp"
 
-namespace fast_lio
-{
+// #pragma omp declare reduction(+: Eigen::Matrix3d: omp_out += omp_in) initializer(omp_priv = Eigen::Matrix3d::Zero())
+// #pragma omp declare reduction(+: Eigen::Vector3d: omp_out += omp_in) initializer(omp_priv = Eigen::Vector3d::Zero())
 
-inline Eigen::Matrix3d Exp(const Eigen::Vector3d &v)
-{
-    double norm = v.norm();
-    if (norm < 1e-7) return Eigen::Matrix3d::Identity();
-    return Eigen::AngleAxisd(norm, v / norm).toRotationMatrix();
-}
+// #define IMU_TOPIC "/sensors/imu"
+// #define LIDAR_TOPIC "/sensors/lidar/points"
+// #define CAR_STATE_TOPIC "/state/car"
+// #define MAP_TOPIC "/state/map"
 
-inline Eigen::Vector3d Log(const Eigen::Matrix3d &R)
-{
-    Eigen::AngleAxisd aa(R);
-    return aa.angle() * aa.axis();
-}
+// using namespace std::chrono_literals;
 
-inline Eigen::Matrix3d Skew(const Eigen::Vector3d &v)
-{
-    Eigen::Matrix3d m;
-    m <<     0, -v.z(),  v.y(),
-         v.z(),      0, -v.x(),
-        -v.y(),  v.x(),      0;
-    return m;
-}
+// namespace
+// {
+//     constexpr const char *kOdomFrame = "odom";
+//     constexpr const char *kBaseFrame = "car/cog";
+//     constexpr auto kPublishPeriod = 10ms; // 100 Hz state & TF
+//     constexpr auto kReportPeriod = 100ms;  // 10 Hz heartbeat
 
-inline pcl::PointCloud<pcl::PointXYZ>::Ptr downsampleVoxel(
-    const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud, float leaf_size)
-{
-    auto output_cloud = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
-    if (!input_cloud || input_cloud->empty()) return output_cloud;
+//     constexpr double kInitPoseVar = 0.0;
+//     constexpr double kZuptVelVar = 0.0025;   // (0.05 m/s)^2
+//     constexpr double kUnknownVelVar = 25.0;  // (5 m/s)^2
+//     constexpr double kStationaryAccel = 0.5; // m/s^2
+//     constexpr double kStationaryRate = 0.05; // rad/s
+// }
 
-    struct VoxelHash {
-        std::size_t operator()(const std::tuple<int, int, int> &k) const {
-            auto [x, y, z] = k;
-            return (std::hash<int>()(x) ^ (std::hash<int>()(y) << 1)) ^ (std::hash<int>()(z) << 2);
-        }
-    };
+// // Voxels structure for spatial point indexing
+// struct VoxelKey {
+//     int64_t x, y, z;
+//     bool operator==(const VoxelKey& o) const { return x == o.x && y == o.y && z == o.z; }
+// };
 
-    std::unordered_map<std::tuple<int, int, int>, pcl::PointXYZ, VoxelHash> grid;
-    float inv_leaf = 1.0f / leaf_size;
+// struct VoxelKeyHash {
+//     std::size_t operator()(const VoxelKey& k) const {
+//         return ((std::hash<int64_t>()(k.x) ^ (std::hash<int64_t>()(k.y) << 1)) >> 1) ^ (std::hash<int64_t>()(k.z) << 1);
+//     }
+// };
 
-    for (const auto &pt : input_cloud->points) {
-        if (!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z)) continue;
+// class IVoxMap {
+// public:
+//     explicit IVoxMap(double voxel_size = 0.4) : voxel_size_(voxel_size) {}
+
+//     VoxelKey pointToKey(const Eigen::Vector3d& pt) const {
+//         return {
+//             static_cast<int64_t>(std::floor(pt.x() / voxel_size_)),
+//             static_cast<int64_t>(std::floor(pt.y() / voxel_size_)),
+//             static_cast<int64_t>(std::floor(pt.z() / voxel_size_))
+//         };
+//     }
+
+//     void insertPoint(const Eigen::Vector3d& pt) {
+//         VoxelKey key = pointToKey(pt);
+//         voxels_[key].push_back(pt);
+//         if (voxels_[key].size() > max_points_per_voxel_) {
+//             voxels_[key].pop_front();
+//         }
+//     }
+
+//     bool getFiveNN(const Eigen::Vector3d& pt, std::vector<Eigen::Vector3d>& neighbors) const {
+//         neighbors.clear();
+//         VoxelKey center_key = pointToKey(pt);
+//         std::vector<std::pair<double, Eigen::Vector3d>> candidates;
+//         candidates.reserve(27 * max_points_per_voxel_);
+
+//         for (int dx = -1; dx <= 1; ++dx) {
+//             for (int dy = -1; dy <= 1; ++dy) {
+//                 for (int dz = -1; dz <= 1; ++dz) {
+//                     VoxelKey key{center_key.x + dx, center_key.y + dy, center_key.z + dz};
+//                     auto it = voxels_.find(key);
+//                     if (it != voxels_.end()) {
+//                         for (const auto& p : it->second) {
+//                             candidates.push_back({(p - pt).squaredNorm(), p});
+//                         }
+//                     }
+//                 }
+//             }
+//         }
+
+//         if (candidates.size() < 5) return false;
+
+//         std::partial_sort(candidates.begin(), candidates.begin() + 5, candidates.end(),
+//             [](const auto& a, const auto& b) { return a.first < b.first; });
+
+//         for (size_t i = 0; i < 5; ++i) {
+//             neighbors.push_back(candidates[i].second);
+//         }
+//         return true;
+//     }
+
+//     std::vector<Eigen::Vector3d> getAllPoints() const {
+//         std::vector<Eigen::Vector3d> points;
+//         for (const auto& [key, voxel_points] : voxels_) {
+//             points.insert(points.end(), voxel_points.begin(), voxel_points.end());
+//         }
+//         return points;
+//     }
+
+// private:
+//     double voxel_size_;
+//     size_t max_points_per_voxel_ = 10;
+//     std::unordered_map<VoxelKey, std::deque<Eigen::Vector3d>, VoxelKeyHash> voxels_;
+// };
+
+// /**
+//  * FastLIOState — High-rate state estimator fusing IMU predictions with 
+//  * LiDAR point-cloud relative motion for body-frame velocity updates.
+//  */
+// class FastLIOState : public rclcpp::Node
+// {
+//     // Thread safety & callback groups
+//     rclcpp::CallbackGroup::SharedPtr _filter_cb_group;
+//     rclcpp::CallbackGroup::SharedPtr _report_cb_group;
+
+//     // Subscriptions
+//     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr _imu_sub;
+//     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr _cloud_sub;
+
+//     // Publishers
+//     rclcpp::Publisher<mirena_common::msg::Car>::SharedPtr _car_pub;
+//     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr _map_pub;
+//     rclcpp::Publisher<mirena_common::msg::Heartbeat>::SharedPtr _report_pub;
+
+//     // Broadcaster
+//     std::unique_ptr<tf2_ros::TransformBroadcaster> _tf_broadcaster;
+
+//     // Timers
+//     rclcpp::TimerBase::SharedPtr _publish_timer;
+//     rclcpp::TimerBase::SharedPtr _report_timer;
+
+//     // Core Filter & Synchronizations
+//     std::mutex _filter_mutex;
+//     std::shared_mutex _map_mutex;
+//     std::unique_ptr<mirena::Ekf> _ekf;
+//     IVoxMap _ivox_map{0.4};
+
+//     rclcpp::Time _last_imu_stamp{0, 0, RCL_ROS_TIME};
+//     rclcpp::Time _last_lidar_stamp{0, 0, RCL_ROS_TIME};
+//     double _last_published_stamp = 0.0;
+
+//     // Anchor frame transformation (LIO -> ODOM)
+//     bool _ins_anchored = false;
+//     double _anchor_tx = 0.0, _anchor_ty = 0.0, _anchor_dpsi = 0.0;
+
+//     // Timeout Parameters
+//     double _lidar_timeout_sec = 0.5;
+//     double _imu_timeout_sec = 0.2;
+//     double _gyro_meas_var = 1.0e-5;
+
+// public:
+//     FastLIOState() : rclcpp::Node("fast_lio_state")
+//     {
+//         this->declare_parameter<double>("lidar_timeout_sec", 0.5);
+//         this->declare_parameter<double>("imu_timeout_sec", 0.2);
+//         this->declare_parameter<double>("max_predict_dt_sec", 0.1);
+//         this->declare_parameter<std::vector<double>>(
+//             "process_noise_diag", {0.01, 0.01, 0.005, 0.5, 0.5, 0.5});
+//         this->declare_parameter<std::vector<double>>(
+//             "odom_meas_floor_diag", {1e-9, 1e-9, 1e-9, 1e-9, 1e-9, 1e-9});
+//         this->declare_parameter<std::vector<double>>(
+//             "init_cov_floor_diag", {0.01, 0.01, 0.001, 0.01, 0.01, 0.001});
+//         this->declare_parameter<double>("gyro_meas_var", 1.0e-5);
+
+//         RCLCPP_INFO(this->get_logger(), "Starting Robust FastLIO State Estimator");
+
+//         _lidar_timeout_sec = this->get_parameter("lidar_timeout_sec").as_double();
+//         _imu_timeout_sec = this->get_parameter("imu_timeout_sec").as_double();
+//         _gyro_meas_var = this->get_parameter("gyro_meas_var").as_double();
+
+//         _filter_cb_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+//         _report_cb_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+
+//         auto filter_sub_opts = rclcpp::SubscriptionOptions();
+//         filter_sub_opts.callback_group = _filter_cb_group;
+
+//         // Publishers & TF
+//         _car_pub = this->create_publisher<mirena_common::msg::Car>(CAR_STATE_TOPIC, 10);
+//         _map_pub = this->create_publisher<sensor_msgs::msg::PointCloud2>(MAP_TOPIC, 10);
+//         _report_pub = this->create_publisher<mirena_common::msg::Heartbeat>("health", 10);
+//         _tf_broadcaster = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
+
+//         mirena::Ekf::Config cfg;
+//         cfg.process_noise_diag = param_vec6("process_noise_diag");
+//         cfg.odom_meas_floor_diag = param_vec6("odom_meas_floor_diag");
+//         cfg.init_cov_floor_diag = param_vec6("init_cov_floor_diag");
+//         cfg.gyro_meas_var = _gyro_meas_var;
+//         cfg.max_dt = this->get_parameter("max_predict_dt_sec").as_double();
+//         _ekf = std::make_unique<mirena::Ekf>(cfg);
+
+//         // Hardware Subscriptions using SensorDataQoS (Best Effort)
+//         _imu_sub = this->create_subscription<sensor_msgs::msg::Imu>(
+//             IMU_TOPIC, rclcpp::SensorDataQoS(),
+//             std::bind(&FastLIOState::imu_callback, this, std::placeholders::_1), filter_sub_opts);
+
+//         _cloud_sub = this->create_subscription<sensor_msgs::msg::PointCloud2>(
+//             LIDAR_TOPIC, rclcpp::SensorDataQoS(),
+//             std::bind(&FastLIOState::pointcloud_callback, this, std::placeholders::_1), filter_sub_opts);
+
+//         // Node-clock aligned Timers
+//         _publish_timer = rclcpp::create_timer(
+//             this, this->get_clock(), kPublishPeriod,
+//             std::bind(&FastLIOState::publish_timer_callback, this), _filter_cb_group);
+//         _report_timer = rclcpp::create_timer(
+//             this, this->get_clock(), kReportPeriod,
+//             std::bind(&FastLIOState::report_callback, this), _report_cb_group);
+//     }
+
+// private:
+//     mirena::Ekf::Vec6 param_vec6(const std::string &name)
+//     {
+//         auto v = this->get_parameter(name).as_double_array();
+//         if (v.size() != 6) {
+//             RCLCPP_FATAL(this->get_logger(), "Parameter %s must have 6 elements, got %zu.", name.c_str(), v.size());
+//             throw std::runtime_error("invalid " + name);
+//         }
+//         return mirena::Ekf::Vec6(v.data());
+//     }
+
+//     void log_step(mirena::Ekf::Step step, const char *what)
+//     {
+//         using Step = mirena::Ekf::Step;
+//         if (step == Step::Diverged) {
+//             RCLCPP_ERROR(this->get_logger(), "EKF diverged on %s — filter reset.", what);
+//         } else if (step == Step::Ignored) {
+//             RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+//                                  "EKF ignored %s: non-finite values or stamp anomaly.", what);
+//         }
+//     }
+
+//     void init_at_origin(const sensor_msgs::msg::Imu &msg)
+//     {
+//         const double accel = std::hypot(msg.linear_acceleration.x, msg.linear_acceleration.y);
+//         const double rate = std::abs(msg.angular_velocity.z);
+//         const bool stationary = accel < kStationaryAccel && rate < kStationaryRate;
+//         const double vel_var = stationary ? kZuptVelVar : kUnknownVelVar;
+
+//         mirena::Ekf::Vec6 r;
+//         r << kInitPoseVar, kInitPoseVar, kInitPoseVar, vel_var, vel_var, _gyro_meas_var;
+
+//         const double t = rclcpp::Time(msg.header.stamp).seconds();
+//         if (_ekf->init(mirena::Ekf::Vec6::Zero(), r, t) != mirena::Ekf::Step::Ok) {
+//             log_step(mirena::Ekf::Step::Ignored, "origin initialization");
+//             return;
+//         }
+//         RCLCPP_INFO(this->get_logger(), "odom origin defined at initial pose; dead reckoning started.");
+//     }
+
+//     void imu_callback(const sensor_msgs::msg::Imu::ConstSharedPtr &msg)
+//     {
+//         std::lock_guard<std::mutex> lock(_filter_mutex);
+//         _last_imu_stamp = msg->header.stamp;
+
+//         if (!_ekf->is_initialized()) {
+//             if (!_ins_anchored) init_at_origin(*msg);
+//             return;
+//         }
+
+//         const double t = rclcpp::Time(msg->header.stamp).seconds();
+//         log_step(_ekf->predict(t, msg->linear_acceleration.x, msg->linear_acceleration.y), "IMU predict");
+//         if (!_ekf->is_initialized()) return;
+//         log_step(_ekf->update_gyro(msg->angular_velocity.z), "gyro update");
+//     }
+
+//     void latch_anchor(double lio_x, double lio_y, double lio_psi)
+//     {
+//         const auto &x = _ekf->state();
+//         _anchor_dpsi = mirena::Ekf::wrap_angle(x(2) - lio_psi);
+//         const double c = std::cos(_anchor_dpsi), s = std::sin(_anchor_dpsi);
+//         _anchor_tx = x(0) - (c * lio_x - s * lio_y);
+//         _anchor_ty = x(1) - (s * lio_x + c * lio_y);
+//         _ins_anchored = true;
+
+//         RCLCPP_INFO(this->get_logger(), "LIO frame anchored into odom. Offset: (%.2f, %.2f) m", _anchor_tx, _anchor_ty);
+//     }
+
+//     void ins_to_odom(double ix, double iy, double ipsi, double &ox, double &oy, double &opsi) const
+//     {
+//         const double c = std::cos(_anchor_dpsi), s = std::sin(_anchor_dpsi);
+//         ox = c * ix - s * iy + _anchor_tx;
+//         oy = s * ix + c * iy + _anchor_ty;
+//         opsi = mirena::Ekf::wrap_angle(ipsi + _anchor_dpsi);
+//     }
+
+//     void pointcloud_callback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg)
+//     {
+//         if (!msg || msg->data.empty()) return;
+
+//         double current_t = rclcpp::Time(msg->header.stamp).seconds();
+//         Eigen::Vector3d current_pos;
+//         double current_yaw = 0.0;
+//         double dt = 0.0;
+
+//         {
+//             std::lock_guard<std::mutex> lock(_filter_mutex);
+//             _last_lidar_stamp = msg->header.stamp;
+
+//             if (!_ekf->is_initialized()) return;
+
+//             const auto& state = _ekf->state();
+//             current_pos = Eigen::Vector3d(state(0), state(1), 0.0);
+//             current_yaw = state(2);
+
+//             dt = current_t - _ekf->stamp();
+//         }
+
+//         // Downsample Cloud
+//         sensor_msgs::PointCloud2ConstIterator<float> iter_x(*msg, "x");
+//         sensor_msgs::PointCloud2ConstIterator<float> iter_y(*msg, "y");
+//         sensor_msgs::PointCloud2ConstIterator<float> iter_z(*msg, "z");
+
+//         std::vector<Eigen::Vector3d> local_pts;
+//         local_pts.reserve((msg->width * msg->height) / 5);
+//         int counter = 0;
+//         for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z) {
+//             if (++counter % 5 != 0) continue;
+//             if (std::isfinite(*iter_x) && std::isfinite(*iter_y) && std::isfinite(*iter_z)) {
+//                 local_pts.emplace_back(*iter_x, *iter_y, *iter_z);
+//             }
+//         }
+
+//         if (local_pts.empty()) return;
+
+//         Eigen::Matrix3d R_curr = Eigen::AngleAxisd(current_yaw, Eigen::Vector3d::UnitZ()).toRotationMatrix();
+//         std::vector<Eigen::Vector3d> world_pts(local_pts.size());
         
-        auto key = std::make_tuple(
-            static_cast<int>(std::floor(pt.x * inv_leaf)),
-            static_cast<int>(std::floor(pt.y * inv_leaf)),
-            static_cast<int>(std::floor(pt.z * inv_leaf))
-        );
-        grid.emplace(key, pt);
-    }
-
-    output_cloud->points.reserve(grid.size());
-    for (const auto &[key, pt] : grid) {
-        output_cloud->points.push_back(pt);
-    }
-    output_cloud->width = static_cast<uint32_t>(output_cloud->points.size());
-    output_cloud->height = 1;
-    output_cloud->is_dense = true;
-
-    return output_cloud;
-}
-
-struct alignas(16) State
-{
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-    Eigen::Vector3d pos = Eigen::Vector3d::Zero();
-    Eigen::Matrix3d rot = Eigen::Matrix3d::Identity();
-    Eigen::Vector3d vel = Eigen::Vector3d::Zero();
-    Eigen::Vector3d bg  = Eigen::Vector3d::Zero();
-    Eigen::Vector3d ba  = Eigen::Vector3d::Zero();
-    Eigen::Vector3d grav = Eigen::Vector3d(0.0, 0.0, -9.81);
-
-    // Error-state manifold boxminus operator: self (-) prior
-    Eigen::Matrix<double, 15, 1> boxMinus(const State &prior) const {
-        Eigen::Matrix<double, 15, 1> dx;
-        dx.segment<3>(0) = pos - prior.pos;
-        dx.segment<3>(3) = Log(prior.rot.transpose() * rot);
-        dx.segment<3>(6) = vel - prior.vel;
-        dx.segment<3>(9) = bg - prior.bg;
-        dx.segment<3>(12) = ba - prior.ba;
-        return dx;
-    }
-
-    // Error-state manifold boxplus operator: self (+) dx
-    void boxPlus(const Eigen::Matrix<double, 15, 1> &dx) {
-        pos += dx.segment<3>(0);
-        rot = rot * Exp(dx.segment<3>(3));
-        vel += dx.segment<3>(6);
-        bg  += dx.segment<3>(9);
-        ba  += dx.segment<3>(12);
-    }
-};
-
-class FastLioNode : public rclcpp::Node
-{
-public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-
-    FastLioNode() : Node("fast_lio_node")
-    {
-        auto sensor_qos = rclcpp::QoS(rclcpp::KeepLast(10)).best_effort();
-
-        // Subscribing to raw IMU measurements (angular velocity & acceleration)
-        imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
-            "/sensors/imu/data", sensor_qos,
-            std::bind(&FastLioNode::imuCallback, this, std::placeholders::_1));
-
-        cloud_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
-            "/sensors/lidar/points", sensor_qos,
-            std::bind(&FastLioNode::cloudCallback, this, std::placeholders::_1));
-
-        perception_sub_ = create_subscription<mirena_common::msg::EntityList>(
-            "/perception/cones", 10,
-            std::bind(&FastLioNode::perceptionCallback, this, std::placeholders::_1));
-
-        odom_pub_ = create_publisher<nav_msgs::msg::Odometry>("/state/fast_lio/odometry", 10);
-        
-        auto map_qos = rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable();
-        map_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>("/state/fast_lio/global_map", map_qos);
-        global_cones_pub_ = create_publisher<mirena_common::msg::EntityList>("/state/fast_lio/global_cones", map_qos);
-
-        tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
-
-        odom_timer_ = create_wall_timer(20ms, std::bind(&FastLioNode::timerCallback, this));
-
-        // State covariance and process noise initialization
-        P_ = Eigen::Matrix<double, 15, 15>::Identity() * 1e-2;
-        Q_ = Eigen::Matrix<double, 15, 15>::Zero();
-        Q_.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity() * 1e-4; // Position noise
-        Q_.block<3, 3>(3, 3) = Eigen::Matrix3d::Identity() * 1e-4; // Gyro noise
-        Q_.block<3, 3>(6, 6) = Eigen::Matrix3d::Identity() * 1e-3; // Accel noise
-        Q_.block<3, 3>(9, 9) = Eigen::Matrix3d::Identity() * 1e-6; // Gyro bias drift
-        Q_.block<3, 3>(12, 12) = Eigen::Matrix3d::Identity() * 1e-6; // Accel bias drift
-
-        global_map_ = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
-        kdtree_map_ = pcl::make_shared<pcl::KdTreeFLANN<pcl::PointXYZ>>();
-
-        RCLCPP_INFO(get_logger(), "FAST-LIO Perception Node initialized.");
-    }
-
-    ~FastLioNode() override
-    {
-        tf_broadcaster_.reset();
-    }
-
-private:
-    void timerCallback()
-    {
-        publishOdometry(this->now());
-    }
-
-    void imuCallback(const sensor_msgs::msg::Imu::ConstSharedPtr msg)
-    {
-        std::lock_guard<std::mutex> lock(state_mutex_);
-        double stamp = rclcpp::Time(msg->header.stamp).seconds();
-
-        if (stamp <= 0.0) return;
-
-        if (last_imu_time_ < 0.0) {
-            last_imu_time_ = stamp;
-            return;
-        }
-
-        double dt = stamp - last_imu_time_;
-        if (dt <= 0.0 || dt > 1.0) {
-            last_imu_time_ = stamp;
-            return;
-        }
-
-        Eigen::Vector3d gyro(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
-        Eigen::Vector3d accel(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z);
-
-        Eigen::Vector3d un_gyro = gyro - state_.bg;
-        Eigen::Vector3d un_accel = accel - state_.ba;
-
-        // Discrete IMU integration
-        Eigen::Matrix3d R_prev = state_.rot;
-        Eigen::Matrix3d R_curr = R_prev * Exp(un_gyro * dt);
-
-        Eigen::Vector3d acc_w = R_prev * un_accel + state_.grav;
-        state_.pos += state_.vel * dt + 0.5 * acc_w * dt * dt;
-        state_.vel += acc_w * dt;
-        state_.rot = R_curr;
-
-        // Covariance Propagation F_x
-        Eigen::Matrix<double, 15, 15> F_x = Eigen::Matrix<double, 15, 15>::Identity();
-        F_x.block<3, 3>(0, 6) = Eigen::Matrix3d::Identity() * dt;
-        F_x.block<3, 3>(3, 3) = Exp(-un_gyro * dt);
-        F_x.block<3, 3>(3, 9) = -Eigen::Matrix3d::Identity() * dt;
-        F_x.block<3, 3>(6, 3) = -R_prev * Skew(un_accel) * dt;
-        F_x.block<3, 3>(6, 12) = -R_prev * dt;
-
-        P_ = F_x * P_ * F_x.transpose() + Q_ * dt;
-
-        last_imu_time_ = stamp;
-    }
-
-    void cloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
-    {
-        auto raw_cloud = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
-        pcl::fromROSMsg(*msg, *raw_cloud);
-
-        std::vector<int> dummy_indices;
-        pcl::removeNaNFromPointCloud(*raw_cloud, *raw_cloud, dummy_indices);
-
-        if (raw_cloud->empty()) return;
-
-        auto filtered_cloud = downsampleVoxel(raw_cloud, 0.1f);
-        if (filtered_cloud->empty()) return;
-
-        State state_prior;
-        Eigen::Matrix<double, 15, 15> P_prior;
-        {
-            std::lock_guard<std::mutex> lock(state_mutex_);
-            state_prior = state_;
-            P_prior = P_;
-        }
-
-        pcl::PointCloud<pcl::PointXYZ>::Ptr active_map;
-        pcl::KdTreeFLANN<pcl::PointXYZ>::Ptr active_kdtree;
-        {
-            std::lock_guard<std::mutex> map_lock(map_mutex_);
-            active_map = global_map_;
-            active_kdtree = kdtree_map_;
-        }
-
-        if (active_map->points.size() < 10) {
-            auto init_map = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
-            for (const auto &pt : filtered_cloud->points) {
-                Eigen::Vector3d p_w = state_prior.rot * Eigen::Vector3d(pt.x, pt.y, pt.z) + state_prior.pos;
-                if (p_w.allFinite()) {
-                    init_map->push_back(pcl::PointXYZ(static_cast<float>(p_w.x()), 
-                                                       static_cast<float>(p_w.y()), 
-                                                       static_cast<float>(p_w.z())));
-                }
-            }
-
-            if (init_map->points.size() >= 10) {
-                auto new_tree = pcl::make_shared<pcl::KdTreeFLANN<pcl::PointXYZ>>();
-                new_tree->setInputCloud(init_map);
-
-                std::lock_guard<std::mutex> map_lock(map_mutex_);
-                global_map_ = init_map;
-                kdtree_map_ = new_tree;
-            }
-
-            publishMap(msg->header.stamp);
-            return;
-        }
-
-        State state_iter = state_prior;
-        constexpr int kMaxIter = 4;
-        constexpr double kMeasNoiseVar = 1e-2;
-        constexpr double kInvNoise = 1.0 / kMeasNoiseVar;
-        const Eigen::Matrix<double, 15, 15> P_prior_inv = P_prior.inverse();
-
-        Eigen::Matrix<double, 15, 15> Ht_Rinv_H_final = Eigen::Matrix<double, 15, 15>::Zero();
-
-        for (int iter = 0; iter < kMaxIter; ++iter) {
-            Eigen::Matrix<double, 15, 15> Ht_Rinv_H = Eigen::Matrix<double, 15, 15>::Zero();
-            Eigen::Matrix<double, 15, 1> Ht_Rinv_z = Eigen::Matrix<double, 15, 1>::Zero();
-            int valid_matches = 0;
-
-            for (const auto &pt : filtered_cloud->points) {
-                Eigen::Vector3d p_l(pt.x, pt.y, pt.z);
-                Eigen::Vector3d p_w = state_iter.rot * p_l + state_iter.pos;
-
-                if (!p_w.allFinite()) continue;
-
-                pcl::PointXYZ search_pt(static_cast<float>(p_w.x()), 
-                                       static_cast<float>(p_w.y()), 
-                                       static_cast<float>(p_w.z()));
-
-                std::vector<int> k_indices(5);
-                std::vector<float> k_sqr_distances(5);
-
-                if (active_kdtree->nearestKSearch(search_pt, 5, k_indices, k_sqr_distances) == 5) {
-                    if (k_sqr_distances[4] > 1.0f) continue;
-
-                    Eigen::Matrix<double, 5, 3> A;
-                    Eigen::Vector3d center = Eigen::Vector3d::Zero();
-
-                    for (int i = 0; i < 5; ++i) {
-                        const auto &mp = active_map->points[k_indices[i]];
-                        Eigen::Vector3d v(mp.x, mp.y, mp.z);
-                        A.row(i) = v;
-                        center += v;
-                    }
-                    center /= 5.0;
-                    A.rowwise() -= center.transpose();
-
-                    Eigen::Matrix3d cov = A.transpose() * A;
-                    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> es(cov);
-
-                    if (es.info() != Eigen::Success) continue;
-
-                    Eigen::Vector3d norm_vec = es.eigenvectors().col(0);
-                    if (!norm_vec.allFinite()) continue;
-
-                    double res = norm_vec.dot(p_w - center);
-                    if (std::abs(res) < 0.2) {
-                        Eigen::Matrix<double, 1, 15> H_i = Eigen::Matrix<double, 1, 15>::Zero();
-                        H_i.block<1, 3>(0, 0) = norm_vec.transpose();
-                        H_i.block<1, 3>(0, 3) = -norm_vec.transpose() * state_iter.rot * Skew(p_l);
-
-                        Ht_Rinv_H += kInvNoise * (H_i.transpose() * H_i);
-                        Ht_Rinv_z += kInvNoise * (H_i.transpose() * (-res));
-                        valid_matches++;
-                    }
-                }
-            }
-
-            if (valid_matches < 10) break;
-
-            // Prior state offset check
-            Eigen::Matrix<double, 15, 1> dx_prior = state_iter.boxMinus(state_prior);
-
-            // Corrected IEKF System update matrix
-            Eigen::Matrix<double, 15, 15> A_mat = P_prior_inv + Ht_Rinv_H;
-            Eigen::Matrix<double, 15, 1> b_vec = Ht_Rinv_z - P_prior_inv * dx_prior;
-
-            Eigen::Matrix<double, 15, 1> dx = A_mat.ldlt().solve(b_vec);
-
-            if (!dx.allFinite() || dx.norm() > 2.0) break;
-
-            state_iter.boxPlus(dx);
-            Ht_Rinv_H_final = Ht_Rinv_H;
-
-            if (dx.norm() < 1e-3) break;
-        }
-
-        // Post-measurement state and covariance updates
-        {
-            std::lock_guard<std::mutex> lock(state_mutex_);
-            if (state_iter.pos.allFinite() && state_iter.rot.allFinite()) {
-                state_ = state_iter;
-                P_ = (P_prior_inv + Ht_Rinv_H_final).inverse();
-            }
-        }
-
-        // Global map building
-        auto combined_map = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
-        *combined_map = *active_map;
-
-        for (const auto &pt : filtered_cloud->points) {
-            Eigen::Vector3d p_w = state_iter.rot * Eigen::Vector3d(pt.x, pt.y, pt.z) + state_iter.pos;
-            if (p_w.allFinite()) {
-                combined_map->push_back(pcl::PointXYZ(static_cast<float>(p_w.x()), 
-                                                       static_cast<float>(p_w.y()), 
-                                                       static_cast<float>(p_w.z())));
-            }
-        }
-
-        auto downsampled_map = downsampleVoxel(combined_map, 0.2f);
-        pcl::removeNaNFromPointCloud(*downsampled_map, *downsampled_map, dummy_indices);
-
-        if (!downsampled_map->empty() && downsampled_map->points.size() >= 10) {
-            auto new_kdtree = pcl::make_shared<pcl::KdTreeFLANN<pcl::PointXYZ>>();
-            new_kdtree->setInputCloud(downsampled_map);
-
-            std::lock_guard<std::mutex> map_lock(map_mutex_);
-            global_map_ = downsampled_map;
-            kdtree_map_ = new_kdtree;
-        }
-
-        publishMap(msg->header.stamp);
-    }
-
-    void perceptionCallback(const mirena_common::msg::EntityList::ConstSharedPtr &msg)
-    {
-        Eigen::Matrix3d current_rot;
-        Eigen::Vector3d current_pos;
-
-        {
-            std::lock_guard<std::mutex> lock(state_mutex_);
-            current_rot = state_.rot;
-            current_pos = state_.pos;
-        }
-
-        constexpr double kMaxRadiusSq = 0.5 * 0.5; // 0.5m matching radius threshold
-        std::lock_guard<std::mutex> lock(cones_mutex_);
-
-        for (const auto &entity : msg->entities) {
-            Eigen::Vector3d p_local(entity.position.x, entity.position.y, entity.position.z);
-            Eigen::Vector3d p_world = current_rot * p_local + current_pos;
-
-            if (!p_world.allFinite()) continue;
-
-            int best_match_idx = -1;
-            double min_dist_sq = kMaxRadiusSq;
-
-            for (size_t i = 0; i < global_cones_map_.entities.size(); ++i) {
-                auto &global_entity = global_cones_map_.entities[i];
-
-                // Ensure same class type
-                if (global_entity.type != entity.type) continue;
-
-                // 2D Distance matching check
-                double dx = global_entity.position.x - p_world.x();
-                double dy = global_entity.position.y - p_world.y();
-                double dist_sq = dx * dx + dy * dy;
-
-                if (dist_sq < min_dist_sq) {
-                    min_dist_sq = dist_sq;
-                    best_match_idx = static_cast<int>(i);
-                }
-            }
-
-            if (best_match_idx >= 0) {
-                // Recursive weighted average to stabilize cone centers
-                auto &matched = global_cones_map_.entities[best_match_idx];
-                matched.confidence += 1.0;
-                double n = std::min(static_cast<double>(matched.confidence), 20.0);
-                
-                matched.position.x = ((n - 1.0) * matched.position.x + p_world.x()) / n;
-                matched.position.y = ((n - 1.0) * matched.position.y + p_world.y()) / n;
-                matched.position.z = ((n - 1.0) * matched.position.z + p_world.z()) / n;
-            } else {
-                mirena_common::msg::Entity new_cone = entity;
-                new_cone.position.x = p_world.x();
-                new_cone.position.y = p_world.y();
-                new_cone.position.z = p_world.z();
-                new_cone.confidence = 1.0;
-                global_cones_map_.entities.push_back(new_cone);
-            }
-        }
-
-        global_cones_map_.header.stamp = msg->header.stamp;
-        global_cones_map_.header.frame_id = "odom";
-        global_cones_pub_->publish(global_cones_map_);
-    }
-
-    void publishMap(const rclcpp::Time &stamp)
-    {
-        sensor_msgs::msg::PointCloud2 map_msg;
-        {
-            std::lock_guard<std::mutex> map_lock(map_mutex_);
-            if (global_map_->empty()) return;
-
-            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000, 
-                "Publishing global map with %zu points.", global_map_->size());
-
-            pcl::toROSMsg(*global_map_, map_msg);
-        }
-
-        map_msg.header.stamp = stamp;
-        map_msg.header.frame_id = "odom";
-        map_pub_->publish(map_msg);
-    }
-
-    void publishOdometry(const rclcpp::Time &stamp)
-    {
-        Eigen::Vector3d pos, vel;
-        Eigen::Matrix3d rot;
-        {
-            std::lock_guard<std::mutex> lock(state_mutex_);
-            pos = state_.pos;
-            vel = state_.vel;
-            rot = state_.rot;
-        }
-
-        nav_msgs::msg::Odometry odom;
-        odom.header.stamp = stamp;
-        odom.header.frame_id = "odom";
-        odom.child_frame_id = "car/cog";
-
-        odom.pose.pose.position.x = pos.x();
-        odom.pose.pose.position.y = pos.y();
-        odom.pose.pose.position.z = pos.z();
-
-        Eigen::Quaterniond q(rot);
-        odom.pose.pose.orientation.x = q.x();
-        odom.pose.pose.orientation.y = q.y();
-        odom.pose.pose.orientation.z = q.z();
-        odom.pose.pose.orientation.w = q.w();
-
-        odom.twist.twist.linear.x = vel.x();
-        odom.twist.twist.linear.y = vel.y();
-        odom.twist.twist.linear.z = vel.z();
-
-        odom_pub_->publish(odom);
-
-        geometry_msgs::msg::TransformStamped tf;
-        tf.header.stamp = stamp;
-        tf.header.frame_id = "odom";
-        tf.child_frame_id = "car/cog";
-        tf.transform.translation.x = pos.x();
-        tf.transform.translation.y = pos.y();
-        tf.transform.translation.z = pos.z();
-        tf.transform.rotation = odom.pose.pose.orientation;
-        tf_broadcaster_->sendTransform(tf);
-    }
-
-    rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
-    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_sub_;
-    rclcpp::Subscription<mirena_common::msg::EntityList>::SharedPtr perception_sub_;
-    
-    rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr map_pub_;
-    rclcpp::Publisher<mirena_common::msg::EntityList>::SharedPtr global_cones_pub_;
-    
-    std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
-    rclcpp::TimerBase::SharedPtr odom_timer_;
-
-    std::mutex state_mutex_;
-    std::mutex map_mutex_;
-    std::mutex cones_mutex_;
-    State state_;
-    Eigen::Matrix<double, 15, 15> P_;
-    Eigen::Matrix<double, 15, 15> Q_;
-    double last_imu_time_ = -1.0;
-
-    pcl::PointCloud<pcl::PointXYZ>::Ptr global_map_;
-    pcl::KdTreeFLANN<pcl::PointXYZ>::Ptr kdtree_map_;
-    mirena_common::msg::EntityList global_cones_map_;
-};
-
-} // namespace fast_lio
-
-int main(int argc, char **argv)
-{
-    rclcpp::init(argc, argv);
-    rclcpp::spin(std::make_shared<fast_lio::FastLioNode>());
-    rclcpp::shutdown();
-    return 0;
-}
+//         // Point-to-Plane Gauss-Newton Step to solve spatial displacement delta
+//         Eigen::Matrix3d H = Eigen::Matrix3d::Zero();
+//         Eigen::Vector3d b = Eigen::Vector3d::Zero();
+//         int valid_residuals = 0;
+
+//         {
+//             std::shared_lock<std::shared_mutex> read_lock(_map_mutex);
+
+//             #pragma omp parallel for schedule(dynamic, 64) reduction(+:H,b,valid_residuals)
+//             for (size_t i = 0; i < local_pts.size(); ++i) {
+//                 Eigen::Vector3d p_w = R_curr * local_pts[i] + current_pos;
+//                 world_pts[i] = p_w;
+
+//                 std::vector<Eigen::Vector3d> neighbors;
+//                 if (_ivox_map.getFiveNN(p_w, neighbors)) {
+//                     Eigen::Vector3d mean = Eigen::Vector3d::Zero();
+//                     for (const auto& n : neighbors) mean += n;
+//                     mean /= 5.0;
+
+//                     Eigen::Matrix3d cov = Eigen::Matrix3d::Zero();
+//                     for (const auto& n : neighbors) {
+//                         Eigen::Vector3d diff = n - mean;
+//                         cov += diff * diff.transpose();
+//                     }
+
+//                     Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> es(cov, Eigen::ComputeEigenvectors);
+//                     Eigen::Vector3d normal = es.eigenvectors().col(0);
+
+//                     double dist = normal.dot(p_w - mean);
+//                     if (std::abs(dist) < 0.1) {
+//                         // Jacobian for [dx, dy, dpsi]
+//                         Eigen::Vector3d J;
+//                         J.head<2>() = normal.head<2>();
+//                         J(2) = normal.x() * (-std::sin(current_yaw) * local_pts[i].x() - std::cos(current_yaw) * local_pts[i].y()) +
+//                                normal.y() * ( std::cos(current_yaw) * local_pts[i].x() - std::sin(current_yaw) * local_pts[i].y());
+
+//                         H += J * J.transpose();
+//                         b += -J * dist;
+//                         valid_residuals++;
+//                     }
+//                 }
+//             }
+//         }
+
+//         // Solve SE(2) Correction Vector: [dx, dy, dpsi]
+//         if (valid_residuals > 15 && std::abs(H.determinant()) > 1e-5) {
+//             Eigen::Vector3d delta = H.ldlt().solve(b);
+
+//             if (dt < 0.001) dt = 0.01; // Avoid divide-by-zero
+
+//             // Extract Body-Frame Velocities
+//             double u_meas = (delta.x() * std::cos(current_yaw) + delta.y() * std::sin(current_yaw)) / dt;
+//             double v_meas = (-delta.x() * std::sin(current_yaw) + delta.y() * std::cos(current_yaw)) / dt;
+//             double omega_meas = delta.z() / dt;
+
+//             // Absolute LIO Position & Yaw estimate
+//             double lio_x = current_pos.x() + delta.x();
+//             double lio_y = current_pos.y() + delta.y();
+//             double lio_psi = mirena::Ekf::wrap_angle(current_yaw + delta.z());
+
+//             std::lock_guard<std::mutex> lock(_filter_mutex);
+//             if (!_ins_anchored) {
+//                 latch_anchor(lio_x, lio_y, lio_psi);
+//             }
+
+//             double ox, oy, opsi;
+//             ins_to_odom(lio_x, lio_y, lio_psi, ox, oy, opsi);
+
+//             // Dynamically condition variance based on Hessian eigenvalues
+//             double position_var = std::clamp(1.0 / (H(0,0) + H(1,1) + 1e-6), 0.001, 0.5);
+//             double yaw_var = std::clamp(1.0 / (H(2,2) + 1e-6), 0.0001, 0.1);
+//             double vel_var = std::clamp(position_var / (dt * dt), 0.01, 2.0);
+
+//             mirena::Ekf::Vec6 z, r;
+//             z << ox, oy, opsi, u_meas, v_meas, omega_meas;
+//             r << position_var, position_var, yaw_var, vel_var, vel_var, yaw_var / (dt * dt);
+
+//             log_step(_ekf->update_odom(z, r), "LIO velocity & pose update");
+//         }
+
+//         // Write points safely into Voxel Map
+//         {
+//             std::unique_lock<std::shared_mutex> write_lock(_map_mutex);
+//             for (const auto& pt : world_pts) {
+//                 _ivox_map.insertPoint(pt);
+//             }
+//         }
+//     }
+
+//     void publish_timer_callback()
+//     {
+//         std::lock_guard<std::mutex> lock(_filter_mutex);
+//         if (!_ekf->is_initialized()) return;
+
+//         // Guard against duplicate TF timestamps
+//         if (_ekf->stamp() <= _last_published_stamp) return;
+//         _last_published_stamp = _ekf->stamp();
+
+//         const auto &x = _ekf->state();
+//         const auto &P = _ekf->covariance();
+//         const rclcpp::Time stamp(static_cast<int64_t>(_ekf->stamp() * 1e9), RCL_ROS_TIME);
+
+//         mirena_common::msg::Car car;
+//         car.header.stamp = stamp;
+//         car.header.frame_id = kOdomFrame;
+//         car.child_frame_id = kBaseFrame;
+//         car.x = x(0);
+//         car.y = x(1);
+//         car.psi = x(2);
+//         car.u = x(3);
+//         car.v = x(4);
+//         car.omega = x(5);
+//         for (int i = 0; i < 6; i++)
+//             for (int j = 0; j < 6; j++)
+//                 car.covariance[i * 6 + j] = P(i, j);
+
+//         _car_pub->publish(car);
+//         send_tf(x(0), x(1), x(2), stamp);
+//     }
+
+//     void send_tf(double x, double y, double psi, const rclcpp::Time &stamp)
+//     {
+//         geometry_msgs::msg::TransformStamped t;
+//         t.header.stamp = stamp;
+//         t.header.frame_id = kOdomFrame;
+//         t.child_frame_id = kBaseFrame;
+//         t.transform.translation.x = x;
+//         t.transform.translation.y = y;
+//         t.transform.translation.z = 0.0;
+
+//         tf2::Quaternion q;
+//         q.setRPY(0, 0, psi);
+//         t.transform.rotation.x = q.x();
+//         t.transform.rotation.y = q.y();
+//         t.transform.rotation.z = q.z();
+//         t.transform.rotation.w = q.w();
+
+//         _tf_broadcaster->sendTransform(t);
+//     }
+
+//     void report_callback()
+//     {
+//         mirena_common::msg::Heartbeat msg;
+//         msg.timestamp = this->now();
+//         msg.node_name = this->get_name();
+
+//         nlohmann::json report_json;
+//         {
+//             std::lock_guard<std::mutex> lock(_filter_mutex);
+//             const double now_s = this->now().seconds();
+
+//             const bool have_lidar = _last_lidar_stamp.nanoseconds() > 0;
+//             const bool have_imu = _last_imu_stamp.nanoseconds() > 0;
+//             const double lidar_age = now_s - _last_lidar_stamp.seconds();
+//             const double imu_age = now_s - _last_imu_stamp.seconds();
+
+//             const bool lidar_stale = !have_lidar || lidar_age > _lidar_timeout_sec;
+//             const bool imu_stale = !have_imu || imu_age > _imu_timeout_sec;
+
+//             std::string mode;
+//             if (!_ekf->is_initialized()) mode = "INIT";
+//             else if (!_ins_anchored) mode = "NO_LIO_YET";
+//             else if (lidar_stale && imu_stale) mode = "STALE";
+//             else if (lidar_stale) mode = "DEAD_RECKONING";
+//             else if (imu_stale) mode = "NO_IMU";
+//             else mode = "FUSED";
+
+//             report_json["mode"] = mode;
+//             report_json["lio_anchored"] = _ins_anchored;
+//             report_json["lidar_stale"] = lidar_stale;
+//             report_json["imu_stale"] = imu_stale;
+//             if (have_lidar) report_json["lidar_age_s"] = lidar_age;
+//             if (have_imu) report_json["imu_age_s"] = imu_age;
+//             report_json["ekf_resets"] = _ekf->divergences();
+
+//             if (_ekf->is_initialized()) {
+//                 const auto &x = _ekf->state();
+//                 report_json["car_pos_x"] = x(0);
+//                 report_json["car_pos_y"] = x(1);
+//                 report_json["car_pos_yaw"] = x(2);
+//                 report_json["car_vel_u"] = x(3);
+//                 report_json["car_vel_v"] = x(4);
+//             }
+//         }
+
+//         msg.report = report_json.dump();
+//         _report_pub->publish(msg);
+//     }
+// };
+
+// int main(int argc, char **argv)
+// {
+//     rclcpp::init(argc, argv);
+//     auto node = std::make_shared<FastLIOState>();
+
+//     rclcpp::executors::MultiThreadedExecutor executor;
+//     executor.add_node(node);
+//     executor.spin();
+//     rclcpp::shutdown();
+//     return 0;
+// }

@@ -33,17 +33,17 @@ add_executable(mirena_perception
   src/cone_detector.cpp
 )
 
+add_executable(mirena_perception_2
+  src/mirena_perception2.cpp
+  src/cone_detector2.cpp
+)
+
+# --- mirena_perception ---
 target_include_directories(mirena_perception PRIVATE
   "src/"
   ${EIGEN3_INCLUDE_DIR}
 )
-
-# SYSTEM so -Wpedantic below stays about our code: PCL's headers are not
-# pedantic-clean and there are a lot of them.
 target_include_directories(mirena_perception SYSTEM PRIVATE ${PCL_INCLUDE_DIRS})
-
-# Scoped to our target, not added globally: Patchwork++ is built as a
-# subdirectory of this project and its warnings are not ours to fix.
 target_compile_options(mirena_perception PRIVATE -Wall -Wextra -Wpedantic)
 
 ament_target_dependencies(mirena_perception
@@ -60,6 +60,33 @@ ament_target_dependencies(mirena_perception
 
 target_link_libraries(mirena_perception ${PCL_LIBRARIES})
 
-install(TARGETS mirena_perception DESTINATION lib/${PROJECT_NAME})
+# --- mirena_perception_2 ---
+target_include_directories(mirena_perception_2 PRIVATE
+  "src/"
+  ${EIGEN3_INCLUDE_DIR}
+)
+target_include_directories(mirena_perception_2 SYSTEM PRIVATE ${PCL_INCLUDE_DIRS})
+target_compile_options(mirena_perception_2 PRIVATE -Wall -Wextra -Wpedantic)
+
+ament_target_dependencies(mirena_perception_2
+  rclcpp
+  sensor_msgs
+  std_msgs
+  geometry_msgs
+  tf2
+  tf2_ros
+  tf2_eigen
+  pcl_conversions
+  mirena_common
+)
+
+target_link_libraries(mirena_perception_2 ${PCL_LIBRARIES})
+
+# Install both targets
+install(TARGETS 
+  mirena_perception 
+  mirena_perception_2 
+  DESTINATION lib/${PROJECT_NAME}
+)
 
 ament_package()

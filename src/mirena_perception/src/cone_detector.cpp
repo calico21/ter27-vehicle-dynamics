@@ -1,6 +1,7 @@
 #include "cone_detector.hpp"
 
-#include <algorithm>
+#include <algorithm> // proporciona funciones como std::min, std::max o std::sort.
+
 #include <chrono>
 #include <cmath>
 #include <limits>
@@ -8,7 +9,7 @@
 
 namespace mirena
 {
-    namespace
+    namespace //namespace anónimo: funciones internas y privadas que se usan SOLO en este archivo
     {
         double elapsed_ms(std::chrono::steady_clock::time_point since)
         {
@@ -20,7 +21,7 @@ namespace mirena
         /// Key for a cell on an integer grid, packed into one integer so the
         /// neighbour lookups below are hash lookups rather than searches.
         inline int64_t cell_key(int i, int j) { return static_cast<int64_t>(i) * 1000003 + j; }
-    } // namespace
+    } // namespace anónimo
 
     ConeDetector::ConeDetector(const ConeDetectorParams &params)
         : params_(params)
