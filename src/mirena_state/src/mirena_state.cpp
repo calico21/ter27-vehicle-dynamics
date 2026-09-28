@@ -112,6 +112,7 @@ class MirenaState : public rclcpp::Node
     double _imu_timeout_sec = 0.2;
     double _encoder_timeout_sec = 0.2;
     double _gyro_meas_var = 0.0001;
+    bool _use_encoders = true;
 
     // Wheel encoders (rear wheels)
     double _wheel_radius = 0.20;       // m
@@ -135,6 +136,7 @@ public:
         this->declare_parameter<double>("wheel_radius", 0.2);
         this->declare_parameter<double>("track_width", 1.2);
         this->declare_parameter<double>("encoder_var", 0.01);
+        this->declare_parameter<bool>("use_encoders", true);
 
         RCLCPP_INFO(this->get_logger(), "Starting Mirena State");
 
@@ -144,6 +146,7 @@ public:
         _wheel_radius = this->get_parameter("wheel_radius").as_double();
         _track_width = this->get_parameter("track_width").as_double();
         _encoder_base_var = this->get_parameter("encoder_var").as_double();
+        _use_encoders = this->get_parameter("use_encoders").as_bool();
 
         _filter_cb_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
         _report_cb_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -172,11 +175,20 @@ public:
         _ins_odom_sub = this->create_subscription<nav_msgs::msg::Odometry>(
             INS_ODOM_TOPIC, rclcpp::SensorDataQoS(),
             std::bind(&MirenaState::ins_odom_callback, this, std::placeholders::_1), filter_sub_options);
-        _encoder_sub = this->create_subscription<mirena_common::msg::WheelSpeeds>(
-            WHEEL_SPEEDS_TOPIC, rclcpp::SensorDataQoS(),
-            std::bind(&MirenaState::encoder_callback, this, std::placeholders::_1), filter_sub_options);
-        RCLCPP_INFO(this->get_logger(), "Subscribed to %s for wheel encoder speeds (radius=%.3f m, var=%.4f)",
-                    WHEEL_SPEEDS_TOPIC, _wheel_radius, _encoder_base_var);
+        if (_use_encoders)
+        {
+            _encoder_sub = this->create_subscription<mirena_common::msg::WheelSpeeds>(
+                WHEEL_SPEEDS_TOPIC, rclcpp::SensorDataQoS(),
+                std::bind(&MirenaState::encoder_callback, this, std::placeholders::_1), filter_sub_options);
+            RCLCPP_INFO(this->get_logger(), "Subscribed to %s for wheel encoder speeds (radius=%.3f m, var=%.4f)",
+                        WHEEL_SPEEDS_TOPIC, _wheel_radius, _encoder_base_var);
+        }
+        else
+        {
+            RCLCPP_WARN(this->get_logger(),
+                        "Wheel encoder fusion DISABLED (use_encoders=false). Not subscribing to %s.",
+                        WHEEL_SPEEDS_TOPIC);
+        }
 
         // Health/status report timer
         _report_timer = rclcpp::create_timer(
@@ -262,9 +274,22 @@ private:
         // Synchronous publish directly following the IMU step
         publish_state();
     }
-
+    
+    
     void encoder_callback(const mirena_common::msg::WheelSpeeds::ConstSharedPtr &msg)
     {
+        if (!_use_encoders) return;
+
+        // Validación de marca de tiempo nula: sin stamp no hay forma de
+        // sincronizar con el EKF. (builtin_interfaces::msg::Time no tiene
+        // nanoseconds(); se revisan los campos sec y nanosec.)
+        if (msg->header.stamp.sec == 0 && msg->header.stamp.nanosec == 0)
+        {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                                 "[Encoder] Ignoring message with null timestamp on %s.", WHEEL_SPEEDS_TOPIC);
+            return;
+        }
+
         std::lock_guard<std::mutex> lock(_filter_mutex);
         _last_encoder_stamp = msg->header.stamp;
 
@@ -279,20 +304,60 @@ private:
             return;
         }
 
+        // Validación de datos de entrada: descartar NaN/INF antes de tocar el EKF.
+        if (!std::isfinite(msg->rl) || !std::isfinite(msg->rr))
+        {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                                 "[Encoder] Ignoring message with non-finite wheel speeds (rl=%.2f, rr=%.2f).",
+                                 msg->rl, msg->rr);
+            return;
+        }
+
         const double v_left = (msg->rl * 2.0 * M_PI / 60.0) * _wheel_radius;
         const double v_right = (msg->rr * 2.0 * M_PI / 60.0) * _wheel_radius;
 
         const double u = 0.5 * (v_left + v_right);
 
+        // Filtro de outliers: rechazar velocidades irrealistas para el vehículo.
+        if (std::abs(u) > 15.0)
+        {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                                 "[Encoder] Rejecting outlier velocity u=%.2f m/s (|u| > 15.0 m/s).", u);
+            return;
+        }
+
+        // Varianza dinámica: durante giros cerrados o deslizamientos las ruedas
+        // giran a velocidades muy distintas y la medición de u pierde
+        // confianza. Se escala cuadráticamente con la diferencia entre ruedas
+        // y se limita para no anular la corrección por completo.
+        const double v_diff = std::abs(v_left - v_right);
+        const double dynamic_var = std::min(_encoder_base_var + 0.10 * (v_diff * v_diff), 1.0);
+
+        // Sincronización temporal con el EKF: nunca aplicar una medición
+        // en el pasado; si el EKF está atrasado, avanzar el tiempo primero.
+        const double t = rclcpp::Time(msg->header.stamp).seconds();
+        if (t < _ekf->stamp())
+        {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                                 "[Encoder] Discarding out-of-order message: stamp %.6f s < EKF stamp %.6f s.",
+                                 t, _ekf->stamp());
+            return;
+        }
+        if (t > _ekf->stamp())
+        {
+            log_step(_ekf->predict(t, 0.0, 0.0), "encoder time sync predict");
+        }
+
         RCLCPP_INFO_ONCE(this->get_logger(),
                          "[Encoder] EKF is initialized; started fusing wheel encoder velocity updates.");
 
         RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-                             "[Encoder] Fusing: rl=%.1f RPM, rr=%.1f RPM -> u_meas=%.2f m/s (EKF u=%.2f m/s)",
-                             msg->rl, msg->rr, u, _ekf->state()(3));
+                             "[Encoder] Fusing: rl=%.1f RPM, rr=%.1f RPM -> u_meas=%.2f m/s (EKF u=%.2f m/s, var=%.4f)",
+                             msg->rl, msg->rr, u, _ekf->state()(3), dynamic_var);
 
-        log_step(_ekf->update_velocity_u(u, _encoder_base_var), "encoder speed update");
+        log_step(_ekf->update_velocity_u(u, dynamic_var), "encoder speed update");
     }
+    
 
     void latch_anchor(double ins_x, double ins_y, double ins_psi)
     {
@@ -445,7 +510,9 @@ private:
 
             const bool odom_stale = !have_odom || odom_age > _odom_timeout_sec;
             const bool imu_stale = !have_imu || imu_age > _imu_timeout_sec;
-            const bool encoder_stale = !have_encoder || encoder_age > _encoder_timeout_sec;
+            // A disabled encoder is intentionally absent, not stale.
+            const bool encoder_stale = _use_encoders &&
+                                        (!have_encoder || encoder_age > _encoder_timeout_sec);
 
             std::string mode;
             if (!_ekf->is_initialized())
@@ -463,6 +530,7 @@ private:
 
             report_json["mode"] = mode;
             report_json["ins_anchored"] = _ins_anchored;
+            report_json["encoders_enabled"] = _use_encoders;
             report_json["odom_stale"] = odom_stale;
             report_json["imu_stale"] = imu_stale;
             report_json["encoder_stale"] = encoder_stale;

@@ -222,4 +222,10 @@ def generate_launch_description():
                 'heartbeat_timeout_sec': 3.0,
             }],
         ),
+        # -- Supervisor -------------------------------------------------------
+        Node(
+            package='mirena_state',
+            executable='mirena_state_ekf',
+            parameters=[{'use_encoders': True}],
+        )
     ])

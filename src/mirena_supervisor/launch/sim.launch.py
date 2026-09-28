@@ -1,26 +1,18 @@
-"""
-sim.launch.py -- the whole system, against the simulator.
-
-  ros2 launch mirena_supervisor sim.launch.py
-
-Starts two things and stops there: the simulator, and the supervisor. The
-autonomy pipeline is deliberately *not* here. The supervisor brings it up when
-the AS selects a mission -- launching launch/missions/<mission>.launch.py on
-AS READY and holding the mission in CONFIGURING until every node in it is
-beating -- and tears it down when the run ends. So a skidpad run gets the skidpad
-pipeline, an inspection run gets one node, and the system is ready for the next
-mission without being restarted.
-
-Its counterpart is hardware.launch.py, which is the same file with the drivers
-where the simulator is. The only thing that differs downstream is use_sim_time,
-which is forwarded to every mission from here.
-"""
-
+import os
 from launch import LaunchDescription
+from launch.substitutions import PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
+    # Ruta relativa al paquete instalado
+    rviz_config_file = PathJoinSubstitution([
+        FindPackageShare('mirena_supervisor'),
+        'config',
+        'sim.rviz'
+    ])
+
     return LaunchDescription([
         # -- Data source ------------------------------------------------------
         Node(
@@ -42,5 +34,22 @@ def generate_launch_description():
                 'mission_launch_directory': 'launch/missions',
                 'mission_launch_arguments': ['use_sim_time:=true'],
             }],
+        ),
+
+        # -- State EKF --------------------------------------------------------
+        Node(
+            package='mirena_state',
+            executable='mirena_state_ekf',
+            parameters=[{'use_encoders': True}],
+        ),
+
+        # -- RViz2 ------------------------------------------------------------
+        Node(
+            package='rviz2',
+            executable='rviz2',
+            name='rviz2',
+            arguments=['-d', rviz_config_file],
+            parameters=[{'use_sim_time': True}],
+            output='screen',
         ),
     ])
