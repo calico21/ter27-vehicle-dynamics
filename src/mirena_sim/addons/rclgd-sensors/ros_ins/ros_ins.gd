@@ -32,10 +32,10 @@ class_name RosIns
 
 # --- Configuration ---
 @export_group("IMU Settings")
-@export var accel_noise_std: float = 0.05
-@export var gyro_noise_std: float = 0.005
-@export var bias_drift_std: float = 0.0001
-@export var lpf_tau: float = 0.15 # Low-pass filter for physics jitter
+@export var accel_noise_std: float = 0.005
+@export var gyro_noise_std: float = 0.0005
+@export var bias_drift_std: float = 0.00001
+@export var lpf_tau: float = 0.05 # Low-pass filter for physics jitter
 ## Covariance published on the Imu messages. Zero matches the hardware, which
 ## leaves all three matrices at zero -- confirmed over a recorded run, 0 of 26888
 ## messages carried one. Raise it only if something downstream starts needing a
@@ -121,6 +121,7 @@ var is_initialized: bool = false
 # Raw sensor state, in this node's own (IMU) axes.
 var _last_imu_vel: Vector3 = Vector3.ZERO
 var _lpf_accel: Vector3 = Vector3.ZERO
+var _lpf_gyro: Vector3 = Vector3.ZERO
 var _accel_bias: Vector3 = Vector3.ZERO
 var _gyro_bias: Vector3 = Vector3.ZERO
 var noisy_accel: Vector3 = Vector3.ZERO
@@ -214,7 +215,10 @@ func _physics_process(delta: float) -> void:
 	var local_gyro := inv_basis * body.angular_velocity
 
 	# 3. Low-pass filter: physics engines create spikes that break factor graphs.
-	_lpf_accel = _lpf_accel.lerp(local_accel, 1.0 - lpf_tau)
+	# Proper exponential moving average: alpha = 1 - exp(-dt/tau).
+	var alpha := 1.0 - exp(-delta / lpf_tau)
+	_lpf_accel = _lpf_accel.lerp(local_accel, alpha)
+	_lpf_gyro = _lpf_gyro.lerp(local_gyro, alpha)
 
 	# 4. Random-walk biases. Drift must scale with sqrt(delta) to be consistent.
 	var drift_scale := sqrt(delta)
@@ -223,7 +227,7 @@ func _physics_process(delta: float) -> void:
 
 	# 5. Final noisy readings.
 	noisy_accel = _lpf_accel + _accel_bias + _noise_vec(accel_noise_std)
-	noisy_gyro = local_gyro + _gyro_bias + _noise_vec(gyro_noise_std)
+	noisy_gyro = _lpf_gyro + _gyro_bias + _noise_vec(gyro_noise_std)
 
 # --- The driver's publish loop ----------------------------------------------
 

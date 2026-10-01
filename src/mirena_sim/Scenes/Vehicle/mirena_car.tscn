@@ -195,6 +195,7 @@ surface_material_override/0 = SubResource("StandardMaterial3D_iifm0")
 
 [node name="RL_WHEEL" type="VehicleWheel3D" parent="." unique_id=2127290588]
 transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, -0.587, 0.208, 0.6)
+use_as_traction = true
 wheel_radius = 0.26
 wheel_rest_length = 0.05
 suspension_stiffness = 25.06
@@ -210,7 +211,6 @@ surface_material_override/0 = SubResource("StandardMaterial3D_iifm0")
 
 [node name="RR_WHEEL" type="VehicleWheel3D" parent="." unique_id=1195679221]
 transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, 0.587, 0.208, 0.6)
-use_as_traction = true
 wheel_radius = 0.26
 wheel_rest_length = 0.05
 suspension_stiffness = 25.06

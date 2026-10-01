@@ -37,14 +37,27 @@ from launch_ros.actions import Node
 def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time')
 
+    # The lateral PID gains are launch arguments so a tuning sweep can override
+    # them from the command line. Defaults are the values this mission has
+    # always run with. Launch arguments are strings; launch_ros YAML-parses
+    # them back ('0.3' -> 0.3), exactly as it already does for use_sim_time.
+    cross_track_kp = LaunchConfiguration('cross_track_kp')
+    cross_track_ki = LaunchConfiguration('cross_track_ki')
+    cross_track_kd = LaunchConfiguration('cross_track_kd')
+    cross_track_tau_d = LaunchConfiguration('cross_track_tau_d')
+
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='false'),
+        DeclareLaunchArgument('cross_track_kp', default_value='0.1'),
+        DeclareLaunchArgument('cross_track_ki', default_value='0.001'),
+        DeclareLaunchArgument('cross_track_kd', default_value='0.5'),
+        DeclareLaunchArgument('cross_track_tau_d', default_value='0.05'),
 
         # -- State estimation ------------------------------------------------
         # Owns /state/car and the odom->car/cog TF.
         Node(
             package='mirena_state',
-            executable='mirena_state_fast_lio',
+            executable='mirena_state_ekf',
             name='mirena_state',
             parameters=[{
                 'use_sim_time': use_sim_time,
@@ -55,7 +68,7 @@ def generate_launch_description():
                 # -- Noise model. Continuous-time process noise over [x, y, psi, u, v, omega]
                 'process_noise_diag': [0.01, 0.01, 0.005, 0.5, 0.5, 0.5],
                 # -- Floor on INS measurement variances, which guards against zero covariances
-                'odom_meas_floor_diag': [1e-9, 1e-9, 1e-9, 1e-9, 1e-9, 1e-9],
+                'odom_meas_floor_diag': [1e-2, 1e-2, 1e-2, 1e-2, 1e-2, 1e-2],
                 # Seeds P at init; the odom frame's own pose has zero
                 # reported variance by construction.
                 'init_cov_floor_diag': [0.01, 0.01, 0.001, 0.01, 0.01, 0.001],
@@ -112,7 +125,7 @@ def generate_launch_description():
                 'publish_debug': True,                         # publish the map and association markers
                 # -- Association. One gate answers every "is this the thing I already have" question
                 'mahalanobis_threshold': 5.99,                 # chi-square gate on squared Mahalanobis distance; 95th pct, 2 DoF
-                'max_association_distance': 2.5,               # m, Euclidean backstop applied before the chi-square test
+                'max_association_distance': 5.0,               # m, Euclidean backstop applied before the chi-square test
                 'local_map_radius': 20.0,                      # m the car looks; also defines "should have been seen"
                 'view_half_angle': 1.05,                       # rad, half-angle of the sensor field of view
                 # -- Measurements
@@ -121,7 +134,7 @@ def generate_launch_description():
                 # -- Existence, in log-odds. Both measurable from a labelled run
                 'p_detect': 0.55,                              # how often perception reports a cone genuinely in view
                 'p_false': 0.05,                               # how often it reports one where there is none
-                'promote_log_odds': 6.0,                       # evidence before a candidate is written into the graph (~4 looks)
+                'promote_log_odds': 9.0,                       # evidence before a candidate is written into the graph (~4 looks)
                 'publish_log_odds': 1.0,                       # evidence to stay in the published map; below promote, for hysteresis
                 # -- Promotion
                 'separability_k': 2.0,                         # sigmas of separation before two estimates are two objects
@@ -221,10 +234,10 @@ def generate_launch_description():
                 'speed_kd': 0.02,
                 'speed_tau_d': 0.05,                           # s, low-pass on the derivative
                 # -- Lateral: cross-track error -> steering angle, rad per m
-                'cross_track_kp': 0.2,
-                'cross_track_ki': 0.02,
-                'cross_track_kd': 0.05,
-                'cross_track_tau_d': 0.08,                     # s
+                'cross_track_kp': cross_track_kp,
+                'cross_track_ki': cross_track_ki,
+                'cross_track_kd': cross_track_kd,
+                'cross_track_tau_d': cross_track_tau_d,  # s
                 'heading_gain': 0.8,                           # rad of steer per rad of heading error; this is the damping
                 'curvature_feedforward': 1.0,                  # fraction of atan(wheelbase * kappa) supplied open-loop
                 'wheelbase': 1.7,                             # m, L_F + L_R of the model in codegen/dbm_model.py

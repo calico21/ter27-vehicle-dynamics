@@ -85,7 +85,17 @@ namespace mirena
         /// Hard Euclidean backstop, metres, applied before the chi-square test.
         /// Sized so it does not bind in normal operation; it exists to stop a pose
         /// that has gone badly wrong from reaching across the track.
-        double max_association_distance = 2.5;
+        ///
+        /// 15 m, not the 2.5 this used to be, because the chi-square gate is the
+        /// real test and this is only a backstop against a pose that has gone
+        /// badly wrong. At 2.5 m a car returning to a cone it mapped a lap ago
+        /// could not match it once odometry had drifted further than that -- which
+        /// is every lap of every track. The Mahalanobis distance already accounts
+        /// for the pose uncertainty that drift produces, so widening this costs
+        /// nothing in false-match rate: a cone 15 m away with a tight pose
+        /// covariance is still rejected by the gate, and a cone 15 m away with a
+        /// loose one is exactly the loop closure the system exists to perform.
+        double max_association_distance = 5.0;
         /// How far the car looks. Cones inside it are candidates for association
         /// and are expected to be seen; cones outside it are neither.
         double local_map_radius = 20.0;

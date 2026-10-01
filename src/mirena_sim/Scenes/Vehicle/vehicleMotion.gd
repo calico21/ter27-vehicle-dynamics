@@ -28,6 +28,7 @@ var path : Path3D
 @export var frame_id: String = "car/cog"
 ## Rate the rear wheel speeds go out at, in Hz.
 @export var wheel_speed_rate: float = 100.0
+@export var wheel_speed_lpf_tau: float = 0.05 # Low-pass filter time constant (s)
 var _node: RosNode
 # Publishers
 var _state_pub: RosPublisher
@@ -39,9 +40,11 @@ var _wheel_speeds_pub: RosPublisher
 var _lap_status_pub: RosPublisher
 var _debug_tim : RosTimer
 var _wheel_speeds_tim : RosTimer
+var _wheel_rpm_lpf: Array = [0.0, 0.0] # [rl, rr] filtered RPM
 # Subscribers
 var _control_sub: RosSubscriber
 var _mission_info_sub: RosSubscriber
+var _as_status_sub: RosSubscriber
 var _ros_gas: float = 0.0
 var _ros_steer: float = 0.0
 
@@ -59,12 +62,22 @@ var lap_start_ticks: float = 0.0
 
 @onready var car_state : RosMirenaCommonCar = RosMirenaCommonCar.new()
 @onready var wheel_speeds : RosMirenaCommonWheelSpeeds = RosMirenaCommonWheelSpeeds.new()
+@onready var lap_status_msg : RosMirenaCommonLapStatus = RosMirenaCommonLapStatus.new()
 
 func _ready():
 	# Enable collision contact reporting
 	contact_monitor = true
 	max_contacts_reported = 4
 	body_entered.connect(_on_body_entered)
+
+	# Enable cone collisions by default
+	cone_collision_set(true)
+
+	# Add to vehicle group so gates can detect us
+	add_to_group("vehicle")
+
+	# Connect to InitialGate's vehicle_passed signal for lap timing
+	_connect_to_initial_gate()
 
 	## ROS — no namespace: all topic names below are absolute
 	_node = RosNode.new()
@@ -99,6 +112,7 @@ func _ready():
 	# Subscribers
 	_control_sub = _node.create_subscription("/control", "mirena_common/msg/CarControl", _on_control)
 	_mission_info_sub = _node.create_subscription("/system/mission_status", "mirena_common/msg/MissionInfo", _on_mission_info)
+	_as_status_sub = _node.create_subscription("/as_status", "mirena_common/msg/AsInfo", _on_as_status)
 
 	# Camera Registration
 	Sim.register_camera($TPCam)
@@ -108,43 +122,51 @@ func _on_body_entered(body: Node) -> void:
 	if body.is_in_group("Cones") and not hit_cones.has(body):
 		hit_cones.append(body)
 		cone_hit.emit(hit_cones.size())
-	elif body.is_in_group("InitialGate"):
-		initial_gate_crossings += 1
+		var elapsed_ms: float = Time.get_ticks_msec() - lap_start_ticks
+		var lap_time: float = elapsed_ms / 1000.0
+		var total_cones_hit: int = hit_cones.size()
+		_publish_lap_status(total_cones_hit, lap_time)
 		
-		if initial_gate_crossings == 1:
-			# First crossing: start timing
-			lap_start_ticks = Time.get_ticks_msec()
-			print("Lap started!")
-			
-		elif initial_gate_crossings >= 2:
-			# Finishing crossing: calculate lap time and publish
-			var elapsed_ms: float = Time.get_ticks_msec() - lap_start_ticks
-			var lap_time: float = elapsed_ms / 1000.0
-			var total_cones_hit: int = hit_cones.size()
-			
-			_publish_lap_status(total_cones_hit, lap_time)
-			print("Lap finished! Time: %.3f s | Cones hit: %d" % [lap_time, total_cones_hit])
-			
-			# Reset to 1 and update start ticks to time subsequent continuous laps
-			initial_gate_crossings = 1
-			lap_start_ticks = Time.get_ticks_msec()
+
+func _connect_to_initial_gate():
+	var gate = get_tree().get_first_node_in_group("InitialGate")
+	if gate:
+		gate.vehicle_passed.connect(_on_initial_gate_passed)
+	else:
+		# Gate not ready yet, try again next frame
+		call_deferred("_connect_to_initial_gate")
+
+func _on_initial_gate_passed():
+	initial_gate_crossings += 1
+
+	if initial_gate_crossings == 1:
+		# First crossing: start timing
+		lap_start_ticks = Time.get_ticks_msec()
+		print("Lap started!")
+
+	elif initial_gate_crossings >= 2:
+		# Finishing crossing: calculate lap time and publish
+		var elapsed_ms: float = Time.get_ticks_msec() - lap_start_ticks
+		var lap_time: float = elapsed_ms / 1000.0
+		var total_cones_hit: int = hit_cones.size()
+
+		_publish_lap_status(total_cones_hit, lap_time)
+		print("Lap finished! Time: %.3f s | Cones hit: %d" % [lap_time, total_cones_hit])
+
+		# Reset to 1 and update start ticks to time subsequent continuous laps
+		initial_gate_crossings = 1
+		lap_start_ticks = Time.get_ticks_msec()
 
 func _publish_lap_status(cones_hit: int, lap_time: float) -> void:
 	if _lap_status_pub == null:
 		return
 
-	# Dynamic instantiation avoids parser errors when GDExtension classes refresh
-	if not ClassDB.class_exists("RosMirenaCommonLapStatus"):
-		push_error("[ROS] RosMirenaCommonLapStatus class not found in ClassDB! Restart Godot from a sourced ROS workspace.")
-		return
+	lap_status_msg.header.stamp = _node.now()
+	lap_status_msg.header.frame_id = "map"
+	lap_status_msg.cones_hit = cones_hit
+	lap_status_msg.lap_time = lap_time
 
-	var msg = ClassDB.instantiate("RosMirenaCommonLapStatus")
-	msg.header.stamp = _node.now()
-	msg.header.frame_id = "map"
-	msg.cones_hit = cones_hit
-	msg.lap_time = lap_time
-	
-	_lap_status_pub.publish(msg)
+	_lap_status_pub.publish(lap_status_msg)
 
 func _on_control(msg):
 	_ros_gas = msg.gas
@@ -178,7 +200,10 @@ func _debug_publish():
 	_publish_perception()
 	_publish_slam()
 	_publish_control()
-	_as_info_pub.publish(_as_info)
+
+func _on_as_status(msg):
+	_as_info.status = msg.status
+	_as_info.mission = msg.mission
 
 func _publish_car_state():
 	var now = _node.now()
@@ -216,8 +241,16 @@ func _publish_car_state():
 func _publish_wheel_speeds():
 	wheel_speeds.header.stamp = _node.now()
 	wheel_speeds.header.frame_id = frame_id  # "car/cog"
-	wheel_speeds.rl = -$RL_WHEEL.get_rpm()
-	wheel_speeds.rr = -$RR_WHEEL.get_rpm()
+	# Low-pass filter: Godot vehicle physics produces jittery RPM values.
+	# Proper exponential moving average: alpha = 1 - exp(-dt/tau).
+	var dt := 1.0 / wheel_speed_rate
+	var alpha := 1.0 - exp(-dt / wheel_speed_lpf_tau)
+	var raw_rl: float = -$RL_WHEEL.get_rpm()
+	#var raw_rr: float = -$RR_WHEEL.get_rpm()
+	_wheel_rpm_lpf[0] = lerpf(_wheel_rpm_lpf[0], raw_rl, alpha)
+	#_wheel_rpm_lpf[1] = lerpf(_wheel_rpm_lpf[1], raw_rr, alpha)
+	wheel_speeds.rl = _wheel_rpm_lpf[0]
+	wheel_speeds.rr = _wheel_rpm_lpf[1]
 	_wheel_speeds_pub.publish(wheel_speeds)
 
 func _publish_perception():
@@ -318,7 +351,7 @@ func _apply_vehicle_physics(_delta: float) -> void:
 	var fx = (throttle - braking * regen_scale) * max_fx_motor
 
 	$RL_WHEEL.engine_force = fx / 2.0
-	$RR_WHEEL.engine_force = fx / 2.0
+	#$RR_WHEEL.engine_force = fx / 2.0
 
 	var brake_force = min(brake + braking * (1.0 - regen_scale) * BRAKE_F, BRAKE_F)
 	$RL_WHEEL.brake = brake_force

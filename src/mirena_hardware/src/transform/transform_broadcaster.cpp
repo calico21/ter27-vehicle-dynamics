@@ -17,6 +17,10 @@ public:
         // Empty means "use the copy installed with this package", resolved via the
         // ament index so it works from any install/overlay prefix.
         this->declare_parameter("yaml_path", "");
+        // use_sim_time is a read-only parameter set by the launch system.
+        // It must NOT be declared here: rclcpp already registers it, and a
+        // second declare_parameter call throws. The node picks it up
+        // automatically from the launch override (use_sim_time:=true).
 
         yaml_path_ = this->get_parameter("yaml_path").as_string();
         if (yaml_path_.empty()) {
