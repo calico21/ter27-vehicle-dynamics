@@ -444,39 +444,37 @@ namespace mirena
  seen_candidates.insert(cid);
  }
 
- // 5. Evidence, for and against. A thing in plain view that was not reported
- // counts against itself; a thing nothing was pointed at does not.
- const double up = seen_evidence();
- const double down = missed_evidence();
- const double cap = 2.0 * params_.promote_log_odds;
+        // 5. Evidence, for and against. A thing in plain view that was not reported
+        //    counts against itself; a thing nothing was pointed at does not.
+        const double up = seen_evidence();
+        const double down = missed_evidence();
+        const double cap = 2.0 * params_.promote_log_odds;
 
- // Calcular incertidumbre de posición actual (desviación estándar estimada)
- const double pose_pos_std = std::sqrt(pose_cov(0,0) + pose_cov(1,1));
+        // Calcular incertidumbre de posición actual (desviación estándar estimada)
+        const double pose_pos_std = std::sqrt(pose_cov(0,0) + pose_cov(1,1));
 
- last_hidden_ = 0;
- for (auto &[id, record] : landmarks_)
- {
- if (seen_landmarks.count(id))
- record.log_odds += up;
- else if (in_view(pose, record.position))
- {
- // Si la incertidumbre de la pose es alta (>0.6m), no podemos estar seguros de que
- // el cono no esté ahí; es probable que la pose estimada esté desviada.
- if (pose_pos_std < 0.6)
- 
- 
- {
- record.log_odds += down;
- }
- }
- record.log_odds = std::clamp(record.log_odds, -cap, cap);
- if (record.log_odds < params_.publish_log_odds)
- {
- ++last_hidden_;
- if (debug)
- debug->hidden.push_back(record.position);
- }
- }
+        last_hidden_ = 0;
+        for (auto &[id, record] : landmarks_)
+        {
+            if (seen_landmarks.count(id))
+                record.log_odds += up;
+            else if (in_view(pose, record.position))
+            {
+            // Si la incertidumbre de la pose es alta (>0.6m), no podemos estar seguros de que
+            // el cono no esté ahí; es probable que la pose estimada esté desviada.
+                if (pose_pos_std < 0.6)
+                    {
+                    record.log_odds += down;
+                    }
+            }
+            record.log_odds = std::clamp(record.log_odds, -cap, cap);
+            if (record.log_odds < params_.publish_log_odds)
+            {
+                ++last_hidden_;
+                if (debug)
+                    debug->hidden.push_back(record.position);
+            }
+        }
 
  for (auto it = candidates_.begin(); it != candidates_.end();)
  {
@@ -504,18 +502,18 @@ namespace mirena
  ++it;
  }
 
- // 6. Is this frame worth a permanent pose?
- ++frames_since_keyframe_;
- const double drifted = std::sqrt(rel(0, 0) + rel(1, 1));
- const bool pinned = well_known >= kPoseDeterminingCones;
- const bool structure = std::any_of(
- candidates_.begin(), candidates_.end(), [&](const auto &entry) {
- return entry.second.log_odds >= params_.promote_log_odds &&
- !entry.second.sightings.empty();
- });
- const bool timer = frames_since_keyframe_ >= params_.keyframe_max_frames;
- const bool drifting = drifted > params_.keyframe_odom_sigma;
- wants_keyframe_ = timer || structure || drifting;
+        // 6. Is this frame worth a permanent pose?
+        ++frames_since_keyframe_;
+        const double drifted = std::sqrt(rel(0, 0) + rel(1, 1));
+        const bool pinned = well_known >= kPoseDeterminingCones;
+        const bool structure = std::any_of(
+            candidates_.begin(), candidates_.end(), [&](const auto &entry) {
+                return entry.second.log_odds >= params_.promote_log_odds &&
+                       !entry.second.sightings.empty();
+            });
+        const bool timer = frames_since_keyframe_ >= params_.keyframe_max_frames;
+        const bool drifting = drifted > params_.keyframe_odom_sigma;
+        wants_keyframe_ = timer || structure || drifting;
 
  // Which clause is doing the forcing, counted for the heartbeat.
  //
@@ -735,25 +733,25 @@ namespace mirena
  const gtsam::Matrix2 rotation = seen_from.rotation().matrix();
  const gtsam::Matrix2 resolving = rotation * last.covariance * rotation.transpose();
 
- int duplicate_of = -1;
- if (is_duplicate(world, world_cov, resolving, &duplicate_of))
- {
- // if (overdue)
- //{
- // Still indistinguishable after all this time. An extra cone in
- // the map is a cosmetic defect; a missing one is a hole in the
- // track that the planner has to route around. Break the tie
- // towards existing.
- // }
- // else
- // {
- // Give it to the landmark it duplicates and let it go. Nothing
- // was ever written for this candidate, so nothing is undone.
- landmarks_.at(duplicate_of).types.absorb(cand.types);
- it = candidates_.erase(it);
- continue;
- // }
- }
+            int duplicate_of = -1;
+            if (is_duplicate(world, world_cov, resolving, &duplicate_of))
+            {
+               // if (overdue)
+                //{
+                    // Still indistinguishable after all this time. An extra cone in
+                    // the map is a cosmetic defect; a missing one is a hole in the
+                    // track that the planner has to route around. Break the tie
+                    // towards existing.
+              //  }
+               // else
+               // {
+                    // Give it to the landmark it duplicates and let it go. Nothing
+                    // was ever written for this candidate, so nothing is undone.
+                    landmarks_.at(duplicate_of).types.absorb(cand.types);
+                    it = candidates_.erase(it);
+                    continue;
+              //  }
+            }
 
  const int id = next_landmark_++;
  values.insert(landmark_key(id), world);
