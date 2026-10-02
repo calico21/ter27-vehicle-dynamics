@@ -107,6 +107,11 @@ class MirenaState : public rclcpp::Node
     bool _ins_anchored = false;
     double _anchor_tx = 0.0, _anchor_ty = 0.0, _anchor_dpsi = 0.0;
 
+    /// Offset constante INS -> estimación sin INS. Se calcula una sola vez
+    /// con el primer fix y se resta a todos los datos subsiguientes del INS.
+    double _ins_offset_x = 0.0, _ins_offset_y = 0.0, _ins_offset_psi = 0.0;
+    bool _ins_offset_computed = false;
+
     // Parameters (resolved in the constructor)
     double _odom_timeout_sec = 0.5;
     double _imu_timeout_sec = 0.2;
@@ -389,15 +394,40 @@ private:
         _last_odom_stamp = msg->header.stamp;
         const double t = rclcpp::Time(msg->header.stamp).seconds();
 
-        const double ins_x = msg->pose.pose.position.x;
-        const double ins_y = msg->pose.pose.position.y;
-        const double ins_psi = yaw_from_quat(msg->pose.pose.orientation);
+        double ins_x = msg->pose.pose.position.x;
+        double ins_y = msg->pose.pose.position.y;
+        double ins_psi = yaw_from_quat(msg->pose.pose.orientation);
+
+        // Restar el offset constante para que el INS coincida con la
+        // estimación dead-reckoning. El primer fix ya coincide por
+        // construcción; los siguientes se ajustan con la misma constante.
+        if (_ins_offset_computed)
+        {
+            ins_x -= _ins_offset_x;
+            ins_y -= _ins_offset_y;
+            ins_psi = mirena::Ekf::wrap_angle(ins_psi - _ins_offset_psi);
+        }
 
         if (!_ins_anchored)
         {
             if (_ekf->is_initialized())
             {
                 latch_anchor(ins_x, ins_y, ins_psi);
+                // Calcular el offset constante entre el INS y la estimación
+                // dead-reckoning. El primer dato del INS coincidirá con la
+                // posición estimada sin INS; los siguientes se ajustan con la
+                // misma constante.
+                const auto &x = _ekf->state();
+                _ins_offset_x = ins_x - x(0);
+                _ins_offset_y = ins_y - x(1);
+                _ins_offset_psi = mirena::Ekf::wrap_angle(ins_psi - x(2));
+                _ins_offset_computed = true;
+                RCLCPP_INFO(this->get_logger(),
+                            "INS offset computed: (%.2f, %.2f) m, %.2f deg. "
+                            "First INS fix will match dead-reckoning estimate.",
+                            _ins_offset_x, _ins_offset_y,
+                            _ins_offset_psi * 180.0 / M_PI);
+                RCLCPP_INFO(this->get_logger(), "FIX");
             }
             else
             {
