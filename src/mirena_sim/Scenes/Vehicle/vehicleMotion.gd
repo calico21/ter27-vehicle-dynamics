@@ -149,6 +149,13 @@ func _on_body_entered(body: Node) -> void:
 	if body.is_in_group("Cones"):
 		hit_cones.append(body)
 		cone_hit.emit(hit_cones.size())
+		# lap_start_ticks is 0.0 until the car first crosses the start gate, and it
+		# is spawned START_OFFSET metres before it. A cone struck in that stretch
+		# would otherwise report get_ticks_msec() - 0, which is engine uptime, not
+		# lap time -- and the sweep reads it as a long survival. The count above
+		# still stands, so a later post-gate hit reports the correct total.
+		if lap_start_ticks == 0.0:
+			return
 		var elapsed_ms: float = Time.get_ticks_msec() - lap_start_ticks
 		var lap_time: float = elapsed_ms / 1000.0
 		var total_cones_hit: int = hit_cones.size()

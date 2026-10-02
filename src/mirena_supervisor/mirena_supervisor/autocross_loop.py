@@ -21,10 +21,12 @@ Usage:
 """
 
 import csv
+import fcntl
 import os
 import signal
 import subprocess
 import time
+from contextlib import contextmanager
 from typing import Dict, List, Optional, Tuple
 
 import rclpy
@@ -48,6 +50,17 @@ COOLDOWN_SEC: float = 3.0
 
 # Path to the sweep CSV. Can be overridden with the csv_path ROS parameter.
 CSV_PATH: str = 'pid_sweep_results_2.csv'
+
+# Written into lap_time_s while a row is being tested, so a parallel instance
+# skips it and a crashed one does not look like a finished measurement. Not a
+# number, precisely so read_sweep_csv can tell the two apart.
+CLAIM_MARKER: str = 'claimed'
+
+# The claim marker used before CLAIM_MARKER existed. A CSV written by the older
+# scheme is treated as untested so it self-heals rather than staying frozen as a
+# fake 0.0s result. A real lap cannot read 0.000 anyway: the timer starts at the
+# gate crossing, so even a same-millisecond hit is 0.001.
+LEGACY_CLAIM: str = '0.000'
 
 # The lateral PID gains each run tries, in sweep order. Keys are the
 # mirena_control_pid parameter names; autocross.launch.py declares them as
@@ -100,7 +113,11 @@ def read_sweep_csv(path: str) -> List[Tuple[int, Dict[str, float], bool]]:
 
     Returns a list of (row_index, params, has_result) tuples, where row_index
     is the 0-based data row index (excluding the header) and has_result is
-    True when the lap_time_s column is non-empty.
+    True when the row holds a real measurement.
+
+    A row still carrying the claim marker counts as NOT done: the instance that
+    claimed it may have been killed before writing its result, and treating the
+    marker as a result would strand that parameter set as a fake 0.0s forever.
     """
     rows: List[Tuple[int, Dict[str, float], bool]] = []
     with open(path, 'r', newline='') as f:
@@ -112,30 +129,60 @@ def read_sweep_csv(path: str) -> List[Tuple[int, Dict[str, float], bool]]:
                 'cross_track_kd': float(row['cross_track_kd']),
                 'cross_track_tau_d': float(row['cross_track_tau_d']),
             }
-            has_result = bool(row.get('lap_time_s', '').strip())
+            cell = row.get('lap_time_s', '').strip()
+            has_result = bool(cell) and cell not in (CLAIM_MARKER, LEGACY_CLAIM)
             rows.append((i, params, has_result))
     return rows
+
+
+@contextmanager
+def csv_lock(path: str):
+    """Hold an exclusive lock on the sweep CSV for the read-modify-write.
+
+    update_csv_row rewrites the whole file, so two instances writing at once
+    interleave and lose each other's rows. The lock is taken on a sidecar file
+    because locking the CSV itself would have to span the truncate-and-rewrite.
+    """
+    lock_path = path + '.lock'
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
 
 
 def update_csv_row(path: str, row_index: int,
                    lap_time: Optional[float], cones_hit: Optional[int]) -> None:
     """Write a test result back to its CSV row immediately."""
-    with open(path, 'r', newline='') as f:
-        rows = list(csv.reader(f))
+    with csv_lock(path):
+        with open(path, 'r', newline='') as f:
+            rows = list(csv.reader(f))
 
-    # row_index is 0-based data row; +1 skips the header
-    data_row = rows[row_index + 1]
-    data_row[4] = f'{lap_time:.3f}' if lap_time is not None else ''
-    data_row[5] = str(cones_hit) if cones_hit is not None else ''
+        # row_index is 0-based data row; +1 skips the header
+        data_row = rows[row_index + 1]
+        data_row[4] = f'{lap_time:.3f}' if lap_time is not None else ''
+        data_row[5] = str(cones_hit) if cones_hit is not None else ''
 
-    with open(path, 'w', newline='') as f:
-        csv.writer(f).writerows(rows)
+        with open(path, 'w', newline='') as f:
+            csv.writer(f).writerows(rows)
 
 
 def claim_csv_row(path: str, row_index: int) -> None:
-    """Claim a row by writing 0,0 -- signals to other parallel instances
-    that this setup is already being tested."""
-    update_csv_row(path, row_index, 0.0, 0)
+    """Claim a row so parallel instances skip it while it is being tested.
+
+    The marker is deliberately not a number: a numeric 0.0 was indistinguishable
+    from a real result, so an instance killed mid-run left the row permanently
+    marked done and that parameter set was never measured.
+    """
+    update_csv_row(path, row_index, None, None)
+    with csv_lock(path):
+        with open(path, 'r', newline='') as f:
+            rows = list(csv.reader(f))
+        rows[row_index + 1][4] = CLAIM_MARKER
+        with open(path, 'w', newline='') as f:
+            csv.writer(f).writerows(rows)
 
 
 class ConeHitError(Exception):
@@ -452,8 +499,15 @@ def main() -> None:
                 'cross_track_kd': float(row['cross_track_kd']),
                 'cross_track_tau_d': float(row['cross_track_tau_d']),
             }
-            lap_time = float(row['lap_time_s']) if row['lap_time_s'].strip() else None
-            cones_hit = int(row['cones_hit']) if row['cones_hit'].strip() else None
+            # A claim marker is not a measurement: report it as untested rather
+            # than trying to parse it as a lap time.
+            cell = row['lap_time_s'].strip()
+            if cell and cell not in (CLAIM_MARKER, LEGACY_CLAIM):
+                lap_time = float(cell)
+                cones_hit = int(row['cones_hit']) if row['cones_hit'].strip() else None
+            else:
+                lap_time = None
+                cones_hit = None
             results.append((params, lap_time, cones_hit))
 
     print(f"Full results written to {csv_path}")

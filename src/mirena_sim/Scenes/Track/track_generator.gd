@@ -60,11 +60,18 @@ const LAYOUT_SCALE := 100.0
 ## straight, self clearance, attempts, and whether it fell back.
 var last_stats := {}
 
+## Seed the noise field is drawn from. Fixed by default, so a given set of gains
+## always drives the same track and two runs of it are comparable -- which is the
+## whole point when a tuning sweep is comparing gains against each other. Set to
+## -1 to go back to a fresh track per launch (the track menu's "generate").
+const DEFAULT_SEED := 20260902
+var base_seed: int = DEFAULT_SEED
+
 
 ## A closed Trackdrive layout that obeys every rule above.
 func generate() -> Curve3D:
 	for attempt in MAX_ATTEMPTS:
-		var raw := _noise_loop()
+		var raw := _noise_loop(attempt)
 		if raw.is_empty():
 			continue
 
@@ -102,9 +109,15 @@ func generate() -> Curve3D:
 ##
 ## A threshold that clears nothing leaves no polygons at all; indexing that is
 ## how this used to crash rather than draw again.
-func _noise_loop() -> PackedVector2Array:
+##
+## The seed is per-attempt, not one constant: generate() retries up to
+## MAX_ATTEMPTS times, so a constant seed would re-test the identical blob 40
+## times and a seed whose first draw breaks a rule would always fall through to
+## the circle. Spreading the attempts keeps the run reproducible *and* still lets
+## the search find a legal layout.
+func _noise_loop(attempt: int) -> PackedVector2Array:
 	var noise := FastNoiseLite.new()
-	noise.seed = randi()
+	noise.seed = base_seed + attempt if base_seed >= 0 else randi()
 	noise.noise_type = FastNoiseLite.TYPE_PERLIN
 	noise.frequency = NOISE_FREQUENCY
 	noise.fractal_type = FastNoiseLite.FRACTAL_NONE
