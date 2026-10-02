@@ -1,5 +1,6 @@
 from setuptools import setup
 from glob import glob
+import os
 
 package_name = 'mirena_supervisor'
 
@@ -14,6 +15,7 @@ setup(
         # starts the latter itself, through the launch API, when the AS selects
         # a mission -- which is why they ship with this package.
         ('share/' + package_name + '/launch', glob('launch/*.launch.py')),
+        (os.path.join('share', package_name, 'config'), glob('config/*.rviz')),
         ('share/' + package_name + '/launch/missions', glob('launch/missions/*.launch.py')),
     ],
     install_requires=[
