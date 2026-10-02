@@ -32,38 +32,76 @@ class_name RosIns
 
 # --- Configuration ---
 @export_group("IMU Settings")
+## White sensor noise floor, per base-rate sample. This is the accelerometer's
+## own noise with the car still, which is small next to what vibration adds.
 @export var accel_noise_std: float = 0.005
 @export var gyro_noise_std: float = 0.0005
 @export var bias_drift_std: float = 0.00001
 @export var lpf_tau: float = 0.05 # Low-pass filter for physics jitter
-## Covariance published on the Imu messages. Zero matches the hardware, which
-## leaves all three matrices at zero -- confirmed over a recorded run, 0 of 26888
-## messages carried one. Raise it only if something downstream starts needing a
-## number there; nothing in this workspace reads it today.
-@export var imu_covariance_scale: float = 0.0
+## Road and drivetrain vibration, as a per-axis standard deviation of the
+## *published* samples at `vibration_reference_speed`. Defaults are the measured
+## on-car figures from mirena_imu.cpp's linear_acceleration_variance and
+## angular_velocity_variance parameters, which imu_pipeline.hpp streams straight
+## onto these messages -- and vibration dominates them by ~5x, exactly as that
+## file says. This is what a real IMU on a real car reads; a bare sensor floor
+## does not. Set vibration_scale to 0 for the smooth virtual-world IMU the sim
+## used to have.
+@export var accel_vibration_std: Vector3 = Vector3(0.173, 0.548, 0.141) # m/s^2
+@export var gyro_vibration_std: Vector3 = Vector3(0.00806, 0.00361, 0.00316) # rad/s
+@export var vibration_reference_speed: float = 15.0 # m/s
+@export_range(0.0, 4.0) var vibration_scale: float = 1.0
+## Scale on the published Imu covariances. 1.0 publishes the variance this model
+## actually produces, which is the point: a covariance that does not describe the
+## error being handed over is worse than no covariance. Set 0 only to reproduce
+## the old all-zero behaviour.
+@export var imu_covariance_scale: float = 1.0
 
 @export_group("INS Settings")
 ## One rate for the whole device, because the car has one: every message below
-## comes from the same measurement. The VN-300 streams at 400 Hz divided down;
-## the driver asks for 100.
+## comes from the same measurement. The VN-300 streams at kBaseRateHz (400, see
+## imu_wrapper.hpp) and mirena_imu divides down by an integer to reach this, so
+## each output sample is the *mean* of a whole number of base-rate samples. The
+## sim physics runs at that same 400 Hz, so this is modelled exactly rather than
+## approximated.
 @export var ins_rate: float = 100.0
-## Fraction of measurements the onboard filter has a solution for. The driver
-## publishes odometry and a fix only while the INS reports mode 2 (tracking) and
-## says nothing otherwise, so this gates rather than throttles -- which is why a
-## recorded run shows the IMU at 100 Hz and both INS topics at 76.6 Hz off the
-## very same stream (20587 of 26888 measurements).
+## Duty cycle of the onboard filter having a usable solution. The driver
+## publishes odometry only while the INS reports mode 2 (tracking) and says
+## nothing otherwise, so this gates rather than throttles: a recorded run shows
+## the IMU at 100 Hz and both INS topics at 76.6 Hz off the very same stream
+## (20587 of 26888 measurements).
+##
+## It used to be applied as a per-measurement coin flip, which threw away 23% of
+## the odometry at random intervals averaging 13 ms. Real INS outages are
+## episodic -- mode 2 to mode 3 dead reckoning for seconds -- and a filter handed
+## that sees its correction arrive at unpredictable times, which reads as jitter
+## in the estimate even when the sensor is fine. It is now a two-state Markov
+## process whose stationary duty cycle is this number and whose dwell times are
+## exponential, so the average holds but the run lengths are realistic.
 @export_range(0.0, 1.0) var ins_tracking_fraction: float = 0.766
+## Mean time spent in mode 3 before the filter reacquires. Sets the scale of the
+## outage runs; the tracking dwell follows from ins_tracking_fraction to keep the
+## duty cycle where it is. A recorded run shows both INS topics at 76.6% over
+## 26888 measurements, i.e. the aggregate, not the granularity.
+@export var ins_dead_dwell_sec: float = 3.0
 ## Alignment delay: the hardware publishes no odometry at all before the onboard
 ## filter converges, because mirena_state seeds its EKF from the first odometry
 ## it sees and an unconverged solution would pin the run's origin on a position
-## the sensor does not stand behind.
-@export var ins_startup_delay_sec: float = 0.0
+## the sensor does not stand behind. Non-zero here for the same reason it is
+## non-zero on the car -- at 0 the first odometry the fusion ever sees is trusted
+## completely. Kept short because a sim run is short.
+@export var ins_startup_delay_sec: float = 5.0
 ## Acquisition delay for the GNSS receiver itself, which is a different and much
 ## shorter job than the INS alignment above -- the driver publishes /sensors/gps/fix
 ## as soon as the receiver has a fix, without waiting for the filter. Kept small
 ## deliberately: the gap between this and ins_startup_delay_sec is the window in
 ## which the stack can see that GNSS is alive while the INS is still aligning.
 @export var gnss_startup_delay_sec: float = 2.0
+## Rate the receiver itself solves at, and therefore the rate /sensors/gps/fix
+## goes out. mirena_imu only accepts 1 or 5; default 5. The fix was previously
+## published once per IMU measurement, re-sending a single solution up to 20
+## times -- evidence that does not exist, which imu_pipeline.hpp explicitly
+## guards against by de-duplicating on GPS time-of-week.
+@export_range(1, 5) var gnss_rate_hz: int = 5
 
 ## Reported position uncertainty wanders inside this band, in metres of standard
 ## deviation. Defaults are the range measured over a recorded run: posU put
@@ -89,8 +127,12 @@ class_name RosIns
 @export var ins_yaw_sigma: float = 0.01
 @export var ins_att_tau: float = 20.0
 ## Published on twist.covariance for the angular rates. The onboard filter does
-## not stream a rate uncertainty, so the driver substitutes this constant.
-@export var ins_gyro_var: float = 1e-4
+## not stream a rate uncertainty, so the driver substitutes these constants --
+## per axis, because the three are genuinely different numbers on this car and a
+## single scalar either overstates one axis or understates another. Defaults are
+## mirena_imu.cpp's angular_velocity_variance, which imu_pipeline.hpp writes
+## straight onto twist.covariance[(i + 3) * 7].
+@export var ins_gyro_var: Vector3 = Vector3(6.5e-5, 1.3e-5, 1.0e-5)
 
 @export_group("Geodesy")
 ## Where the Godot world origin sits on the earth. The INS reports latitude and
@@ -127,6 +169,27 @@ var _gyro_bias: Vector3 = Vector3.ZERO
 var noisy_accel: Vector3 = Vector3.ZERO
 var noisy_gyro: Vector3 = Vector3.ZERO
 
+## Set after a respawn, and on the very first tick: the acceleration is a
+## finite difference of velocity, so the first sample after a teleport would
+## report the jump itself as acceleration. At 15 m/s over a 2.5 ms tick that is
+## 6000 m/s^2, and it is a step the EKF cannot unsee -- it integrates straight
+## into the pose and then has to be argued out of the covariance.
+var _seed_pending: bool = true
+
+# Decimation from the sensor's base rate down to ins_rate. Each output sample is
+# the mean of `_decim_window()` base-rate samples, which is what dividing the
+# real stream down does -- averaging, not holding.
+var _decim_n: int = 0
+var _decim_accel: Vector3 = Vector3.ZERO
+var _decim_gyro: Vector3 = Vector3.ZERO
+
+## Per-axis variance of the base-rate error, so the published covariance can be
+## derived from the model instead of asserted. Averaging N independent draws
+## divides the white part by N; the bias walk is common to the whole window and
+## is not reduced by it.
+var _accel_white_var: Vector3 = Vector3.ZERO
+var _gyro_white_var: Vector3 = Vector3.ZERO
+
 # INS solution error. One slow scalar in [0, 1] drives both the reported sigma
 # and the size of the error, so the covariance a consumer reads always describes
 # the error it is actually being handed -- which is the point of publishing one.
@@ -137,6 +200,14 @@ var _ins_pos_err: Vector3 = Vector3.ZERO   # metres, NED
 var _ins_vel_err: Vector3 = Vector3.ZERO   # m/s, sensor axes
 var _att_err: Vector3 = Vector3.ZERO       # rad, (roll, pitch, yaw)
 var _ins_elapsed: float = 0.0
+
+## Onboard filter mode, as a dwell time rather than a per-sample coin flip.
+var _ins_tracking_now: bool = true
+var _ins_mode_remaining: float = 0.0
+
+## Time since the last /sensors/gps/fix, so it goes out at the receiver's own
+## solution rate instead of once per IMU measurement.
+var _fix_elapsed: float = 0.0
 
 ## Where the odom frame's origin sits on the earth (mirena::IMU::GeodesicRef),
 ## latched from the first solution the driver trusts.
@@ -155,7 +226,6 @@ var _imu_in_cog_pub: RosPublisher
 var _imu_in_lidar_pub: RosPublisher
 var _odom_pub: RosPublisher
 var _fix_pub: RosPublisher
-var _timer: RosTimer
 var _cog_msg: RosSensorMsgsImu
 var _lidar_msg: RosSensorMsgsImu
 var _odom_msg: RosNavMsgsOdometry
@@ -190,10 +260,41 @@ func _ready() -> void:
 	_fix_msg = RosSensorMsgsNavSatFix.new()
 	_fill_imu_covariances()
 
-	_timer = _node.create_timer(1.0 / ins_rate, _process_measurement)
+	# No RosTimer here on purpose: publishing is driven off _physics_process so
+	# it lands on the requested tick rather than on a render-frame boundary.
+	# See _publish_output.
+	_init_ins_mode()
+	_warn_on_bad_rate()
 	is_initialized = true
 
+## The real driver refuses a rate that does not divide kBaseRateHz and streams at
+## the nearest that does (mirena_imu.cpp::rate_divisor). Here the window is
+## rounded, so the same thing happens silently -- except that a silent 99 Hz
+## topic is exactly the sort of thing that gets blamed on the fusion later.
+func _warn_on_bad_rate() -> void:
+	var base := _base_rate_hz()
+	var want := maxf(ins_rate, 1.0)
+	var window := _decim_window()
+	var actual := base / float(window)
+	if absf(actual - want) / want > 0.01:
+		push_warning("RosIns: ins_rate=%.1f does not divide the %.0f Hz base rate; "
+			% [want, base]
+			+ "streaming at %.1f Hz instead." % actual)
+
 # --- Raw sensing -------------------------------------------------------------
+
+## The sensor's base rate, which is also the physics rate. The real VN-300
+## streams at kBaseRateHz = 400 and the driver divides that down by an integer
+## (see imu_wrapper.hpp and mirena_imu.cpp::rate_divisor), so this is the rate
+## the noise has to be drawn at: drawing it at ins_rate and holding would leave
+## consecutive output samples correlated and fold the noise spectrum into the
+## baseband at full amplitude, which is what made this topic look broken.
+func _base_rate_hz() -> float:
+	return float(Engine.physics_ticks_per_second)
+
+## How many base-rate samples make up one output sample.
+func _decim_window() -> int:
+	return maxi(1, int(round(_base_rate_hz() / maxf(ins_rate, 1.0))))
 
 func _physics_process(delta: float) -> void:
 	if not is_initialized: return
@@ -206,17 +307,33 @@ func _physics_process(delta: float) -> void:
 	# the top of this file).
 	var arm_world := global_position - body.global_position
 	var imu_vel := body.linear_velocity + body.angular_velocity.cross(arm_world)
-	var accel_world := (imu_vel - _last_imu_vel) / delta
-	_last_imu_vel = imu_vel
+	var inv_basis := global_basis.inverse()
 
 	# 2. Into the sensor's own axes.
-	var inv_basis := global_basis.inverse()
-	var local_accel := inv_basis * accel_world
 	var local_gyro := inv_basis * body.angular_velocity
+	var local_accel := Vector3.ZERO
+
+	if _seed_pending:
+		# First tick, or the first after a respawn. There is no previous velocity,
+		# so there is no acceleration to report: contributing zero is the honest
+		# answer, and it is what stops a teleport from being published as
+		# 15 m/s over one 2.5 ms tick. Seeding _last_imu_vel here is what makes
+		# the *next* tick's difference valid rather than a jump.
+		#
+		# The gyro is different -- it is measured directly, not differenced, so it
+		# is seeded from the sample. Starting it at zero instead would put a
+		# decaying transient on the yaw rate of every run.
+		_seed_pending = false
+		_last_imu_vel = imu_vel
+		_lpf_accel = Vector3.ZERO
+		_lpf_gyro = local_gyro
+	else:
+		local_accel = inv_basis * (imu_vel - _last_imu_vel) / delta
+		_last_imu_vel = imu_vel
 
 	# 3. Low-pass filter: physics engines create spikes that break factor graphs.
 	# Proper exponential moving average: alpha = 1 - exp(-dt/tau).
-	var alpha := 1.0 - exp(-delta / lpf_tau)
+	var alpha := 1.0 - exp(-delta / maxf(lpf_tau, 1e-6))
 	_lpf_accel = _lpf_accel.lerp(local_accel, alpha)
 	_lpf_gyro = _lpf_gyro.lerp(local_gyro, alpha)
 
@@ -225,22 +342,101 @@ func _physics_process(delta: float) -> void:
 	_accel_bias += _noise_vec(bias_drift_std * drift_scale)
 	_gyro_bias += _noise_vec(bias_drift_std * drift_scale)
 
-	# 5. Final noisy readings.
-	noisy_accel = _lpf_accel + _accel_bias + _noise_vec(accel_noise_std)
-	noisy_gyro = _lpf_gyro + _gyro_bias + _noise_vec(gyro_noise_std)
+	# 5. Vibration, growing with speed: road and tyre buzz, and the drive
+	#    train's own. This is the term that dominates a real IMU on a real car,
+	#    and it is why the hardware's measured covariances are ~5x the
+	#    accelerometer's own noise floor.
+	#
+	#    accel_vibration_std describes the *output* samples, because that is what
+	#    the hardware's variance parameters describe and what a consumer reads
+	#    off these messages. Drawing it at the base rate means scaling up by
+	#    sqrt(window): averaging N independent draws divides their variance by N,
+	#    so to land on a chosen output variance the base rate has to be sqrt(N)
+	#    times larger. Doing it here rather than baking 2.0 into the defaults is
+	#    what keeps the match intact if ins_rate ever changes.
+	var speed := imu_vel.length()
+	var vib_gain := vibration_scale * (speed / maxf(vibration_reference_speed, 1e-6))
+	var scale_up := sqrt(float(_decim_window()))
+	var vib_a_std := accel_vibration_std * vib_gain * scale_up
+	var vib_g_std := gyro_vibration_std * vib_gain * scale_up
+
+	# 6. Final base-rate readings.
+	noisy_accel = _lpf_accel + _accel_bias + _noise_vec(accel_noise_std) + _noise_vec_v(vib_a_std)
+	noisy_gyro = _lpf_gyro + _gyro_bias + _noise_vec(gyro_noise_std) + _noise_vec_v(vib_g_std)
+
+	# 7. Track the variance actually being produced, so the published covariance
+	#    describes this error rather than asserting a datasheet figure.
+	var floor_a := Vector3.ONE * accel_noise_std
+	var floor_g := Vector3.ONE * gyro_noise_std
+	_accel_white_var = _vsq(floor_a) + _vsq(vib_a_std)
+	_gyro_white_var = _vsq(floor_g) + _vsq(vib_g_std)
+
+	# 8. Decimate down to ins_rate by averaging the base-rate samples. This is
+	#    what the real driver does with `rate_divisor`, and it is the step that
+	#    was missing: holding one sample per output period correlated 3 of every
+	#    4 outputs with their predecessor and aliased the per-tick noise on top.
+	_decim_accel += noisy_accel
+	_decim_gyro += noisy_gyro
+	_decim_n += 1
+	var window := _decim_window()
+	if _decim_n < window:
+		return
+	var n := float(_decim_n)
+	noisy_accel = _decim_accel / n
+	noisy_gyro = _decim_gyro / n
+	_decim_accel = Vector3.ZERO
+	_decim_gyro = Vector3.ZERO
+	_decim_n = 0
+
+	_publish_output(delta * n)
+
+## Wipe the sensor's own state. Called when the car is respawned, and before the
+## first tick. Everything that carries across a pose change has to go: the
+## velocity the acceleration is differenced against, both filters, the bias
+## random walks, and the INS solution's own error state -- a respawn is a new
+## run, not a continuation of the last one.
+func reset() -> void:
+	_seed_pending = true
+	_last_imu_vel = Vector3.ZERO
+	_lpf_accel = Vector3.ZERO
+	_lpf_gyro = Vector3.ZERO
+	_accel_bias = Vector3.ZERO
+	_gyro_bias = Vector3.ZERO
+	_decim_accel = Vector3.ZERO
+	_decim_gyro = Vector3.ZERO
+	_decim_n = 0
+	_accel_white_var = Vector3.ZERO
+	_gyro_white_var = Vector3.ZERO
+	_ins_quality = 0.5
+	_ins_pos_err = Vector3.ZERO
+	_ins_vel_err = Vector3.ZERO
+	_att_err = Vector3.ZERO
+	_ins_elapsed = 0.0
+	_fix_elapsed = 0.0
+	# The odom origin is latched from the first solution this device trusts, so
+	# a new run has to latch a new one -- otherwise the pose origin would be
+	# pinned to wherever the car happened to be on the previous respawn.
+	_have_ref = false
+	_init_ins_mode()
 
 # --- The driver's publish loop ----------------------------------------------
 
-## One measurement, converted -- the sim's Pipeline::process.
-func _process_measurement() -> void:
-	if not is_initialized: return
+## One output measurement, converted -- the sim's Pipeline::process.
+##
+## Driven from _physics_process once per decimation window rather than from a
+## RosTimer: RosTimer callbacks reach Godot through call_deferred, so a timer
+## nominally at ins_rate actually fires on a render-frame boundary, and with
+## vsync off that frame rate floats with load. Arrival intervals jittered even
+## though the stamps themselves came from /clock.
+func _publish_output(dt: float) -> void:
 	var body := get_parent() as RigidBody3D
 	if not body: return
 	_ensure_mounting()
 
-	var dt := 1.0 / ins_rate
 	_ins_elapsed += dt
+	_fix_elapsed += dt
 	_advance_ins_error(dt)
+	_advance_ins_mode(dt)
 
 	var stamp = _node.now()
 
@@ -250,7 +446,9 @@ func _process_measurement() -> void:
 	# device does not have.
 	var attitude := _noisy_attitude()
 
-	# Always produced, both frames, from the one sample.
+	# Always produced, both frames, from the one sample. The covariances cover both
+	# messages, so they are filled first.
+	_fill_imu_covariances()
 	_fill_imu(_cog_msg, stamp, parent_frame_id, _cog_from_imu, attitude)
 	_imu_in_cog_pub.publish(_cog_msg)
 	_fill_imu(_lidar_msg, stamp, lidar_frame_id, _lidar_from_imu, attitude)
@@ -267,7 +465,13 @@ func _process_measurement() -> void:
 	# publishes it from that moment. Before this change the whole GNSS side of
 	# the stack was silent until the INS came up, which is precisely when
 	# someone debugging a car that will not converge needs to see it.
-	if _gnss_has_fix():
+	#
+	# At the receiver's own solution rate, though. This used to go out once per
+	# IMU measurement -- the same fix repeated up to ins_rate/gnss_rate times,
+	# which is the "evidence that does not exist" imu_pipeline.hpp guards
+	# against by keying on GPS time-of-week.
+	if _gnss_has_fix() and _fix_elapsed >= 1.0 / float(maxi(1, gnss_rate_hz)):
+		_fix_elapsed = 0.0
 		_publish_fix(stamp, lla)
 
 	if not _ins_tracking():
@@ -285,10 +489,44 @@ func _gnss_has_fix() -> bool:
 
 ## VectorNav INS mode 2 is "tracking"; 0, 1 and 3 are no solution, aligning, and
 ## dead reckoning after GPS loss. None of them may publish odometry.
+##
+## Episodic, not per-sample: see ins_tracking_fraction for why a coin flip per
+## measurement was wrong.
 func _ins_tracking() -> bool:
 	if _ins_elapsed < ins_startup_delay_sec:
 		return false
-	return randf() < ins_tracking_fraction
+	return _ins_tracking_now
+
+## Start the filter in mode 2 with a dwell drawn from the tracking distribution,
+## so the first outage lands at a random point rather than immediately.
+func _init_ins_mode() -> void:
+	_ins_tracking_now = true
+	_ins_mode_remaining = _draw_dwell(_tracking_dwell_sec())
+
+## Mean dwell in mode 2, derived so that the stationary duty cycle is
+## ins_tracking_fraction whatever the outage length is set to.
+func _tracking_dwell_sec() -> float:
+	var dead := maxf(ins_dead_dwell_sec, 1e-6)
+	var stay := clampf(ins_tracking_fraction, 0.0, 1.0)
+	return dead * stay / maxf(1.0 - stay, 1e-6)
+
+## Exponential dwell. A constant dwell would make the outage runs evenly spaced,
+## which is its own kind of tell; the exponential is the correct distribution
+## for a two-state continuous-time Markov chain and is what makes the average
+## dwell exactly the value passed in.
+func _draw_dwell(mean: float) -> float:
+	if mean <= 0.0:
+		return INF
+	return -log(maxf(randf(), 1e-12)) * mean
+
+## Advance the filter mode, flipping it when the current dwell expires.
+func _advance_ins_mode(dt: float) -> void:
+	_ins_mode_remaining -= dt
+	if _ins_mode_remaining > 0.0:
+		return
+	_ins_tracking_now = not _ins_tracking_now
+	_ins_mode_remaining = _draw_dwell(
+		_tracking_dwell_sec() if _ins_tracking_now else ins_dead_dwell_sec)
 
 ## Fill one Imu message for the frame `frame_from_imu` targets.
 ##
@@ -450,16 +688,47 @@ func _ou_vec(value: Vector3, sigma: float, tau: float, dt: float) -> Vector3:
 func _noise_vec(std: float) -> Vector3:
 	return Vector3(randfn(0, std), randfn(0, std), randfn(0, std))
 
+## Noise with a different standard deviation per axis, so the vibration term can
+## follow the measured per-axis spread rather than pretending it is isotropic.
+func _noise_vec_v(std: Vector3) -> Vector3:
+	return Vector3(randfn(0, std.x), randfn(0, std.y), randfn(0, std.z))
+
+## Component-wise square, i.e. the per-axis variance of a deviation vector.
+##
+## Written out by hand rather than as `v * v` on purpose: `Vector3.square()` was
+## assumed here and does not exist in Godot 4, and because a parse error takes the
+## whole script down with it, that mistake silently removed all four INS
+## publishers. Vector3 has no component-wise square in any Godot 4 release, and
+## spelling it out means there is nothing left to misremember.
+func _vsq(v: Vector3) -> Vector3:
+	return Vector3(v.x * v.x, v.y * v.y, v.z * v.z)
+
 # --- Covariances -------------------------------------------------------------
 
+## Covariances of the decimation *output*, refilled every sample because the
+## vibration term scales with speed and the window's length is what decides how
+## much of the white part survives the averaging.
+##
+## The white terms are divided by the window because averaging N independent
+## draws divides their variance by N; the bias walk is common to every sample in
+## the window, so it is not reduced at all. Reporting the white part unreduced
+## would overstate the error by the window length; reporting the bias reduced
+## would understate it.
 func _fill_imu_covariances() -> void:
-	var a_var := pow(accel_noise_std, 2) * imu_covariance_scale
-	var g_var := pow(gyro_noise_std, 2) * imu_covariance_scale
+	var n := float(maxi(1, _decim_window()))
+	var a_var := (_accel_white_var / n + _vsq(_accel_bias)) * imu_covariance_scale
+	var g_var := (_gyro_white_var / n + _vsq(_gyro_bias)) * imu_covariance_scale
 	for i in range(3):
-		_cog_msg.linear_acceleration_covariance[i * 4] = a_var
-		_cog_msg.angular_velocity_covariance[i * 4] = g_var
-		_lidar_msg.linear_acceleration_covariance[i * 4] = a_var
-		_lidar_msg.angular_velocity_covariance[i * 4] = g_var
+		_cog_msg.linear_acceleration_covariance[i * 4] = a_var[i]
+		_cog_msg.angular_velocity_covariance[i * 4] = g_var[i]
+		_lidar_msg.linear_acceleration_covariance[i * 4] = a_var[i]
+		_lidar_msg.angular_velocity_covariance[i * 4] = g_var[i]
+	if imu_covariance_scale > 0.0:
+		var s := imu_covariance_scale
+		for msg in [_cog_msg, _lidar_msg]:
+			msg.orientation_covariance[0] = pow(ins_roll_sigma, 2) * s
+			msg.orientation_covariance[4] = pow(ins_pitch_sigma, 2) * s
+			msg.orientation_covariance[8] = pow(ins_yaw_sigma, 2) * s
 
 ## Refilled every solution, not once at startup: on the car these are the onboard
 ## filter's own 1-sigma uncertainties and they move as the fix gets better or
@@ -477,7 +746,7 @@ func _fill_odom_covariances() -> void:
 	for i in range(3):
 		pose_cov[i * 7] = pos_var
 		twist_cov[i * 7] = vel_var
-		twist_cov[(i + 3) * 7] = ins_gyro_var
+		twist_cov[(i + 3) * 7] = ins_gyro_var[i]
 	pose_cov[21] = pow(ins_roll_sigma, 2)
 	pose_cov[28] = pow(ins_pitch_sigma, 2)
 	pose_cov[35] = pow(ins_yaw_sigma, 2)

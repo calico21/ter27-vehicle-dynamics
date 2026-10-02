@@ -125,7 +125,7 @@ def generate_launch_description():
                 'publish_debug': True,                         # publish the map and association markers
                 # -- Association. One gate answers every "is this the thing I already have" question
                 'mahalanobis_threshold': 5.99,                 # chi-square gate on squared Mahalanobis distance; 95th pct, 2 DoF
-                'max_association_distance': 5.0,               # m, Euclidean backstop applied before the chi-square test
+                'max_association_distance': 5.5,               # m, Euclidean backstop applied before the chi-square test
                 'local_map_radius': 20.0,                      # m the car looks; also defines "should have been seen"
                 'view_half_angle': 1.05,                       # rad, half-angle of the sensor field of view
                 # -- Measurements

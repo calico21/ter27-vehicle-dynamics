@@ -8,7 +8,11 @@ enum PilotMode { NO_PILOT, MANUAL, ROS, TRACK_RAIL }
 const POWER_LIM = 80000 # W
 const MOTOR_PEAK_TRQ = 100 # Nm
 const GEAR_RATIO = 5 # 1:5
-const WHEEL_RADIUS = 0.23 # m
+## Rolling radius of the tyre. Must agree with wheel_radius on every
+## VehicleWheel3D in mirena_car.tscn *and* with mirena_state's `wheel_radius`
+## parameter, which is what turns the RPM published below into m/s. All three
+## were different once: 0.23 here, 0.26 in the scene, 0.20 in the fusion.
+const WHEEL_RADIUS = 0.20 # m
 const BRAKE_F = 20
 const MAX_STEER = deg_to_rad(30)
 ## Forward speed over which regen is at full strength. Below it regen fades out
@@ -26,9 +30,19 @@ var path : Path3D
 
 # --- ROS Variables ---
 @export var frame_id: String = "car/cog"
-## Rate the rear wheel speeds go out at, in Hz.
+## Rate the rear wheel speeds go out at, in Hz. Mirrors the real bus, where
+## WheelInfo is a cyclic frame polled by mirena_can's 5 ms rx timer and stamped
+## on arrival -- the message carries no timestamp of its own.
 @export var wheel_speed_rate: float = 100.0
-@export var wheel_speed_lpf_tau: float = 0.05 # Low-pass filter time constant (s)
+## Low-pass filter time constant (s). tau = 0 passes the quantised encoder
+## reading straight through, which is the most honest thing available: on the
+## real car the filtering is inside the motor controller, not in this driver.
+@export var wheel_speed_lpf_tau: float = 0.05
+## Quantisation step of the reported speed in RPM. The bus value is a signed
+## int16 in whole RPM (see mirena_can.cpp handle_wheel_info), so a real encoder
+## can never report a fraction. At WHEEL_RADIUS that is a 0.021 m/s step, which
+## the fusion absorbs as measurement noise and deserves to be exercised against.
+@export var wheel_speed_quantise_rpm: float = 1.0
 var _node: RosNode
 # Publishers
 var _state_pub: RosPublisher
@@ -39,7 +53,8 @@ var _inferred_control_pub: RosPublisher
 var _wheel_speeds_pub: RosPublisher
 var _lap_status_pub: RosPublisher
 var _debug_tim : RosTimer
-var _wheel_speeds_tim : RosTimer
+var _wheel_decim_n: int = 0
+var _wheel_rpm_acc: Array = [0.0, 0.0] # [rl, rr] sum over the window
 var _wheel_rpm_lpf: Array = [0.0, 0.0] # [rl, rr] filtered RPM
 # Subscribers
 var _control_sub: RosSubscriber
@@ -66,15 +81,17 @@ var lap_start_ticks: float = 0.0
 
 func _ready():
 	# Enable collision contact reporting
-	contact_monitor = true
-	max_contacts_reported = 4
-	body_entered.connect(_on_body_entered)
-
-	# Enable cone collisions by default
+	
 	cone_collision_set(true)
 
 	# Add to vehicle group so gates can detect us
 	add_to_group("vehicle")
+	contact_monitor = true
+	max_contacts_reported = 10
+	body_entered.connect(_on_body_entered)
+
+	# Enable cone collisions by default
+	
 
 	# Connect to InitialGate's vehicle_passed signal for lap timing
 	_connect_to_initial_gate()
@@ -93,6 +110,9 @@ func _ready():
 	
 	var wheel_qos := RosQoS.new()
 	wheel_qos.history = RosQoS.KEEP_LAST
+	# depth 5 / BEST_EFFORT mirrors rclcpp::SensorDataQoS(), which is what the
+	# real CAN bridge publishes /sensors/wheel_speeds on. Deliberately not
+	# widened: a sim that queues more than the car does hides its own hitches.
 	wheel_qos.depth = 5
 	wheel_qos.reliability = RosQoS.BEST_EFFORT
 	wheel_qos.durability = RosQoS.VOLATILE
@@ -106,8 +126,15 @@ func _ready():
 	_mission_info.status = 0
 	
 	## Publisher timers
+	#
+	# Wheel speeds are deliberately NOT on a RosTimer. RosTimer callbacks are
+	# handed to the Godot main thread with call_deferred (see
+	# rclgd/src/rclgd/ros_timer.cpp), so a "100 Hz" timer actually fires on a
+	# render-frame boundary -- with vsync off that frame rate floats with load,
+	# and the published intervals jitter even though the stamps come from
+	# /clock. The encoder is driven off _physics_process instead, which lands
+	# exactly on the requested tick.
 	_debug_tim = _node.create_timer(0.1, _debug_publish)
-	_wheel_speeds_tim = _node.create_timer(1.0 / wheel_speed_rate, _publish_wheel_speeds)
 	
 	# Subscribers
 	_control_sub = _node.create_subscription("/control", "mirena_common/msg/CarControl", _on_control)
@@ -119,13 +146,14 @@ func _ready():
 	Sim.register_camera($FPCam)
 
 func _on_body_entered(body: Node) -> void:
-	if body.is_in_group("Cones") and not hit_cones.has(body):
+	if body.is_in_group("Cones"):
 		hit_cones.append(body)
 		cone_hit.emit(hit_cones.size())
 		var elapsed_ms: float = Time.get_ticks_msec() - lap_start_ticks
 		var lap_time: float = elapsed_ms / 1000.0
 		var total_cones_hit: int = hit_cones.size()
 		_publish_lap_status(total_cones_hit, lap_time)
+		print("CONE Hit")
 		
 
 func _connect_to_initial_gate():
@@ -193,6 +221,7 @@ func _physics_process(delta: float) -> void:
 	if global_position.y < -1:
 		reset_position()
 
+	_update_wheel_speeds()
 	_publish_car_state()
 		
 # Publish Debug Info
@@ -238,20 +267,57 @@ func _publish_car_state():
 	car_state.covariance = cov
 	_state_pub.publish(car_state)
 
-func _publish_wheel_speeds():
+## Accumulate wheel speed once per physics tick and publish at wheel_speed_rate.
+##
+## An encoder counts pulses over a measurement window, so what the bus carries is
+## the *mean* over that window rather than the instantaneous rate. Godot
+## integrates wheel rotation every physics tick, so the mean over
+## (physics rate / output rate) ticks is the same quantity the real frame's
+## period would average -- and averaging is what removes the per-tick solver
+## jitter that made this topic unusable, instead of merely hiding it behind a
+## filter. The previous code published one held sample per output period.
+func _update_wheel_speeds() -> void:
+	# Godot's convention: forward drive makes get_rpm() negative.
+	_wheel_rpm_acc[0] += -$RL_WHEEL.get_rpm()
+	_wheel_rpm_acc[1] += -$RR_WHEEL.get_rpm()
+	_wheel_decim_n += 1
+
+	var window: int = maxi(1, int(round(Engine.physics_ticks_per_second / wheel_speed_rate)))
+	if _wheel_decim_n < window:
+		return
+
+	# The interval actually accumulated, taken from the tick count rather than
+	# assumed from wheel_speed_rate: a nominal dt silently retunes the filter
+	# every time the loop hitches, which is precisely when it matters.
+	var dt := float(_wheel_decim_n) / float(Engine.physics_ticks_per_second)
+	var raw_rl: float = _wheel_rpm_acc[0] / float(_wheel_decim_n)
+	var raw_rr: float = _wheel_rpm_acc[1] / float(_wheel_decim_n)
+	_wheel_rpm_acc[0] = 0.0
+	_wheel_rpm_acc[1] = 0.0
+	_wheel_decim_n = 0
+
 	wheel_speeds.header.stamp = _node.now()
 	wheel_speeds.header.frame_id = frame_id  # "car/cog"
 	# Low-pass filter: Godot vehicle physics produces jittery RPM values.
 	# Proper exponential moving average: alpha = 1 - exp(-dt/tau).
-	var dt := 1.0 / wheel_speed_rate
-	var alpha := 1.0 - exp(-dt / wheel_speed_lpf_tau)
-	var raw_rl: float = -$RL_WHEEL.get_rpm()
-	#var raw_rr: float = -$RR_WHEEL.get_rpm()
+	var alpha := 1.0 - exp(-dt / maxf(wheel_speed_lpf_tau, 1e-6))
+	# Both rear wheels are reported. RL is the traction wheel and its reading
+	# carries whatever slip the solver produced; RR free-rolls, so it reflects
+	# the road. Both are real hardware (the bus instruments both), and
+	# mirena_state averages them, so publishing only one would halve u.
 	_wheel_rpm_lpf[0] = lerpf(_wheel_rpm_lpf[0], raw_rl, alpha)
-	#_wheel_rpm_lpf[1] = lerpf(_wheel_rpm_lpf[1], raw_rr, alpha)
-	wheel_speeds.rl = _wheel_rpm_lpf[0]
-	wheel_speeds.rr = _wheel_rpm_lpf[1]
+	_wheel_rpm_lpf[1] = lerpf(_wheel_rpm_lpf[1], raw_rr, alpha)
+	# Whole RPM, as int16 on the bus. This is what gives the topic its final
+	# quantisation step; filtering above stands in for the motor controller's
+	# internal filtering, not for anything the driver adds.
+	wheel_speeds.rl = _quantise_rpm(_wheel_rpm_lpf[0])
+	wheel_speeds.rr = _quantise_rpm(_wheel_rpm_lpf[1])
 	_wheel_speeds_pub.publish(wheel_speeds)
+
+func _quantise_rpm(rpm: float) -> float:
+	if wheel_speed_quantise_rpm <= 0.0:
+		return rpm
+	return roundf(rpm / wheel_speed_quantise_rpm) * wheel_speed_quantise_rpm
 
 func _publish_perception():
 	var cones = get_cones_in_sight(12.0)
@@ -350,8 +416,9 @@ func _apply_vehicle_physics(_delta: float) -> void:
 	var regen_scale = clamp(u / REGEN_FADE_SPEED, 0.0, 1.0)
 	var fx = (throttle - braking * regen_scale) * max_fx_motor
 
-	$RL_WHEEL.engine_force = fx / 2.0
-	#$RR_WHEEL.engine_force = fx / 2.0
+	# Rear left is the only traction wheel -- see the note on the wheel nodes in
+	# mirena_car.tscn. RR free-rolls and still reports an encoder speed.
+	$RL_WHEEL.engine_force = fx
 
 	var brake_force = min(brake + braking * (1.0 - regen_scale) * BRAKE_F, BRAKE_F)
 	$RL_WHEEL.brake = brake_force
@@ -382,12 +449,28 @@ func reset_position() -> void:
 	self.brake = 0
 	_rail_progress = 0
 	slam_cones.clear()
-	
+
 	# Reset gate crossing and cone timing tracking state
 	hit_cones.clear()
 	initial_gate_crossings = 0
 	lap_start_ticks = 0.0
 	cone_hit.emit(0)
+
+	# Sensor state has to be wiped with the pose. Otherwise the first wheel-speed
+	# window after a respawn spans the teleport, and the INS finite-differences
+	# its way across one too.
+	_wheel_rpm_acc[0] = 0.0
+	_wheel_rpm_acc[1] = 0.0
+	_wheel_rpm_lpf[0] = 0.0
+	_wheel_rpm_lpf[1] = 0.0
+	_wheel_decim_n = 0
+	# Guarded, because a parse error in ros_ins.gd leaves $INS as a bare Node3D
+	# with no script -- and an unguarded call here took the whole car down with
+	# it, stopping reset_position before it ever reached the wheel speeds above.
+	# The INS carrying state across a teleport is bad; the car not respawning at
+	# all is worse.
+	if $INS.has_method("reset"):
+		$INS.reset()
 
 func cone_collision_set(enable: bool) -> void:
 	self.collision_layer = (self.collision_layer & ~2) | (2 * int(enable))
