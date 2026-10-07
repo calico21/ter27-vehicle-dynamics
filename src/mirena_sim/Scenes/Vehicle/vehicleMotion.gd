@@ -423,10 +423,11 @@ func _apply_vehicle_physics(_delta: float) -> void:
 	var regen_scale = clamp(u / REGEN_FADE_SPEED, 0.0, 1.0)
 	var fx = (throttle - braking * regen_scale) * max_fx_motor
 
-	# Rear left is the only traction wheel -- see the note on the wheel nodes in
+	# Rear left and right 
 	# mirena_car.tscn. RR free-rolls and still reports an encoder speed.
 	$RL_WHEEL.engine_force = fx
-
+	$RR_WHEEL.engine_force = fx
+	
 	var brake_force = min(brake + braking * (1.0 - regen_scale) * BRAKE_F, BRAKE_F)
 	$RL_WHEEL.brake = brake_force
 	$RR_WHEEL.brake = brake_force

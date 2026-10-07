@@ -17,7 +17,7 @@ namespace mirena
         double voxel_leaf_size = 0.05; // Tamaño del voxel en metros (5 cm)
         
         bool use_intensity = true;
-        double min_intensity_peak = 15.0;
+        double min_intensity_peak = 5.0;
 
         // -- 2. Selección de candidatos --
         double coarse_cell = 0.40;
@@ -27,7 +27,7 @@ namespace mirena
         double peak_height = 0.10;
 
         // -- 3. Recorte del vehículo --
-        double ego_half_length = 2.0;
+        double ego_half_length = 1.0;
         double ego_half_width = 1.2;
 
         // -- 4. Ajuste de plano de suelo local --
@@ -51,7 +51,7 @@ namespace mirena
         double big_cone_min_height = 0.40;
 
         // Criterios PCA / Esbeltez
-        double min_slenderness = 0.5;
+        double min_slenderness = 0.3;
         double max_pca_angle_deg = 35.0;
 
         // -- Covarianzas para SLAM --

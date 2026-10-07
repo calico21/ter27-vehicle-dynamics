@@ -10,10 +10,19 @@ launch it again whenever and it picks up exactly where it left off.
 For every untested parameter set in the CSV:
   1. Launch the sim and the supervisor, forwarding the set to the mission
       as launch arguments (the supervisor passes them to autocross.launch.py)
-  2. Wait for the system to accept AS_status, then select Autocross
-  3. Wait for the mission pipeline to report READY
-  4. Release the car (AS_STATUS_DRIVING)
-  5. Wait for /lap_status or a timeout, then tear down and restart
+  2. Check that exactly one node is publishing /clock, since two of them means
+      two timelines on one clock and no measurable lap
+  3. Wait for the system to accept AS_status, then select Autocross
+  4. Wait for the mission pipeline to report READY
+  5. Release the car (AS_STATUS_DRIVING)
+  6. Wait for /lap_status or a timeout, then tear down, clear anything the run
+      left behind, and restart
+
+Only the sim publishes /clock, so a sim that outlived its run -- most often
+because the sweep was interrupted with Ctrl-C -- silently breaks every run
+after it: tf2 starts rejecting map->odom as data from the past and the car
+never steers. teardown() therefore sweeps up leftovers after every run, and a
+row is abandoned outright if /clock ever has more than one publisher.
 
 Usage:
     ros2 run mirena_supervisor autocross_loop.py
@@ -45,8 +54,40 @@ STARTUP_WAIT_SEC: float = 10.0
 # How long to wait for the mission pipeline to report READY.
 MISSION_READY_TIMEOUT_SEC: float = 60.0
 
+# How long to give the sim to show up as a /clock publisher before the run is
+# abandoned. The wait ends as soon as any publisher appears, so the healthy case
+# costs nothing and only a sim that never starts pays for it.
+CLOCK_PUBLISHER_TIMEOUT_SEC: float = 10.0
+
 # Cooldown between runs, seconds.
 COOLDOWN_SEC: float = 3.0
+
+# How long a leftover process gets to die on SIGTERM before it is SIGKILLed.
+STRAY_TERM_TIMEOUT_SEC: float = 10.0
+
+# Processes that must not outlive a run, matched against the full command line
+# with pgrep -f.
+#
+# The sim is the one that matters: it is the only node in the stack that
+# publishes /clock. A leftover one leaves the next run with two nodes writing
+# two different timelines to the same clock, and tf2 then rejects every
+# map->odom the new mirena_slam broadcasts -- the buffer keeps the older,
+# larger stamps and calls the newer ones data from the past -- so no consumer
+# can compose map->car/cog and every lap time measured from then on is
+# meaningless.
+#
+# The patterns are deliberately narrow, naming only what the sweep itself starts.
+# A bare "mirena_supervisor" would match this script's own argv (it lives in
+# src/mirena_supervisor/mirena_supervisor/), and a bare "ros2 launch
+# mirena_supervisor" would match the hardware session -- which, in the container
+# the sweep usually runs in, is PID 1. `mission_launch_arguments` is the
+# parameter only the sweep passes, and only it launches autocross.launch.py.
+STRAY_PATTERNS: Tuple[str, ...] = (
+    'lib/rclgd/godot',                     # the running sim; its wrapper execs godot
+    'ros2 run mirena_sim',                 # the `ros2 run` wrapper, before that exec
+    'mission_launch_arguments',            # the supervisor this sweep started
+    'ros2 launch mirena_supervisor autocross',  # the mission it triggers
+)
 
 # Path to the sweep CSV. Can be overridden with the csv_path ROS parameter.
 CSV_PATH: str = 'pid_sweep_results_2.csv'
@@ -243,6 +284,33 @@ class AutocrossLoop(Node):
         msg.mission = mission
         self._as_pub.publish(msg)
 
+    def clock_publishers(self) -> List[str]:
+        """Names of the nodes publishing /clock right now.
+
+        The sim is the only node in the stack that should appear here. Anything
+        else means two timelines are being written to one clock, which is what
+        makes tf2 reject map->odom as data from the past and leaves the car
+        unable to steer for the rest of the run.
+        """
+        try:
+            return [info.node_name for info in self.get_publishers_info_by_topic('/clock')]
+        except Exception:  # rclpy raises if the graph cannot answer yet
+            return []
+
+    def wait_for_single_clock(self, timeout: float = CLOCK_PUBLISHER_TIMEOUT_SEC) -> List[str]:
+        """The /clock publishers, as soon as any of them shows up.
+
+        The wait ends at the first sighting rather than after the full timeout:
+        two publishers never resolve themselves, so there is nothing to wait for,
+        while one appearing late is only discovery catching up with the sim.
+        """
+        deadline = time.monotonic() + timeout
+        while True:
+            publishers = self.clock_publishers()
+            if publishers or time.monotonic() >= deadline:
+                return publishers
+            time.sleep(0.5)
+
     def wait_for_mission_ready(self, timeout: float) -> bool:
         start = time.monotonic()
         while time.monotonic() - start < timeout:
@@ -313,13 +381,147 @@ def child_pids(pid: Optional[int]) -> List[int]:
 
 
 def signal_group(pid: Optional[int], sig: int) -> None:
-    """Signal a process group, ignoring one that is already gone."""
-    if pid is None:
+    """Signal a process group, ignoring one that is already gone.
+
+    Three cases the plain killpg gets wrong. A leftover whose parent died can
+    be reparented without ever having led a group of its own, and killpg on a
+    non-leader raises ESRCH and signals nothing at all. A pid sharing this
+    process's group is left alone entirely -- that group is the shell the sweep
+    was started from, and signalling its leader would take the sweep down with
+    it. And PID 1 is never signalled: in the container the sweep runs in, that
+    is the launch everything else hangs off.
+
+    Everywhere else the group is signalled rather than the process, because
+    that is also what reaches the nodes it spawned.
+    """
+    if pid is None or pid <= 1 or pid == os.getpid():
         return
     try:
-        os.killpg(pid, sig)
+        pgid = os.getpgid(pid)
+    except (ProcessLookupError, PermissionError):
+        return
+    if pgid <= 1 or pgid == os.getpgid(0):
+        return
+    try:
+        if pgid == pid:
+            os.killpg(pid, sig)
+        else:
+            os.kill(pid, sig)
     except (ProcessLookupError, PermissionError):
         pass
+
+
+def _own_ancestors() -> set:
+    """Every pid above this one, so the sweep never signals its own launcher."""
+    ancestors = set()
+    parent = _proc_status_field(os.getpid(), 'PPid')
+    cur = int(parent) if parent and parent.isdigit() else None
+    while cur is not None and cur > 0 and cur not in ancestors:
+        ancestors.add(cur)
+        parent = _proc_status_field(cur, 'PPid')
+        cur = int(parent) if parent and parent.isdigit() else None
+    return ancestors
+
+
+def pid_alive(pid: int) -> bool:
+    """True unless the pid is gone or is a zombie still waiting to be reaped."""
+    try:
+        out = subprocess.run(['ps', '-o', 'stat=', '-p', str(pid)],
+                             capture_output=True, text=True, check=False).stdout.strip()
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return False
+    return bool(out) and not out.startswith('Z')
+
+
+def _proc_status_field(pid: int, field: str) -> Optional[str]:
+    """One whitespace-separated field of /proc/<pid>/status, e.g. 'PPid'."""
+    try:
+        with open(f'/proc/{pid}/status', 'r') as f:
+            for line in f:
+                if line.startswith(f'{field}:'):
+                    return line.split()[1]
+    except (OSError, IndexError):
+        return None
+    return None
+
+
+def _cmdline(pid: int) -> str:
+    try:
+        with open(f'/proc/{pid}/cmdline', 'rb') as f:
+            return f.read().replace(b'\x00', b' ').decode('utf-8', 'replace')
+    except OSError:
+        return ''
+
+
+def owned_by_other_sweep(pid: int) -> bool:
+    """True when `pid` descends from a live autocross_loop.py other than this one.
+
+    The CSV claim exists so a second instance can sweep in parallel, and that
+    instance's sim is not a stray: killing it breaks its run exactly as surely
+    as leaving an orphan behind breaks ours. Only processes with no live sweep
+    above them are ours to clean up.
+    """
+    seen = set()
+    cur: Optional[int] = pid
+    while cur is not None and cur > 1 and cur not in seen:
+        seen.add(cur)
+        if cur != os.getpid() and 'autocross_loop.py' in _cmdline(cur):
+            return True
+        parent = _proc_status_field(cur, 'PPid')
+        cur = int(parent) if parent and parent.isdigit() else None
+    return False
+
+
+def find_pids(pattern: str) -> List[int]:
+    """Pids whose command line matches `pattern`, never this process."""
+    try:
+        out = subprocess.run(['pgrep', '-f', pattern],
+                             capture_output=True, text=True, check=False).stdout
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return []
+    pids = []
+    for token in out.split():
+        try:
+            pid = int(token)
+        except ValueError:
+            continue
+        if pid != os.getpid():
+            pids.append(pid)
+    return pids
+
+
+def purge_strays() -> List[int]:
+    """Kill sim / supervisor / mission processes left over from an earlier run.
+
+    Called before the first run and after every teardown. The failure it
+    prevents is silent rather than loud: a stale /clock does not crash anything,
+    it just leaves the next run unable to steer, and the sweep writes the
+    resulting no-lap down as a real result.
+    """
+    killed: List[int] = []
+    ancestors = _own_ancestors()
+    for pattern in STRAY_PATTERNS:
+        for pid in find_pids(pattern):
+            if pid in killed or pid in ancestors or pid <= 1:
+                continue
+            if not pid_alive(pid) or owned_by_other_sweep(pid):
+                continue
+            signal_group(pid, signal.SIGTERM)
+            killed.append(pid)
+
+    if not killed:
+        return killed
+
+    deadline = time.monotonic() + STRAY_TERM_TIMEOUT_SEC
+    while time.monotonic() < deadline and any(pid_alive(pid) for pid in killed):
+        time.sleep(0.2)
+    for pid in killed:
+        if pid_alive(pid):
+            signal_group(pid, signal.SIGKILL)
+
+    print(f'[autocross_loop]: Killed leftover process(es) {killed}. A second sim would keep '
+          'publishing /clock and make every transform of the next run data from the past.')
+    return killed
 
 
 def teardown(procs: List[subprocess.Popen]) -> None:
@@ -348,6 +550,12 @@ def teardown(procs: List[subprocess.Popen]) -> None:
     for pid in mission_pids:
         signal_group(pid, signal.SIGKILL)
 
+    # The killpg above only reaches what stayed in the groups it signalled.
+    # Anything that escaped -- a node that made its own session, or a sim that
+    # hung on the way down -- would still be publishing /clock when the next row
+    # starts, so sweep up whatever is left before returning.
+    purge_strays()
+
 
 def run_once(loop: AutocrossLoop, pid_params: Dict[str, float],
              run_number: int, total: int
@@ -368,6 +576,18 @@ def run_once(loop: AutocrossLoop, pid_params: Dict[str, float],
         # 1. Wait for the system to come up
         loop.get_logger().info(f"Waiting {STARTUP_WAIT_SEC:.0f}s for sim + supervisor...")
         time.sleep(STARTUP_WAIT_SEC)
+
+        # 1b. Exactly one node may publish /clock. Two means two timelines on one
+        # clock, and nothing downstream can be trusted from here on, so refuse
+        # the run rather than write a meaningless lap time into the CSV.
+        publishers = loop.wait_for_single_clock()
+        if len(publishers) != 1:
+            loop.get_logger().error(
+                f"{len(publishers)} publishers on /clock ({', '.join(publishers) or 'none'}); "
+                "expected exactly 1, the sim. Two clocks mean tf2 rejects map->odom as data "
+                "from the past and the car cannot steer, so this row is being abandoned. Check "
+                "for a sim left running by an earlier sweep.")
+            return None, None
 
         # 2. Select Autocross mission (AS_STATUS_READY)
         loop.get_logger().info("Sending AS_STATUS_READY + AUTOCROSS mission...")
@@ -457,6 +677,12 @@ def main() -> None:
         return
 
     run_count = 0
+
+    # Anything still running from a previous, interrupted sweep is a hazard for
+    # the first row: a surviving sim is a second /clock publisher. Cleared once,
+    # here, rather than per row, so a parallel instance's sim is left alone.
+    purge_strays()
+
     try:
         for row_index, pid_params, has_result in sweep_rows:
             if has_result:

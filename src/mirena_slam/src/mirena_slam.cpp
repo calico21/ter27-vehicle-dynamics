@@ -764,6 +764,33 @@ private:
         // spend the first seconds of every run publishing a transform that is
         // knowingly wrong.
         const rclcpp::Time now = this->now();
+
+        // 0. Never put a stamp on the wire that is not newer than the last one.
+        //
+        // map->odom is the only transform in the tree whose child frame (`odom`)
+        // this node owns, so a stamp that goes backwards is inserted straight
+        // into every listener's tf buffer as old data: TimeCache drops anything
+        // more than its 10 s window behind the newest sample it already holds,
+        // and once a larger stamp is in there, every later broadcast of ours is
+        // rejected -- consumers can no longer compose map->car/cog and control
+        // falls back to its failsafe for the rest of the run.
+        //
+        // The clock can only fail to advance if something outside this node is
+        // driving it wrong (a second /clock publisher, a sim that restarted its
+        // clock under a running mission). Dropping the tick keeps the buffer
+        // consistent instead, and costs one 10 ms sample. The root cause is not
+        // fixable from here; this only stops it from being permanent.
+        if (_has_broadcast && now <= _last_broadcast)
+        {
+            RCLCPP_WARN_THROTTLE(
+                this->get_logger(), *this->get_clock(), 2000,
+                "Skipping map->odom broadcast: the clock did not advance (now %.6f s, last "
+                "broadcast %.6f s). Publishing it would be rejected as TF_OLD_DATA by every "
+                "listener and would freeze the tf tree for them.",
+                now.seconds(), _last_broadcast.seconds());
+            return;
+        }
+
         if (!_has_broadcast)
         {
             _published_correction = map_to_odom;

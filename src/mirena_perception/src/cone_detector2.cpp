@@ -554,8 +554,11 @@ namespace mirena
 
         stage_.accept_ms = elapsed_ms(mark);
         total_ms_ = elapsed_ms(started);
-
-        // -- IMPRESIÓN DETALLADA DE TIEMPOS DE EJECUCIÓN POR FUNCIÓN --
+        bool debug_log = false;
+        {
+            if (debug_log)
+        {
+            // -- IMPRESIÓN DETALLADA DE TIEMPOS DE EJECUCIÓN POR FUNCIÓN --
         std::cout << std::fixed << std::setprecision(2);
         std::cout << "--- [ConeDetector] Pts Entrada: " << cloud_lidar.rows() 
                   << " | Crop: " << points_after_crop 
@@ -573,6 +576,10 @@ namespace mirena
         std::cout << "      - fit_ground() Total:" << total_fit_ground_ms << " ms" << std::endl;
         std::cout << "      - validate_pca() Tot:" << total_pca_ms << " ms" << std::endl;
         std::cout << "  [DETECTOR TOTAL]:       " << total_ms_ << " ms (" << detections_.size() << " conos detectados)" << std::endl;
+    }
+
+        }
+        
 
         return detections_;
     }

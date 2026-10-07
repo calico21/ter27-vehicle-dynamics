@@ -1,7 +1,6 @@
 #include "cone_detector.hpp"
 
 #include <algorithm> // proporciona funciones como std::min, std::max o std::sort.
-
 #include <chrono>
 #include <cmath>
 #include <limits>

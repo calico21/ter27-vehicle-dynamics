@@ -22,7 +22,7 @@
 #include "cone_detector2.hpp"
 
 #define CLOUD_SUB_TOPIC "/sensors/lidar/points"
-#define ENTITY_LIST_PUB_TOPIC "/perception/cones"
+#define ENTITY_LIST_PUB_TOPIC "/perception/cones_2"
 #define DEBUG_PC_PUB_TOPIC "/perception/debug/clustered_points"
 #define DEBUG_STANDING_PUB_TOPIC "/perception/debug/standing_points"
 #define HEALTH_PUB_TOPIC "health"
@@ -161,6 +161,7 @@ class MirenaPerception : public rclcpp::Node
 
     std::unique_ptr<mirena::ConeDetector> _detector;
     bool _publish_debug = true;
+    bool debug_log = false;
 
     std::mutex _report_mutex;
     uint64_t _frames_processed = 0;
@@ -177,10 +178,12 @@ class MirenaPerception : public rclcpp::Node
 public:
     MirenaPerception() : rclcpp::Node("mirena_perception"), _last_frame_at(this->now())
     {
-        RCLCPP_INFO(this->get_logger(), "Iniciando Mirena Perception Optimizado para Tecnun eRacing");
+        if (debug_log)
+            RCLCPP_INFO(this->get_logger(), "Iniciando Mirena Perception Optimizado para Tecnun eRacing");
 
         _detector = std::make_unique<mirena::ConeDetector>(declare_detector_params());
         _publish_debug = this->declare_parameter("enable_debug", true);
+        debug_log = this->declare_parameter("debug_log", false);
 
         _cloud_cb_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
         _report_cb_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -261,8 +264,9 @@ private:
 
         if (cloud.rows() == 0)
         {
-            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
-                                 "Nube de puntos sin datos float32 x/y/z en %s", CLOUD_SUB_TOPIC);
+            if (debug_log)
+                RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                                     "Nube de puntos sin datos float32 x/y/z en %s", CLOUD_SUB_TOPIC);
             return;
         }
 
@@ -310,9 +314,10 @@ private:
 
         const double total_cb_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_start).count();
 
-        RCLCPP_INFO(this->get_logger(),
-                    "[NODE TIMING] Total: %.2f ms | Conv cloud: %.2f ms | TF: %.2f ms | Detect: %.2f ms | Pub Cones: %.2f ms | Pub Debug Cloud: %.2f ms",
-                    total_cb_ms, conv_ms, tf_ms, detect_ms, pub_ms, debug_pub_ms);
+        if (debug_log)
+            RCLCPP_INFO(this->get_logger(),
+                        "[NODE TIMING] Total: %.2f ms | Conv cloud: %.2f ms | TF: %.2f ms | Detect: %.2f ms | Pub Cones: %.2f ms | Pub Debug Cloud: %.2f ms",
+                        total_cb_ms, conv_ms, tf_ms, detect_ms, pub_ms, debug_pub_ms);
 
         {
             std::lock_guard<std::mutex> lock(_report_mutex);
@@ -341,8 +346,9 @@ private:
         }
         catch (const tf2::TransformException &e)
         {
-            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
-                                 "No hay TF entre %s <- %s: %s", CAR_FRAME, header.frame_id.c_str(), e.what());
+            if (debug_log)
+                RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                                     "No hay TF entre %s <- %s: %s", CAR_FRAME, header.frame_id.c_str(), e.what());
             return std::nullopt;
         }
     }

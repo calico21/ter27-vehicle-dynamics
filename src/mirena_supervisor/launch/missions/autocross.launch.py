@@ -48,10 +48,10 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='false'),
-        DeclareLaunchArgument('cross_track_kp', default_value='0.1'),
-        DeclareLaunchArgument('cross_track_ki', default_value='0.001'),
-        DeclareLaunchArgument('cross_track_kd', default_value='0.5'),
-        DeclareLaunchArgument('cross_track_tau_d', default_value='0.05'),
+        DeclareLaunchArgument('cross_track_kp', default_value='0.4'),
+        DeclareLaunchArgument('cross_track_ki', default_value='0.02'),
+        DeclareLaunchArgument('cross_track_kd', default_value='0.1'),
+        DeclareLaunchArgument('cross_track_tau_d', default_value='0.06'),
 
         # -- State estimation ------------------------------------------------
         # Owns /state/car and the odom->car/cog TF.

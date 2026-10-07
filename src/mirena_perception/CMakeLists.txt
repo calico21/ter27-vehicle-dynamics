@@ -27,6 +27,7 @@ find_package(mirena_common REQUIRED)
 # and the conversion helpers, and nothing is vendored at configure time.
 find_package(PCL 1.12 REQUIRED COMPONENTS common)
 find_package(pcl_conversions REQUIRED)
+find_package(OpenMP REQUIRED)
 
 add_executable(mirena_perception
   src/mirena_perception.cpp
@@ -36,6 +37,11 @@ add_executable(mirena_perception
 add_executable(mirena_perception_2
   src/mirena_perception2.cpp
   src/cone_detector2.cpp
+)
+
+add_executable(mirena_perception_3
+  src/cone_detector3_node.cpp
+  src/cone_detector3.cpp
 )
 
 # --- mirena_perception ---
@@ -82,10 +88,36 @@ ament_target_dependencies(mirena_perception_2
 
 target_link_libraries(mirena_perception_2 ${PCL_LIBRARIES})
 
-# Install both targets
-install(TARGETS 
-  mirena_perception 
-  mirena_perception_2 
+# --- mirena_perception_3 ---
+target_include_directories(mirena_perception_3 PRIVATE
+  "src/"
+  ${EIGEN3_INCLUDE_DIR}
+)
+target_include_directories(mirena_perception_3 SYSTEM PRIVATE ${PCL_INCLUDE_DIRS})
+target_compile_options(mirena_perception_3 PRIVATE -Wall -Wextra -Wpedantic)
+
+ament_target_dependencies(mirena_perception_3
+  rclcpp
+  sensor_msgs
+  std_msgs
+  geometry_msgs
+  tf2
+  tf2_ros
+  tf2_eigen
+  pcl_conversions
+  mirena_common
+)
+
+# Se agrega nuevamente OpenMP::OpenMP_CXX para habilitar #pragma omp
+target_link_libraries(mirena_perception_3 ${PCL_LIBRARIES} OpenMP::OpenMP_CXX)
+
+# --- install ---
+# Sin esto los binarios se compilan pero nunca llegan a lib/${PROJECT_NAME},
+# y `ros2 run mirena_perception <exe>` responde "No executable found".
+install(TARGETS
+  mirena_perception
+  mirena_perception_2
+  mirena_perception_3
   DESTINATION lib/${PROJECT_NAME}
 )
 
