@@ -154,11 +154,11 @@ namespace mirena
  /// with a landmark *and* too close to be resolved from it; consistent but
  /// resolvable means keep both. Rejection is the only irreversible act in
  /// this class, and it is never taken under ambiguity.
- double separability_k = 4.0;
+ double separability_k = 2.0;
  /// How many keyframes a candidate may stay unresolved before it is promoted
  /// anyway. An extra cone in the map is a cosmetic defect; a missing one is
  /// a hole in the track, so the tie is broken towards existing.
- int max_candidate_age = 40;
+ int max_candidate_age = 20;
  /// Most measurements a promotion may bring into the graph at once. A
  /// candidate that lingered and accumulated sixty sightings would otherwise
  /// attach factors reaching sixty keyframes back, which is a loop closure on

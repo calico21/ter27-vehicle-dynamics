@@ -49,11 +49,11 @@ set(FAST_LIO_SOURCES
 
 
 # Executable declarations
-add_executable(mirena_state_ekf ${SOURCES})
+add_executable(mirena_state ${SOURCES})
 # add_executable(mirena_state_fast_lio ${FAST_LIO_SOURCES})
 
 # Target include directories
-target_include_directories(mirena_state_ekf PRIVATE
+target_include_directories(mirena_state PRIVATE
   "src/"
 )
 
@@ -63,7 +63,7 @@ target_include_directories(mirena_state_ekf PRIVATE
 # )
 
 # ROS 2 dependency mapping (uses plain target_link_libraries internally)
-ament_target_dependencies(mirena_state_ekf
+ament_target_dependencies(mirena_state
   rclcpp
   tf2
   tf2_ros
@@ -84,7 +84,7 @@ ament_target_dependencies(mirena_state_ekf
 # )
 
 # External library linking (uses plain signature to match ament_target_dependencies)
-target_link_libraries(mirena_state_ekf
+target_link_libraries(mirena_state
   Eigen3::Eigen
 )
 
@@ -95,6 +95,6 @@ target_link_libraries(mirena_state_ekf
 # )
 
 # Install directives
-install(TARGETS mirena_state_ekf DESTINATION lib/${PROJECT_NAME})
+install(TARGETS mirena_state DESTINATION lib/${PROJECT_NAME})
 
 ament_package()
