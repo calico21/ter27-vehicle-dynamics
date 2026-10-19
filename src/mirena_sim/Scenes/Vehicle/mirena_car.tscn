@@ -150,8 +150,9 @@ blend_shape_mode = 0
 shadow_mesh = SubResource("ArrayMesh_hnasb")
 
 [node name="MirenaCar" type="VehicleBody3D" unique_id=1131682099]
-mass = 250.0
+mass = 300.0
 center_of_mass_mode = 1
+center_of_mass = Vector3(0, 0.33, -0.117)
 script = ExtResource("1_nuhka")
 
 [node name="CAR_MESH" type="MeshInstance3D" parent="." unique_id=958680021]
@@ -166,9 +167,9 @@ shape = SubResource("BoxShape3D_iwp33")
 [node name="FR_WHEEL" type="VehicleWheel3D" parent="." unique_id=360427877]
 transform = Transform3D(-0.999999, 0, -8.742269e-08, 0, 0.999999, 0, 8.742269e-08, 0, -0.999999, 0.587, 0.208, -0.993)
 use_as_steering = true
-wheel_radius = 0.26
+wheel_radius = 0.2
 wheel_rest_length = 0.05
-suspension_stiffness = 25.06
+suspension_stiffness = 35030.0
 damping_compression = 6.7
 damping_relaxation = 2.7
 
@@ -181,9 +182,9 @@ surface_material_override/0 = SubResource("StandardMaterial3D_iifm0")
 [node name="FL_WHEEL" type="VehicleWheel3D" parent="." unique_id=2101877658]
 transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, -0.587, 0.208, -0.993)
 use_as_steering = true
-wheel_radius = 0.26
+wheel_radius = 0.2
 wheel_rest_length = 0.05
-suspension_stiffness = 25.06
+suspension_stiffness = 35030.0
 damping_compression = 6.7
 damping_relaxation = 2.7
 
@@ -195,10 +196,10 @@ surface_material_override/0 = SubResource("StandardMaterial3D_iifm0")
 
 [node name="RL_WHEEL" type="VehicleWheel3D" parent="." unique_id=2127290588]
 transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, -0.587, 0.208, 0.6)
-wheel_radius = 0.26
+use_as_traction = true
+wheel_radius = 0.2
 wheel_rest_length = 0.05
-suspension_stiffness = 25.06
-suspension_max_force = 1000.0
+suspension_stiffness = 52540.0
 damping_compression = 6.7
 damping_relaxation = 2.7
 
@@ -211,9 +212,9 @@ surface_material_override/0 = SubResource("StandardMaterial3D_iifm0")
 [node name="RR_WHEEL" type="VehicleWheel3D" parent="." unique_id=1195679221]
 transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, 0.587, 0.208, 0.6)
 use_as_traction = true
-wheel_radius = 0.26
+wheel_radius = 0.2
 wheel_rest_length = 0.05
-suspension_stiffness = 25.06
+suspension_stiffness = 52540.0
 damping_compression = 6.7
 damping_relaxation = 2.7
 
@@ -251,7 +252,7 @@ publish_rate = 60.0
 metadata/_custom_type_script = "uid://ds4q43s0n1ft7"
 
 [node name="INS" type="Node3D" parent="." unique_id=598701879]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+transform = Transform3D(1, 0, 0, 0, 0.98480767, 0.17364816, 0, -0.17364816, 0.98480767, -0.075, 1, 0.15)
 script = ExtResource("5_sviuk")
 metadata/_custom_type_script = "uid://dq7n5vk2ajh1w"
 

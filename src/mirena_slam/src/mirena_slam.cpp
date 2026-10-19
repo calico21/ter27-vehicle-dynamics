@@ -404,7 +404,26 @@ private:
             _last_keyframe_time = car_msg->header.stamp;
             _is_initialized = true;
             RCLCPP_INFO(this->get_logger(), "SLAM Engine Initialized at (%.2f, %.2f)", car_msg->x, car_msg->y);
-            publish_snapshot(car_msg->header.stamp);
+            // Capture snapshot data under the slam lock, publish outside.
+            {
+                std::lock_guard<std::mutex> lock(_snapshot_mutex);
+                _map_to_odom_snapshot = _slam->get_correction();
+                auto map_msg = std::make_shared<mirena_common::msg::EntityList>();
+                const std::vector<mirena::Landmark> landmarks = _slam->map_snapshot();
+                map_msg->entities.reserve(landmarks.size());
+                for (const auto &l : landmarks) {
+                    mirena_common::msg::Entity e;
+                    e.position.x = l.x;
+                    e.position.y = l.y;
+                    e.type = l.type;
+                    e.confidence = l.confidence;
+                    map_msg->entities.push_back(e);
+                }
+                map_msg->header.frame_id = FIXED_FRAME;
+                map_msg->header.stamp = car_msg->header.stamp;
+                _map_snapshot = std::move(map_msg);
+                _has_snapshot = true;
+            }
             return;
         }
 
@@ -479,7 +498,26 @@ private:
 
         // The map changes on every frame, not only on keyframes, because a cone
         // can be promoted or lose its evidence between them.
-        publish_snapshot(car_msg->header.stamp);
+        // Capture snapshot data under the slam lock, publish outside.
+        {
+            std::lock_guard<std::mutex> lock(_snapshot_mutex);
+            _map_to_odom_snapshot = _slam->get_correction();
+            auto map_msg = std::make_shared<mirena_common::msg::EntityList>();
+            const std::vector<mirena::Landmark> landmarks = _slam->map_snapshot();
+            map_msg->entities.reserve(landmarks.size());
+            for (const auto &l : landmarks) {
+                mirena_common::msg::Entity e;
+                e.position.x = l.x;
+                e.position.y = l.y;
+                e.type = l.type;
+                e.confidence = l.confidence;
+                map_msg->entities.push_back(e);
+            }
+            map_msg->header.frame_id = FIXED_FRAME;
+            map_msg->header.stamp = car_msg->header.stamp;
+            _map_snapshot = std::move(map_msg);
+            _has_snapshot = true;
+        }
 
         {
             std::lock_guard<std::mutex> lock(_report_mutex);
@@ -507,7 +545,7 @@ private:
         slam_lock.unlock();
         if (want_debug && keyframed)
             publish_debug(debug, car_msg->header.stamp);
-    }
+            }
 
     /// Uncertainty accumulated by the odometry *delta*, not the absolute pose,
     /// as sigmas over [x, y, theta] in the body frame.
@@ -566,36 +604,6 @@ private:
         const double st = std::max({drift_th, model_th, _odom_sigma_floor_th});
 
         return gtsam::Vector3(sx, sy, st);
-    }
-
-    /// Copy the optimiser's result somewhere the publisher thread can read it
-    /// without touching _slam. Building the message here rather than in the timer
-    /// keeps the timer's critical section down to two pointer copies.
-    /// Caller must hold _slam_mutex.
-    void publish_snapshot(const builtin_interfaces::msg::Time &stamp)
-    {
-        auto map_msg = std::make_shared<mirena_common::msg::EntityList>();
-        const std::vector<mirena::Landmark> landmarks = _slam->map_snapshot();
-        map_msg->entities.reserve(landmarks.size());
-        for (const auto &l : landmarks) {
-            mirena_common::msg::Entity e;
-            e.position.x = l.x;
-            e.position.y = l.y;
-            e.type = l.type;
-            // Nobody downstream reads this yet, but with no landmark ids on the
-            // wire it is the only thing that can say how sure the map is.
-            e.confidence = l.confidence;
-            map_msg->entities.push_back(e);
-        }
-        map_msg->header.frame_id = FIXED_FRAME;
-        map_msg->header.stamp = stamp;
-
-        const gtsam::Pose2 correction = _slam->get_correction();
-
-        std::lock_guard<std::mutex> lock(_snapshot_mutex);
-        _map_to_odom_snapshot = correction;
-        _map_snapshot = std::move(map_msg);
-        _has_snapshot = true;
     }
 
     /// One marker per thing worth seeing, all under the map frame.
@@ -756,6 +764,33 @@ private:
         // spend the first seconds of every run publishing a transform that is
         // knowingly wrong.
         const rclcpp::Time now = this->now();
+
+        // 0. Never put a stamp on the wire that is not newer than the last one.
+        //
+        // map->odom is the only transform in the tree whose child frame (`odom`)
+        // this node owns, so a stamp that goes backwards is inserted straight
+        // into every listener's tf buffer as old data: TimeCache drops anything
+        // more than its 10 s window behind the newest sample it already holds,
+        // and once a larger stamp is in there, every later broadcast of ours is
+        // rejected -- consumers can no longer compose map->car/cog and control
+        // falls back to its failsafe for the rest of the run.
+        //
+        // The clock can only fail to advance if something outside this node is
+        // driving it wrong (a second /clock publisher, a sim that restarted its
+        // clock under a running mission). Dropping the tick keeps the buffer
+        // consistent instead, and costs one 10 ms sample. The root cause is not
+        // fixable from here; this only stops it from being permanent.
+        if (_has_broadcast && now <= _last_broadcast)
+        {
+            RCLCPP_WARN_THROTTLE(
+                this->get_logger(), *this->get_clock(), 2000,
+                "Skipping map->odom broadcast: the clock did not advance (now %.6f s, last "
+                "broadcast %.6f s). Publishing it would be rejected as TF_OLD_DATA by every "
+                "listener and would freeze the tf tree for them.",
+                now.seconds(), _last_broadcast.seconds());
+            return;
+        }
+
         if (!_has_broadcast)
         {
             _published_correction = map_to_odom;
@@ -874,7 +909,15 @@ private:
 
 int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
-    auto node = std::make_shared<MirenaMapping>();
+
+    std::shared_ptr<MirenaMapping> node;
+    try {
+        node = std::make_shared<MirenaMapping>();
+    } catch (const std::exception & e) {
+        RCLCPP_FATAL(rclcpp::get_logger("mirena_slam"), "Startup failed: %s", e.what());
+        rclcpp::shutdown();
+        return 1;
+    }
 
     rclcpp::executors::MultiThreadedExecutor executor;
     executor.add_node(node);

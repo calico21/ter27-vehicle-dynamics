@@ -26,7 +26,7 @@ def generate_launch_description():
         Node(
             package='mirena_sim',
             executable='mirena_sim',
-            parameters=[{'use_sim_time': True}],
+            parameters=[{'use_sim_time': True, 'publish_sim_time': True}],
         ),
 
         # -- Supervisor -------------------------------------------------------

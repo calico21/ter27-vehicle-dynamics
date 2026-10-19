@@ -92,7 +92,7 @@ MirenaSim strictly follows **REP 103** for ROS2 interoperability.
 ### Parameters
 
 - `track` (string): Path to a `.json` track file or set to `"random"` for procedural generation.
-- `use_sim_time` (bool): Whether to sync with ROS2 clock (Default: `false`).
+- `use_sim_time` (bool): Whether to sync with ROS2 clock (Default: `true`). The sim publishes `/clock` (`publish_sim_time`), so its nodes follow it and all sensor stamps are sim time.
 
 
 ## Notice

@@ -17,9 +17,7 @@ constexpr double kMinVariance = 1e-12;
 
 double Ekf::wrap_angle(double a)
 {
-    // IEEE remainder lands in [-pi, pi] and terminates for every input. The
-    // subtract-in-a-loop form this replaces spun forever on +/-inf, hanging the
-    // callback thread with no crash and no log.
+    // IEEE remainder lands in [-pi, pi] and terminates for every input.
     return std::remainder(a, 2.0 * M_PI);
 }
 
@@ -64,9 +62,6 @@ Ekf::Step Ekf::predict(double stamp, double ax, double ay)
     const double elapsed = stamp - stamp_;
     if (elapsed <= 0.0) return Step::Ignored; // out-of-order or duplicate sample
 
-    // Adopt the stamp only now that the sample is accepted, so the filter clock
-    // can never run ahead of the data. Long gaps still jump the clock but
-    // propagate at most max_dt, which is the intended guard.
     stamp_ = stamp;
     const double dt = std::min(elapsed, cfg_.max_dt);
 
@@ -79,7 +74,6 @@ Ekf::Step Ekf::predict(double stamp, double ax, double ay)
     x_(2) = wrap_angle(psi + omega * dt);
     x_(3) += (ax + v * omega) * dt;
     x_(4) += (ay - u * omega) * dt;
-    // omega: random walk (fused separately via update_gyro)
 
     // Jacobian F = I + A*dt
     Mat6 F = Mat6::Identity();
@@ -138,6 +132,90 @@ Ekf::Step Ekf::update_odom(const Vec6 &z, const Vec6 &r_diag)
     symmetrize();
     return commit();
 }
+
+Ekf::Step Ekf::update_pose(const Vec3 &z, const Vec3 &r_diag)
+{
+    if (!initialized_) return Step::Ignored;
+    if (!z.allFinite() || !r_diag.allFinite()) return Step::Ignored;
+
+    Eigen::Matrix<double, 3, 6> H = Eigen::Matrix<double, 3, 6>::Zero();
+    H(0, 0) = 1.0;
+    H(1, 1) = 1.0;
+    H(2, 2) = 1.0;
+
+    Vec3 innovation = z - x_.head<3>();
+    innovation(2) = wrap_angle(innovation(2));
+
+    const Eigen::Matrix3d R = r_diag.cwiseMax(cfg_.odom_meas_floor_diag.head<3>()).asDiagonal();
+    const Eigen::Matrix3d S = H * P_ * H.transpose() + R;
+    const Eigen::Matrix<double, 6, 3> K = P_ * H.transpose() * S.inverse();
+
+    x_ += K * innovation;
+    x_(2) = wrap_angle(x_(2));
+    P_ -= K * H * P_;
+    symmetrize();
+    return commit();
+}
+
+Ekf::Step Ekf::update_velocity(const Vec3 &z, const Vec3 &r_diag)
+{
+    if (!initialized_) return Step::Ignored;
+    if (!z.allFinite() || !r_diag.allFinite()) return Step::Ignored;
+
+    Eigen::Matrix<double, 3, 6> H = Eigen::Matrix<double, 3, 6>::Zero();
+    H(0, 3) = 1.0;
+    H(1, 4) = 1.0;
+    H(2, 5) = 1.0;
+
+    const Vec3 innovation = z - x_.tail<3>();
+    const Eigen::Matrix3d R = r_diag.cwiseMax(cfg_.odom_meas_floor_diag.tail<3>()).asDiagonal();
+    const Eigen::Matrix3d S = H * P_ * H.transpose() + R;
+    const Eigen::Matrix<double, 6, 3> K = P_ * H.transpose() * S.inverse();
+
+    x_ += K * innovation;
+    P_ -= K * H * P_;
+    symmetrize();
+    return commit();
+}
+
+Ekf::Step Ekf::update_zupt(const Vec3 &r_diag)
+{
+    return update_velocity(Vec3::Zero(), r_diag);
+}
+
+// Wheel encoder
+
+Ekf::Step Ekf::update_velocity_u(double u_meas, double var_u)
+{
+    if (!initialized_) return Step::Ignored;
+
+    // Estado actual: x_ = [x, y, psi, u, v, omega]^T
+    // Innovación (residuo) de la velocidad longitudinal 'u'
+    double y = u_meas - x_(3);
+
+    // S = H * P * H^T + R  (donde H = [0, 0, 0, 1, 0, 0])
+    double S = P_(3, 3) + var_u;
+
+    if (S <= 0.0 || !std::isfinite(S)) {
+        return Step::Ignored;
+    }
+
+    // Ganancia de Kalman K (columna 3 de la matriz P)
+    Vec6 K = P_.col(3) / S;
+
+    // Actualización de estado y normalización de yaw
+    x_ += K * y;
+    x_(2) = wrap_angle(x_(2));
+
+    // Actualización de Covarianza: P = (I - K*H) * P
+    Mat6 I_KH = Mat6::Identity();
+    I_KH.col(3) -= K;
+    P_ = I_KH * P_;
+
+    symmetrize();
+    return commit();
+}
+
 
 void Ekf::symmetrize()
 {

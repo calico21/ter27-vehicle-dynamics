@@ -128,5 +128,7 @@ common/max_physics_steps_per_frame=20
 
 [ros]
 
-parameters/use_sim_time=false
+#Thisappisthetimesource(publish_sim_timedrives/clockfromthe#physicstick),soitsnodesmustfollowthatsameclock:everyRosNode#inheritsuse_sim_timeatcreationandstampswithnow().Withthisfalse#thesimpublished/clockfortherestofthestackwhileitsownsensor#messagescarriedwalltime.Command-lineargs(e.g.sim.launch.py)still#takeprecedenceoverthesevalues.parameters/use_sim_time=true
+parameters/use_sim_time=true
+parameters/publish_sim_time=true
 parameters/use_separate_thread=true

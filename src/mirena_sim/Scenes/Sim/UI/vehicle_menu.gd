@@ -34,8 +34,10 @@ func _on_reset_car_button_pressed() -> void:
 func _on_as_state_item_selected(index: int) -> void:
 	# item ids carry the mirena_common/AsInfo AS_STATUS_* enum values
 	Sim.car._as_info.status = $Vehicle/AsStatus/StateSelector/State.get_item_id(index)
+	Sim.car._as_info_pub.publish(Sim.car._as_info)
 
 
 func _on_mission_item_selected(index: int) -> void:
 	# item ids carry the mirena_common/AsInfo AS_MISSION_* enum values
 	Sim.car._as_info.mission = $Vehicle/AsStatus/MissionSelector/Mission.get_item_id(index)
+	Sim.car._as_info_pub.publish(Sim.car._as_info)

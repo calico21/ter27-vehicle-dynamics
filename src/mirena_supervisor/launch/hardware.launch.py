@@ -103,14 +103,24 @@ def generate_launch_description():
                 # and the tail, well under it. Said explicitly because a
                 # positive z reads as "above" in every other frame in this
                 # workspace.
-                'antenna_a_offset': [-0.413, 0.056, 0.2754],
-                'gnss_compass_baseline': [120.59, 0.0, -0.7713],
+                # 'antenna_a_offset': [-0.413, 0.056, 0.2754],
+              #  'gnss_compass_baseline': [120.59, 0.0, -0.7713],
+                #10º
+                # Offset de Antena A respecto al IMU
+                'antenna_a_offset': [-0.1198, 0.0717, 0.20],
+
+                # Baseline GNSS (Vector de Antena A hacia Antena B)
+                'gnss_compass_baseline': [1.15, 0.0000, -0.3439],
+
+                # 30º
+                #'antenna_a_offset': [0.1095, 0.0717, 0.4701],
+                #'gnss_compass_baseline': [1.2080, 0.0000, -0.8080],                
                 # 1 sigma on the baseline above. This bounds the carrier-phase
                 # ambiguity search: too loose and convergence crawls, too tight
                 # and a wrong baseline never converges at all. Roughly 1-2% of
                 # baseline length if it was measured properly. Call the
                 # ~/estimate_gnss_baseline service to have the unit measure its
-                # own baseline and report what these should be.
+                # own baseline and report what these should be. 
                 'gnss_compass_uncertainty': [0.02, 0.02, 0.02],
                 # -- Onboard INS setup (VN registers 67 and 144) --------------
                 # 3 = DualGnssNoPressure. Anything that is not a dual-GNSS

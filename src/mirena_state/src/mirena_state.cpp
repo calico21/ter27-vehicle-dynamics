@@ -1,13 +1,19 @@
 #include <rclcpp/rclcpp.hpp>
+#include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 // Transforms
 #include <tf2_ros/transform_broadcaster.h>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <tf2/LinearMath/Quaternion.h>
-
+    
 // JSON library for string packaging
 #include <nlohmann/json.hpp>
 
@@ -16,81 +22,31 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include "mirena_common/msg/car.hpp"
 #include "mirena_common/msg/heartbeat.hpp"
+#include "mirena_common/msg/wheel_speeds.hpp"
 
 #include "ekf.hpp"
 
 // Topics and Frames
 #define IMU_TOPIC "/sensors/imu"
 #define INS_ODOM_TOPIC "/sensors/imu/odom"
+#define WHEEL_SPEEDS_TOPIC "/sensors/wheel_speeds"
 #define CAR_STATE_TOPIC "/state/car"
 
 using namespace std::chrono_literals;
 
 namespace
 {
-    /// Frames and rate. Constants rather than parameters: no launch file in this
-    /// workspace has ever set them, and the nodes downstream hard-code the same
-    /// strings (mirena_perception's CAR_FRAME, mirena_slam's frames).
     constexpr const char *kOdomFrame = "odom";
     constexpr const char *kBaseFrame = "car/cog";
-    constexpr auto kPublishPeriod = 10ms; // 100 Hz, matching the IMU stream
     constexpr auto kReportPeriod = 100ms;
 
-    /// The odom frame is *defined* by the pose the filter starts at, so in odom
-    /// that pose has no error by construction. Ekf::init floors this by
-    /// init_cov_floor_diag regardless, which is what keeps the position gain
-    /// off zero so the INS can still pull once it anchors.
     constexpr double kInitPoseVar = 0.0;
-
-    /// Zero-velocity update. The car stands still in staging while the INS
-    /// converges, so "stopped" is a measurement rather than an assumption --
-    /// as long as the IMU agrees it is stopped.
     constexpr double kZuptVelVar = 0.0025;   // (0.05 m/s)^2
     constexpr double kUnknownVelVar = 25.0;  // (5 m/s)^2, if it is already rolling
     constexpr double kStationaryAccel = 0.5; // m/s^2, gravity already removed
     constexpr double kStationaryRate = 0.05; // rad/s
 } // namespace
 
-/**
- * MirenaState — sensor fusion / state estimation node.
- *
- * Owns /state/car and the odom->base TF: predicts from /sensors/imu (body accel
- * + gyro) and corrects with the INS solution on /sensors/imu/odom
- * (nav_msgs/Odometry).
- *
- * New sensors (GSS, wheel speeds, GPS fix, ...) should be added here as
- * additional EKF measurement updates — never as direct /state/car publishers.
- *
- * Sign conventions: state and Car fields follow REP-103 body axes (x forward,
- * y left, z up): u = forward velocity, v = LEFT-positive lateral velocity,
- * omega = CCW-positive yaw rate. This matches the sim's established Car
- * convention that SLAM/MPC were developed against.
- *
- * WHAT THE PUBLISHED COVARIANCE MEANS -- read before consuming it.
- *
- * It is the filter's uncertainty *about the odom frame*, and it is a relative
- * quantity, not an absolute one. The odom origin was pinned wherever the INS
- * first converged, which on a status-0 fix is itself some metres from the true
- * position; that offset is common to every pose, unobservable, and deliberately
- * not represented here, because it cancels for everything that works in odom.
- *
- * It is also not a bound on absolute GNSS accuracy. INS position error is a
- * slowly varying bias rather than white noise, and this filter fuses 100
- * position measurements a second as though they were independent -- so P
- * settles near 0.03 m^2 (sigma 0.17 m) while the INS reports sigma 2.8 m. That
- * is the right number for "how well do I know where I am relative to where I
- * started", which is what odom means, and the wrong number for "how well do I
- * know where I am on Earth". Measured against revisited poses the relative
- * figure is optimistic by roughly 2x, not by the 16x the absolute comparison
- * suggests.
- *
- * Consumers wanting the uncertainty of a *relative* motion (SLAM's odometry
- * factors, say) must not difference this: a converged filter's absolute
- * covariance is flat, so the difference is ~0 and says nothing. Integrate the
- * velocity block (indices 21, 28, 35) over the interval instead -- that grows
- * honestly when the INS drops out, which is exactly when a relative constraint
- * should loosen.
- */
 class MirenaState : public rclcpp::Node
 {
     // Callback Groups for thread safety
@@ -100,6 +56,7 @@ class MirenaState : public rclcpp::Node
     // Subscribers
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr _imu_sub;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr _ins_odom_sub;
+    rclcpp::Subscription<mirena_common::msg::WheelSpeeds>::SharedPtr _encoder_sub;
 
     // Publishers
     rclcpp::Publisher<mirena_common::msg::Car>::SharedPtr _car_pub;
@@ -109,70 +66,76 @@ class MirenaState : public rclcpp::Node
     std::unique_ptr<tf2_ros::TransformBroadcaster> _tf_broadcaster;
 
     // Timers
-    rclcpp::TimerBase::SharedPtr _publish_timer;
     rclcpp::TimerBase::SharedPtr _report_timer;
 
-    // Filter state & mutex (shared between filter and report/publish threads)
+    // Filter state & mutex
     std::mutex _filter_mutex;
     std::unique_ptr<mirena::Ekf> _ekf;
     rclcpp::Time _last_imu_stamp{0, 0, RCL_ROS_TIME};
     rclcpp::Time _last_odom_stamp{0, 0, RCL_ROS_TIME};
+    rclcpp::Time _last_encoder_stamp{0, 0, RCL_ROS_TIME};
 
-    /// Stamp of the last state actually published. The filter clock only moves
-    /// when an IMU sample arrives, so a timer tick that lands between two
-    /// samples has nothing new to say -- and republishing anyway hands tf2 a
-    /// duplicate stamp, which it answers with TF_REPEATED_DATA.
     double _last_published_stamp = 0.0;
 
-    /// T_odom <- ins, latched once the INS first speaks. Until then the filter
-    /// dead reckons and there is no absolute reference at all.
+    /// T_odom <- ins, latched once the INS first speaks and re-latched if the
+    /// solution ever steps. See ins_odom_callback.
     bool _ins_anchored = false;
     double _anchor_tx = 0.0, _anchor_ty = 0.0, _anchor_dpsi = 0.0;
 
-    // Parameters (resolved in the constructor)
+    /// How many times the anchor has been re-latched because the INS solution
+    /// disagreed with the estimate by more than the threshold. Reported, not
+    /// enforced: see ins_odom_callback for what a re-anchor costs.
+    uint64_t _ins_reanchors = 0;
+
+    // Parameters
     double _odom_timeout_sec = 0.5;
     double _imu_timeout_sec = 0.2;
+    double _encoder_timeout_sec = 0.2;
     double _gyro_meas_var = 0.0001;
+    bool _use_encoders = true;
+
+    /// Metres by which the INS solution may disagree with the estimate before
+    /// the update is absorbed by re-anchoring instead of applied to the state.
+    /// <= 0 disables the gate. Measured: routine disagreement is 3-5 m (the
+    /// INS's own reported noise), p99.9 is 9.2 m, and the teleports this exists
+    /// to stop were 17-18 m.
+    double _ins_reanchor_m = 12.0;
+
+    // Wheel encoders
+    double _wheel_radius = 0.20;       // m
+    double _track_width = 1.2;        // m
+    double _encoder_base_var = 0.01;  // (m/s)^2
 
 public:
     MirenaState() : rclcpp::Node("mirena_state")
     {
         this->declare_parameter<double>("odom_timeout_sec", 0.5);
         this->declare_parameter<double>("imu_timeout_sec", 0.2);
+        this->declare_parameter<double>("encoder_timeout_sec", 0.2);
         this->declare_parameter<double>("max_predict_dt_sec", 0.1);
-        // Continuous-time process noise diagonal over [x, y, psi, u, v, omega]
         this->declare_parameter<std::vector<double>>(
             "process_noise_diag", {0.01, 0.01, 0.005, 0.5, 0.5, 0.5});
-        // Floor on INS odometry measurement variances. Purely a guard against a
-        // zero or negative variance reaching the gain.
-        //
-        // It used to be {0.01, 0.01, 0.001, 0.01, 0.01, 0.001}, which was not a
-        // guard but a silent override: measured against the 2026-08-08 log, the
-        // yaw and angular-rate entries replaced the sensor's own uncertainty on
-        // 100% of 27690 messages and the velocity entries on 23%. The VN-300
-        // reported 0.478 deg of yaw uncertainty; the filter was told 1.81 deg.
         this->declare_parameter<std::vector<double>>(
-            "odom_meas_floor_diag", {1e-9, 1e-9, 1e-9, 1e-9, 1e-9, 1e-9});
-        // Floor on the covariance the filter initialises P with. These are the
-        // values the floor above used to carry, kept here because init() is the
-        // one place they were doing real work: the odom frame is defined by the
-        // initial pose, so its reported variance is zero and P needs seeding
-        // from something.
+            "odom_meas_floor_diag", {1e-2, 1e-2, 1e-2, 1e-2, 1e-2, 1e-2});
         this->declare_parameter<std::vector<double>>(
             "init_cov_floor_diag", {0.01, 0.01, 0.001, 0.01, 0.01, 0.001});
-        // Variance of the gyro-as-measurement omega update, rad^2/s^2.
-        //
-        // Measured, not assumed: stationary whitened yaw-rate noise on the
-        // 2026-08-08 log was 9.7e-7, and this sits an order of magnitude above
-        // it to cover vibration under load. The previous 1e-4 had no derivation
-        // and was in any case clamped to 1e-3 by the old floor. Keep it in step
-        // with mirena_imu's gyro_variance -- they describe the same gyro.
         this->declare_parameter<double>("gyro_meas_var", 1.0e-5);
+        this->declare_parameter<double>("wheel_radius", 0.2);
+        this->declare_parameter<double>("track_width", 1.2);
+        this->declare_parameter<double>("encoder_var", 0.01);
+        this->declare_parameter<bool>("use_encoders", true);
+        this->declare_parameter<double>("ins_reanchor_m", 12.0);
 
         RCLCPP_INFO(this->get_logger(), "Starting Mirena State");
 
         _odom_timeout_sec = this->get_parameter("odom_timeout_sec").as_double();
         _imu_timeout_sec = this->get_parameter("imu_timeout_sec").as_double();
+        _encoder_timeout_sec = this->get_parameter("encoder_timeout_sec").as_double();
+        _wheel_radius = this->get_parameter("wheel_radius").as_double();
+        _track_width = this->get_parameter("track_width").as_double();
+        _encoder_base_var = this->get_parameter("encoder_var").as_double();
+        _use_encoders = this->get_parameter("use_encoders").as_bool();
+        _ins_reanchor_m = this->get_parameter("ins_reanchor_m").as_double();
 
         _filter_cb_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
         _report_cb_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -194,36 +157,41 @@ public:
         cfg.max_dt = this->get_parameter("max_predict_dt_sec").as_double();
         _ekf = std::make_unique<mirena::Ekf>(cfg);
 
-        // Sensor subscriptions: SensorDataQoS (best-effort) — the hardware
-        // drivers publish best-effort; a reliable subscriber would starve.
+        // Sensor subscriptions
         _imu_sub = this->create_subscription<sensor_msgs::msg::Imu>(
             IMU_TOPIC, rclcpp::SensorDataQoS(),
             std::bind(&MirenaState::imu_callback, this, std::placeholders::_1), filter_sub_options);
         _ins_odom_sub = this->create_subscription<nav_msgs::msg::Odometry>(
             INS_ODOM_TOPIC, rclcpp::SensorDataQoS(),
             std::bind(&MirenaState::ins_odom_callback, this, std::placeholders::_1), filter_sub_options);
+        if (_use_encoders)
+        {
+            _encoder_sub = this->create_subscription<mirena_common::msg::WheelSpeeds>(
+                WHEEL_SPEEDS_TOPIC, rclcpp::SensorDataQoS(),
+                std::bind(&MirenaState::encoder_callback, this, std::placeholders::_1), filter_sub_options);
+            RCLCPP_INFO(this->get_logger(), "Subscribed to %s for wheel encoder speeds (radius=%.3f m, var=%.4f)",
+                        WHEEL_SPEEDS_TOPIC, _wheel_radius, _encoder_base_var);
+        }
+        else
+        {
+            RCLCPP_WARN(this->get_logger(),
+                        "Wheel encoder fusion DISABLED (use_encoders=false). Not subscribing to %s.",
+                        WHEEL_SPEEDS_TOPIC);
+        }
 
-        // Node clock, not wall clock. Under use_sim_time these two are different
-        // clocks running at different rates, and a wall timer would publish at
-        // 100 Hz of real time while the stamps it carries advance at whatever
-        // rate the simulator manages.
-        _publish_timer = rclcpp::create_timer(
-            this, this->get_clock(), kPublishPeriod,
-            std::bind(&MirenaState::publish_timer_callback, this), _filter_cb_group);
+        // Health/status report timer
         _report_timer = rclcpp::create_timer(
             this, this->get_clock(), kReportPeriod,
             std::bind(&MirenaState::report_callback, this), _report_cb_group);
     }
 
 private:
+
     mirena::Ekf::Vec6 param_vec6(const std::string &name)
     {
         auto v = this->get_parameter(name).as_double_array();
         if (v.size() != 6)
         {
-            // Fatal rather than substituted. This is filter tuning: carrying on
-            // with a silent stand-in means the car drives on a filter nobody
-            // configured, which is worse than not starting.
             RCLCPP_FATAL(this->get_logger(), "Parameter %s must have 6 elements, got %zu.",
                          name.c_str(), v.size());
             throw std::runtime_error("invalid " + name);
@@ -236,18 +204,15 @@ private:
         return std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
     }
 
-    /// Log a filter step that did not apply. Divergence is an error (the filter
-    /// dropped itself and now waits for a new INS fix); Ignored is a producer
-    /// problem, throttled because a broken producer breaks every sample.
     void log_step(mirena::Ekf::Step step, const char *what)
     {
         using Step = mirena::Ekf::Step;
         if (step == Step::Diverged)
         {
-            RCLCPP_ERROR(this->get_logger(),
-                         "EKF diverged on %s (non-finite state or covariance) — filter reset, "
-                         "re-initializing from the next INS fix. Reset #%u.",
-                         what, _ekf->divergences());
+          RCLCPP_ERROR(this->get_logger(),
+             "EKF diverged on %s (non-finite state or covariance) — filter reset, "
+             "re-initializing from the next INS fix. Reset #%u.",
+             what, static_cast<unsigned int>(_ekf->divergences()));
         }
         else if (step == Step::Ignored)
         {
@@ -257,18 +222,6 @@ private:
         }
     }
 
-    /// Define the odom frame here and start dead reckoning.
-    ///
-    /// REP-105 makes the odom origin arbitrary -- conventionally wherever the
-    /// robot booted -- so there is nothing to wait for. The filter used to sit
-    /// idle until the INS converged, which on rosbag2_2026_08_05-20_26_23 was
-    /// 62 s of a 271 s run: 23% of the session with cones being detected and
-    /// discarded because no pose existed to place them against.
-    ///
-    /// Velocity is seeded at zero. That is a real measurement, not a guess, for
-    /// a car sitting in staging -- but only if the IMU agrees it is sitting, so
-    /// a car that is already rolling gets a variance wide enough to say the
-    /// filter does not know.
     void init_at_origin(const sensor_msgs::msg::Imu &msg)
     {
         const double accel = std::hypot(msg.linear_acceleration.x, msg.linear_acceleration.y);
@@ -298,43 +251,127 @@ private:
         _last_imu_stamp = msg->header.stamp;
         if (!_ekf->is_initialized())
         {
-            // Once the INS has anchored, recovery from a divergence goes back
-            // through the INS instead (ins_odom_callback). Re-defining the
-            // origin mid-run would put a step in the one frame whose entire
-            // contract is that it never steps.
             if (!_ins_anchored) init_at_origin(*msg);
             return;
         }
 
         const double t = rclcpp::Time(msg->header.stamp).seconds();
-        // Body accel is gravity-free forward/left (REP-103) after the driver's
-        // gravity compensation and frame alignment to the base frame.
         log_step(_ekf->predict(t, msg->linear_acceleration.x, msg->linear_acceleration.y), "IMU predict");
-        if (!_ekf->is_initialized()) return; // predict diverged and reset the filter
+        if (!_ekf->is_initialized()) return;
         log_step(_ekf->update_gyro(msg->angular_velocity.z), "gyro update");
+
+        publish_state();
+    }
+    
+    void encoder_callback(const mirena_common::msg::WheelSpeeds::ConstSharedPtr &msg)
+    {
+        if (!_use_encoders) return;
+
+        if (msg->header.stamp.sec == 0 && msg->header.stamp.nanosec == 0)
+        {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                                 "[Encoder] Ignoring message with null timestamp on %s.", WHEEL_SPEEDS_TOPIC);
+            return;
+        }
+
+        std::lock_guard<std::mutex> lock(_filter_mutex);
+        _last_encoder_stamp = msg->header.stamp;
+
+        RCLCPP_INFO_ONCE(this->get_logger(),
+                         "[Encoder] Callback activated: received first message on %s (rl=%.2f RPM, rr=%.2f RPM)",
+                         WHEEL_SPEEDS_TOPIC, msg->rl, msg->rr);
+
+        if (!_ekf->is_initialized())
+        {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                                 "[Encoder] Callback active, but EKF is not initialized yet.");
+            return;
+        }
+
+        if (!std::isfinite(msg->rl) || !std::isfinite(msg->rr))
+        {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                                 "[Encoder] Ignoring message with non-finite wheel speeds (rl=%.2f, rr=%.2f).",
+                                 msg->rl, msg->rr);
+            return;
+        }
+
+        const double v_left = (msg->rl * 2.0 * M_PI / 60.0) * _wheel_radius;
+        const double v_right = (msg->rr * 2.0 * M_PI / 60.0) * _wheel_radius;
+        const double u = 0.5 * (v_left + v_right);
+
+        if (std::abs(u) > 15.0)
+        {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                                 "[Encoder] Rejecting outlier velocity u=%.2f m/s (|u| > 15.0 m/s).", u);
+            return;
+        }
+
+        const double v_diff = std::abs(v_left - v_right);
+        const double dynamic_var = std::min(_encoder_base_var + 0.10 * (v_diff * v_diff), 1.0);
+
+        const double t = rclcpp::Time(msg->header.stamp).seconds();
+        if (t < _ekf->stamp())
+        {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                                 "[Encoder] Discarding out-of-order message: stamp %.6f s < EKF stamp %.6f s.",
+                                 t, _ekf->stamp());
+            return;
+        }
+        if (t > _ekf->stamp())
+        {
+            log_step(_ekf->predict(t, 0.0, 0.0), "encoder time sync predict");
+        }
+
+        log_step(_ekf->update_velocity_u(u, dynamic_var), "encoder speed update");
     }
 
-    /// Latch the rigid transform that carries INS poses into odom.
+    /// Recompute T_odom <- ins so the given INS solution lands exactly on the
+    /// pose the filter currently carries.
     ///
-    /// The INS reports in a frame pinned wherever its own filter converged,
-    /// which is not where this node defined odom. Rather than adopt the INS
-    /// frame -- which is what waiting for it used to amount to -- the offset
-    /// between the two is measured once and every later INS pose is carried
-    /// through it. Because that changes what the *measurement* means and not
-    /// the *state*, odom does not move when the INS arrives: no step, which is
-    /// odom's whole contract.
-    ///
-    /// Only position and yaw need it. The twist is body-frame (child_frame_id
-    /// is the base frame), and body axes are the same physical axes whichever
-    /// world frame references them, so u, v and omega carry over untouched.
-    void latch_anchor(double ins_x, double ins_y, double ins_psi)
+    /// `innovation_m` is the disagreement that provoked the call when this is a
+    /// re-anchor, and negative for the ordinary first fix. The state is not
+    /// touched either way: the disagreement is absorbed into the offset, which
+    /// is what keeps /state/car and the odom->base TF continuous across it.
+    void latch_anchor(double ins_x, double ins_y, double ins_psi, double innovation_m = -1.0)
     {
+        const bool reanchor = innovation_m >= 0.0;
         const auto &x = _ekf->state();
-        _anchor_dpsi = mirena::Ekf::wrap_angle(x(2) - ins_psi);
+
+        // On the first fix the odom frame's orientation is *defined* here, so
+        // the heading offset has to be derived from the pose.
+        //
+        // On a re-anchor it must not be. The pose's heading is gyro-integrated
+        // and drifts badly across a dropout -- measured on the recorded run,
+        // 27.7 deg of error over a 23 s outage against 0.7 deg from the INS --
+        // so re-deriving here would freeze that error into the anchor for good
+        // and throw away the only absolute heading source the car has. Left
+        // alone, the INS heading flows through the original transform and
+        // update_odom corrects it as an ordinary measurement, with the INS's
+        // own yaw covariance behind it. Position is unaffected either way: the
+        // translation below is still solved to put the solution on the pose.
+        if (!reanchor)
+        {
+            _anchor_dpsi = mirena::Ekf::wrap_angle(x(2) - ins_psi);
+        }
+
         const double c = std::cos(_anchor_dpsi), s = std::sin(_anchor_dpsi);
         _anchor_tx = x(0) - (c * ins_x - s * ins_y);
         _anchor_ty = x(1) - (s * ins_x + c * ins_y);
         _ins_anchored = true;
+
+        if (reanchor)
+        {
+            RCLCPP_WARN(this->get_logger(),
+                        "INS solution %.2f m from the estimate (re-anchor #%u): absorbed into the "
+                        "odom offset (%.2f, %.2f) m, instead of applied to the pose. The pose "
+                        "stands at (%.2f, %.2f), so no consumer of /state/car moves. The INS's "
+                        "own absolute position is given up until it moves again; its heading is "
+                        "not, and still corrects the estimate (heading offset held at %.2f deg).",
+                        innovation_m, static_cast<unsigned int>(_ins_reanchors), _anchor_tx, _anchor_ty,
+                        x(0), x(1), _anchor_dpsi * 180.0 / M_PI);
+            return;
+        }
 
         RCLCPP_INFO(this->get_logger(),
                     "INS anchored into odom: offset (%.2f, %.2f) m, %.2f deg. Dead reckoning had "
@@ -369,9 +406,6 @@ private:
             }
             else
             {
-                // The INS beat the IMU to this node, so there is no dead-reckoned
-                // pose to anchor against. Adopt the INS frame as odom -- identity
-                // anchor -- which is what this node did unconditionally before.
                 _anchor_tx = _anchor_ty = _anchor_dpsi = 0.0;
                 _ins_anchored = true;
                 RCLCPP_INFO(this->get_logger(),
@@ -379,17 +413,73 @@ private:
             }
         }
 
-        mirena::Ekf::Vec6 z;
         double zx, zy, zpsi;
         ins_to_odom(ins_x, ins_y, ins_psi, zx, zy, zpsi);
+
+        // An INS solution this far from where the filter believes the car is
+        // is not a correction.
+        //
+        // The driver publishes odometry only while the onboard filter is
+        // tracking, so during an outage the estimate runs on IMU and encoders
+        // alone and drifts. When the solution returns it may be metres from
+        // where the car actually is, and handing that to update_odom moves the
+        // state by metres in a single sample -- the recorded run this was
+        // measured on teleported 12.9 m at t=72.46 s and then cascaded a further
+        // 13.4 m over four samples at t=85.18 s, both times on the first
+        // message after a dropout. Everything downstream inherits it: SLAM's
+        // keyframes, the track projection, the guidance error.
+        //
+        // The test is the innovation, not the step between two INS solutions.
+        // A step cannot be judged on its own, because the car really did drive
+        // during the outage: the two reacquisitions in that run stepped 16.2 m
+        // over 23 s and 35.4 m over 10.7 s, both kinematically ordinary, so a
+        // step threshold either misses them or fires on ordinary driving.
+        // Elapsed time needs no term either -- the odometry has moved too, so
+        // the innovation already carries it.
+        //
+        // Measured over that run's 27673 INS updates: p50 1.5 m, p99 8.5 m,
+        // p99.9 9.2 m, against 16.9 m and 18.1 m at the two teleports. The
+        // routine 3-5 m spread in between is the INS's own reported noise
+        // (posU 2.3-3.3 m in the sim), not drift, which is why the threshold
+        // sits well above it.
+        //
+        // Re-anchoring is the same recovery as the first fix, for the same
+        // reason: the difference goes into T_odom <- ins rather than into the
+        // pose. The INS's absolute reference is lost for the rest of the run,
+        // which is the deliberate trade -- an odom frame that never moves is
+        // worth more to the rest of the stack than the offset it gave up.
+        if (_ekf->is_initialized())
+        {
+            // Advance to the measurement's stamp first. ins_odom_callback does
+            // not otherwise move the filter's clock, so without this the
+            // innovation is taken against a pose up to one IMU period stale.
+            // Same time-sync predict the encoder callback uses.
+            if (t > _ekf->stamp())
+            {
+                log_step(_ekf->predict(t, 0.0, 0.0), "INS time sync predict");
+            }
+
+            if (_ekf->is_initialized())
+            {
+                const auto &x = _ekf->state();
+                const double innovation = std::hypot(zx - x(0), zy - x(1));
+                if (_ins_reanchor_m > 0.0 && innovation > _ins_reanchor_m)
+                {
+                    ++_ins_reanchors;
+                    latch_anchor(ins_x, ins_y, ins_psi, innovation);
+                    // The anchor just moved the INS under the current pose, so
+                    // the measurement has to be mapped again before it is used.
+                    ins_to_odom(ins_x, ins_y, ins_psi, zx, zy, zpsi);
+                }
+            }
+        }
+
+        mirena::Ekf::Vec6 z;
         z << zx, zy, zpsi,
             msg->twist.twist.linear.x,
             msg->twist.twist.linear.y,
             msg->twist.twist.angular.z;
 
-        // The position sigma the driver reports is isotropic, so rotating the
-        // measurement by the anchor leaves its covariance unchanged; a yaw
-        // offset does not touch the yaw variance either.
         mirena::Ekf::Vec6 r;
         r << msg->pose.covariance[0],   // x
             msg->pose.covariance[7],    // y
@@ -400,38 +490,30 @@ private:
 
         if (!_ekf->is_initialized())
         {
-            // Divergence recovery. The measurement is already in odom, so
-            // re-seeding from it puts the filter back without moving the frame.
             if (_ekf->init(z, r, t) == mirena::Ekf::Step::Ok)
+            {
                 RCLCPP_INFO(this->get_logger(), "EKF re-initialized from INS at (%.2f, %.2f)", z(0), z(1));
+                publish_state();
+            }
             else
+            {
                 log_step(mirena::Ekf::Step::Ignored, "INS initialization");
+            }
             return;
         }
-        // The measurement is fused at the filter's current time rather than
-        // back-propagated to its own stamp. Both streams come from the same
-        // driver at the same rate, so the mismatch is bounded by one sample
-        // (~10 ms); anything that changes that has to revisit this.
+
         log_step(_ekf->update_odom(z, r), "INS odometry update");
     }
 
-    void publish_timer_callback()
+    void publish_state()
     {
-        std::lock_guard<std::mutex> lock(_filter_mutex);
-        // No state before the filter is initialised -- which the first IMU
-        // message does via init_at_origin, not the first INS fix. The stack
-        // runs without GNSS; it just runs dead-reckoning (mode NO_INS_YET).
         if (!_ekf->is_initialized()) return;
 
-        // Nothing new since the last tick: the filter clock only moves on an IMU
-        // sample, and republishing the same instant is a duplicate, not an update.
         if (_ekf->stamp() <= _last_published_stamp) return;
         _last_published_stamp = _ekf->stamp();
 
         const auto &x = _ekf->state();
         const auto &P = _ekf->covariance();
-        // Stamp with the filter's own time (derived from message stamps) so the
-        // output is consistent under use_sim_time.
         const rclcpp::Time stamp(static_cast<int64_t>(_ekf->stamp() * 1e9), RCL_ROS_TIME);
 
         mirena_common::msg::Car car;
@@ -483,44 +565,43 @@ private:
             std::lock_guard<std::mutex> lock(_filter_mutex);
             const double now_s = this->now().seconds();
 
-            // Before the first message of a stream there is no age to report --
-            // subtracting an epoch-zero stamp yields the seconds since 1970,
-            // which reads as a number rather than as "nothing has arrived".
             const bool have_odom = _last_odom_stamp.nanoseconds() > 0;
             const bool have_imu = _last_imu_stamp.nanoseconds() > 0;
+            const bool have_encoder = _last_encoder_stamp.nanoseconds() > 0;
             const double odom_age = now_s - _last_odom_stamp.seconds();
             const double imu_age = now_s - _last_imu_stamp.seconds();
+            const double encoder_age = now_s - _last_encoder_stamp.seconds();
 
-            // Both inputs are checked: losing the INS leaves the filter dead
-            // reckoning on the accelerometer, losing the IMU leaves it with no
-            // propagation between fixes. They fail differently, so they report
-            // differently rather than collapsing into one "STALE".
             const bool odom_stale = !have_odom || odom_age > _odom_timeout_sec;
             const bool imu_stale = !have_imu || imu_age > _imu_timeout_sec;
+            const bool encoder_stale = _use_encoders &&
+                                        (!have_encoder || encoder_age > _encoder_timeout_sec);
 
             std::string mode;
             if (!_ekf->is_initialized())
                 mode = "INIT";
             else if (!_ins_anchored)
-                // Running, but on the IMU alone and with no absolute reference
-                // yet. Distinct from DEAD_RECKONING, which means the INS was
-                // there and went away.
                 mode = "NO_INS_YET";
             else if (odom_stale && imu_stale)
-                mode = "STALE";           // nothing is arriving; the pose is frozen
+                mode = "STALE";
             else if (odom_stale)
-                mode = "DEAD_RECKONING";  // IMU only; drifting, trust it briefly
+                mode = "DEAD_RECKONING";
             else if (imu_stale)
-                mode = "NO_IMU";          // INS fixes only; no propagation between them
+                mode = "NO_IMU";
             else
                 mode = "FUSED";
 
             report_json["mode"] = mode;
             report_json["ins_anchored"] = _ins_anchored;
+            report_json["ins_reanchors"] = _ins_reanchors;
+            report_json["ins_reanchor_m"] = _ins_reanchor_m;
+            report_json["encoders_enabled"] = _use_encoders;
             report_json["odom_stale"] = odom_stale;
             report_json["imu_stale"] = imu_stale;
+            report_json["encoder_stale"] = encoder_stale;
             if (have_odom) report_json["odom_age_s"] = odom_age;
             if (have_imu) report_json["imu_age_s"] = imu_age;
+            if (have_encoder) report_json["encoder_age_s"] = encoder_age;
             report_json["ekf_resets"] = _ekf->divergences();
             if (_ekf->is_initialized())
             {

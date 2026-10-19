@@ -43,7 +43,7 @@ def generate_launch_description():
             # Owns /state/car and the odom->car/cog TF.
             Node(
                 package="mirena_state",
-                executable="mirena_state",
+                executable="mirena_state_ekf",
                 name="mirena_state",
                 parameters=[
                     {
@@ -60,9 +60,31 @@ def generate_launch_description():
                         # zero reported variance by construction.
                         "init_cov_floor_diag": [0.01, 0.01, 0.001, 0.01, 0.01, 0.001],
                         "gyro_meas_var": 1.0e-5,  # rad^2/s^2
+                        # -- INS disagreement gate. An INS solution this far from the estimate -- the
+                        # innovation the update is about to apply -- is absorbed by re-anchoring
+                        # T_odom <- ins rather than applied to the pose, so /state/car never
+                        # teleports when the solution returns from a dropout. <= 0 disables it.
+                        "ins_reanchor_m": 12.0,  # m of disagreement that triggers a re-anchor
                     }
                 ],
             ),
+            # FAST-LIO alternative: start this instead of mirena_state_ekf when the
+            # LiDAR odometry backend is intended to own /sensors/imu/odom. Keep
+            # them off at the same time: both publish the same topic and frame.
+            # Node(
+            #     package="mirena_state",
+            #     executable="mirena_state_fast_lio",
+            #     name="mirena_state_fast_lio",
+            #     parameters=[
+            #         {
+            #             "use_sim_time": use_sim_time,
+            #             "cloud_topic": "/sensors/lidar/points",
+            #             "imu_topic": "/sensors/imu",
+            #             "odom_topic": "/sensors/imu/odom",
+            #             "publish_rate_hz": 20.0,
+            #         }
+            #     ],
+            # ),
             # -- Perception ------------------------------------------------------
             Node(
                 package="mirena_perception",

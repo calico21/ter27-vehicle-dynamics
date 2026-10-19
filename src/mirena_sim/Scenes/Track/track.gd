@@ -16,8 +16,6 @@ const START_OFFSET := 6.0
 var track_curve : Curve3D = Curve3D.new() 
 @onready var track_path : Path3D = $TrackPath
 
-
-
 # Internal Refs
 static var _gate_scene = preload("res://Scenes/Track/Gate/gate.tscn")
 static var _cone_scene = preload("res://Scenes/Track/Cone/cone.tscn")
@@ -44,8 +42,6 @@ func _on_ros_parameter_changed(param_name: String, value: Variant):
 		else:
 			if FileAccess.file_exists(value):
 				load_track(value)
-		
-
 
 func _ready() -> void:
 	_node = RosNode.new()
@@ -60,16 +56,14 @@ func _ready() -> void:
 	_map_timer = _node.create_timer(1,_publish_full_map)
 	_track_timer = _node.create_timer(1,_publish_track)
 	
-	#Check parameter
+	# Check parameter
 	var value = _node.get_parameter("track")
 	if value == "random":
 		create_track()
 	else:
 		if FileAccess.file_exists(value):
 			load_track(value)
-	
 
-	
 # ROS publishers
 func _publish_full_map():
 	var msg = RosMirenaCommonEntityList.new()
@@ -77,7 +71,6 @@ func _publish_full_map():
 	msg.header.stamp = _node.now()
 	msg.entities = get_tree().get_nodes_in_group("Cones").map(func(c): return _to_ent(c,true))
 	_map_pub.publish(msg)
-
 
 func _publish_track():
 	if not Sim.track: return
@@ -90,14 +83,13 @@ func _publish_track():
 		gate.x = -t.origin.z  # Godot -Z Forward -> ROS +X
 		gate.y = -t.origin.x  # Godot -X Left    -> ROS +Y
 		gate.psi = -t.basis.get_euler(EulerOrder.EULER_ORDER_YXZ).x
-		
 		return gate
 	)
 	_track_pub.publish(msg)
 	
-func _to_ent(cone: Node3D, global : bool = false  ) -> RosMirenaCommonEntity:
+func _to_ent(cone: Node3D, global : bool = false) -> RosMirenaCommonEntity:
 	var ent = RosMirenaCommonEntity.new()
-	var pos =  cone.global_position if global else to_local(cone.global_position)
+	var pos = cone.global_position if global else to_local(cone.global_position)
 	ent.type = cone.get_type_as_string()
 	
 	# ROS Swizzle: Forward=Z, Left=-X, Up=Y
@@ -126,7 +118,13 @@ func create_track():
 		$Gates.add_child(gate) 
 		
 		gate.gate_width = track_width
-		gate.gate_type = Gate.GateType.EVENT if (i == 0) else Gate.GateType.STANDARD
+		
+		# --- INITIAL GATE SETUP ---
+		if i == 0:
+			gate.gate_type = Gate.GateType.EVENT
+			gate.add_to_group("InitialGate")
+		else:
+			gate.gate_type = Gate.GateType.STANDARD
 		
 		var trans = track_curve.sample_baked_with_rotation(d, true)
 		gate.global_transform = trans
@@ -137,10 +135,6 @@ func create_track():
 	var p1 = track_curve.get_point_position(1)
 	var dir = (p0 - p1).normalized()
 
-	# The car lines up 6 m behind the start line, as the rules place it, so the
-	# run begins with the line ahead rather than under the front axle. Perception
-	# and SLAM both start from here, and the map frame is this pose -- which is
-	# what lets the planner treat the origin as the track root.
 	var shifted_p0 = p0 + (dir * START_OFFSET)
 
 	origin.origin = shifted_p0
@@ -148,12 +142,6 @@ func create_track():
 	
 	track_loaded.emit()
 
-## Writes the current track out in the format load_track reads, which is also
-## the format the planner's stored templates are in.
-##
-## Everything is in the ROS frame the rest of the stack works in -- x forward,
-## y left, measured from the car's start pose -- so an exported track drops
-## straight into a planner test with no transform.
 func export_track(path: String) -> bool:
 	var to_start := origin.affine_inverse()
 
@@ -173,8 +161,6 @@ func export_track(path: String) -> bool:
 		points.append({"x": snappedf(-p.z, 0.001), "y": snappedf(-p.x, 0.001)})
 		walked += track_spacing
 
-	# The car sits at the origin of its own start frame by construction, so the
-	# pose is only here because the format carries it.
 	var data := {
 		"metadata": {
 			"track_name": path.get_file().get_basename(),
@@ -191,7 +177,6 @@ func export_track(path: String) -> bool:
 	file.store_string(JSON.stringify(data, "  "))
 	return true
 
-
 func load_track(path : String):
 	clear_track()
 	var file = FileAccess.open(path, FileAccess.READ)
@@ -201,11 +186,10 @@ func load_track(path : String):
 	json.parse(file.get_as_text())
 	var data = json.data
 	
-	# Load Cones: ROS X -> Godot Z | ROS Y -> Godot X
+	# Load Cones
 	if data.has("cones"):
 		for cone_data in data["cones"]:
 			var cone = _cone_scene.instantiate() as Cone
-			# ROS X is -Z, ROS Y is -X
 			cone.position = Vector3(-cone_data["y"], 0.0, -cone_data["x"])
 			
 			match cone_data["type"]:
@@ -221,14 +205,22 @@ func load_track(path : String):
 	if data.has('path'):
 		track_curve.clear_points()
 		for p in data['path']['points']:
-			# Mapping ROS path points back to Godot space, the same way the
-			# cones and the origin above are mapped: ROS X is -Z, ROS Y is -X.
 			track_curve.add_point(Vector3(-p['y'], 0.0, -p['x']))
-			track_curve.closed = data['path']['closed']
+		track_curve.closed = data['path']['closed']
+		
+		# --- SPAWN INITIAL GATE FOR LOADED TRACKS ---
+		if track_curve.get_baked_length() > 0:
+			var initial_gate = _gate_scene.instantiate() as Gate
+			$Gates.add_child(initial_gate)
+			initial_gate.gate_width = track_width
+			initial_gate.gate_type = Gate.GateType.EVENT
+			initial_gate.add_to_group("InitialGate")
+			
+			var trans = track_curve.sample_baked_with_rotation(0.0, true)
+			initial_gate.global_transform = trans
+			initial_gate.rotate_object_local(Vector3.UP, PI)
 
-	# Start pose directly assigned from ROS 2 input
-
-	origin.origin = Vector3(-data.setup.car_start_pose.y,0.0,-data.setup.car_start_pose.x)
+	origin.origin = Vector3(-data.setup.car_start_pose.y, 0.0, -data.setup.car_start_pose.x)
 	origin.basis = Basis(Vector3.UP, data.setup.car_start_pose.psi)
 	track_loaded.emit()
 
@@ -244,15 +236,12 @@ func get_gate_positions() -> Array[Transform3D]:
 		var d = (i * track_spacing)
 		var pos = track_curve.sample_baked(d)
 		
-		# Get direction vector by looking slightly ahead
 		var next_d = fmod(d + 0.1, length)
 		var next_pos = track_curve.sample_baked(next_d)
 		var dir = (next_pos - pos).normalized()
 		
-		# Construct the Transform3D
 		var gate_xform = Transform3D()
 		gate_xform.origin = pos
-		# use_model_front = true enforces Godot's native -Z as forward
 		gate_xform.basis = Basis.looking_at(dir, Vector3.UP, true)
 		
 		transforms.append(gate_xform)

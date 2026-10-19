@@ -62,14 +62,4 @@ func _spawn_cone(cone_name: String, pos: Vector3, color: int):
 
 func _on_body_entered(body: Node3D):
 	if body.is_in_group("vehicle"):
-		# Forward in Godot is -Z. 
-		var gate_forward = -global_transform.basis.z 
-		# Check if the body has a linear_velocity property (typical for RigidBody3D)
-		var velocity = body.linear_velocity if "linear_velocity" in body else Vector3.ZERO
-		var vehicle_velocity = velocity.normalized()
-		
-		if gate_forward.dot(vehicle_velocity) > 0.1:
-			print("Valid Pass!")
-			vehicle_passed.emit()
-		else:
-			print("Wrong Way!")
+		vehicle_passed.emit()

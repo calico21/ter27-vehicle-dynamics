@@ -1,10 +1,17 @@
 // SocketCAN bridge node for the TER DBC (hardware).
 //
-// Implements four paths:
+// Implements five paths:
 //   * CarControl (ROS) -> DV_Dynamic_Req_1 (CAN)        [output]
 //   * MissionInfo (ROS) -> DV_info (CAN)                [output]
 //   * DV_system_status (CAN) -> AsInfo (ROS)            [input]
 //   * WheelInfo (CAN) -> WheelSpeeds (ROS)              [input]
+//   * APPS/BPPS/STEER (CAN) -> CarControl (ROS)         [input]
+//
+// The last path mirrors the manual (pedal) driving commands, so a manual test can
+// be recorded as a ROS bag: every APPS, BPPS or STEER frame received republishes a
+// CarControl carrying the latest known gas and steering values. It goes to its own
+// topic, never /control -- that topic is this node's CAN TX source, and feeding it
+// back would close a loop through the car.
 //
 // ...and, optionally, records the whole bus to disk. See can_logger.hpp for how
 // that is kept off this node's rx path; the policy of when to record lives here,
@@ -64,12 +71,16 @@ public:
   {
     iface_ = declare_parameter<std::string>("can_interface", "can1");
 
+    // BPPS full scale in Bar, used to normalize brake pressure into [0,1] of gas.
+    // 1.0 Bar is what the DBC declares; raise it if the real pedal reads higher.
+    bpps_full_scale_bar_ = declare_parameter<double>("bpps_full_scale_bar", 1.0);
+
     // Recording is off unless asked for, and asking for it without saying where
     // is a configuration mistake rather than a reason to pick a directory on
     // the user's behalf -- a log written somewhere nobody looks is worse than
     // no log, because it is believed to exist.
-    const bool log_enabled = declare_parameter<bool>("log", false);
-    const std::string log_path = declare_parameter<std::string>("log_path", "");
+    const bool log_enabled = declare_parameter<bool>("log", true);
+    const std::string log_path = declare_parameter<std::string>("log_path", "/home/mirena/mirena_ws/src/mirena_hardware/src/can/log");
     if (log_enabled && log_path.empty()) {
       RCLCPP_ERROR(get_logger(), "log is set but log_path is empty; not recording.");
     } else if (log_enabled) {
@@ -98,8 +109,14 @@ public:
     // Sensor data, so it follows the same best-effort contract as the other
     // /sensors topics: a wheel speed that arrived late describes a speed the car
     // is no longer doing, and is better dropped than queued.
-    wheel_speeds_pub_ = create_publisher<mirena_common::msg::WheelSpeeds>(
-      "/sensors/wheel_speeds", rclcpp::SensorDataQoS());
+    wheel_speeds_pub_ = this->create_publisher<mirena_common::msg::WheelSpeeds>(
+    "/sensors/wheel_speeds", rclcpp::SensorDataQoS());
+
+    // The same contract as /sensors: these are commands sampled from pedals, so a
+    // message that arrives late describes an input the driver has already released.
+    // Dropping it is better than queueing it behind the ones after it.
+    const std::string car_control_topic = declare_parameter<std::string>("car_control_topic", "/control/can");
+    car_control_pub_ = create_publisher<mirena_common::msg::CarControl>(car_control_topic, rclcpp::SensorDataQoS());
 
     // Poll the socket regularly; reads are non-blocking and drain all pending frames.
     rx_timer_ = create_wall_timer(5ms, std::bind(&MirenaCan::rx_poll, this));
@@ -153,11 +170,20 @@ private:
           get_logger(), "Could not subscribe to CAN error frames: %s", std::strerror(errno));
       }
     } else {
-      struct can_filter rfilter[2];
-      rfilter[0].can_id = TER_DV_SYSTEM_STATUS_FRAME_ID;
-      rfilter[0].can_mask = CAN_SFF_MASK;
-      rfilter[1].can_id = TER_WHEEL_INFO_FRAME_ID;
-      rfilter[1].can_mask = CAN_SFF_MASK;
+      // The frames we transmit (DV_Dynamic_Req_1, DV_info) are deliberately absent:
+      // nothing we send should come back to us as a reading of the car.
+      struct can_filter rfilter[5];
+      const canid_t wanted[] = {
+        TER_DV_SYSTEM_STATUS_FRAME_ID,
+        TER_WHEEL_INFO_FRAME_ID,
+        TER_APPS_FRAME_ID,
+        TER_BPPS_FRAME_ID,
+        TER_STEER_FRAME_ID,
+      };
+      for (size_t i = 0; i < sizeof(wanted) / sizeof(wanted[0]); ++i) {
+        rfilter[i].can_id = wanted[i];
+        rfilter[i].can_mask = CAN_SFF_MASK;  // all of these are standard (11-bit) frames
+      }
       if (setsockopt(can_fd_, SOL_CAN_RAW, CAN_RAW_FILTER, &rfilter, sizeof(rfilter)) < 0) {
         RCLCPP_ERROR(get_logger(), "Failed to set CAN filter: %s", std::strerror(errno));
         close_can();
@@ -363,6 +389,15 @@ private:
         case TER_WHEEL_INFO_FRAME_ID:
           handle_wheel_info(frame);
           break;
+        case TER_APPS_FRAME_ID:
+          handle_apps(frame);
+          break;
+        case TER_BPPS_FRAME_ID:
+          handle_bpps(frame);
+          break;
+        case TER_STEER_FRAME_ID:
+          handle_steer(frame);
+          break;
         default:
           break;  // not ours; only reachable while recording runs unfiltered
       }
@@ -452,6 +487,75 @@ private:
     wheel_speeds_pub_->publish(out);
   }
 
+  // --- CAN APPS / BPPS / STEER -> ROS CarControl ---
+  //
+  // These are the manual driver's inputs, not our commands: the accelerator and
+  // brake pedals and the steering sensor, all broadcast by the pedal ECU. They are
+  // published so a manual test can be recorded and replayed as a ROS bag, which is
+  // the only way to compare what a human asked the car for against what the car
+  // did -- the CAN log has the commands, this has them timestamped in ROS time.
+
+  // Accelerator pedal. APPS_AV is the ECU's own average of the two pedal sensors,
+  // which is the signal to trust: one pot failing is a fault the ECU reports, not
+  // something to reconstruct here.
+  void handle_apps(const struct can_frame & frame)
+  {
+    struct ter_apps_t dst;
+    if (ter_apps_unpack(&dst, frame.data, frame.can_dlc) != 0) {
+      return;
+    }
+
+    gas_apps_ = std::clamp(ter_apps_apps_av_decode(dst.apps_av) / 255.0, 0.0, 1.0);
+    publish_pedal_control();
+  }
+
+  // Brake pedal, as pressure. Normalized against a full-scale that is a parameter
+  // rather than a constant because the DBC's 1 Bar is a nominal range, not a
+  // measured full pedal, and getting it wrong scales every braking sample in the bag.
+  void handle_bpps(const struct can_frame & frame)
+  {
+    struct ter_bpps_t dst;
+    if (ter_bpps_unpack(&dst, frame.data, frame.can_dlc) != 0) {
+      return;
+    }
+
+    const double full_scale = (bpps_full_scale_bar_ > 0.0) ? bpps_full_scale_bar_ : 1.0;
+    gas_brake_ = std::clamp(ter_bpps_bpps_decode(dst.bpps) / full_scale, 0.0, 1.0);
+    publish_pedal_control();
+  }
+
+  // Steering sensor, published exactly as the bus reports it. The signal is in
+  // Grad, and CarControl.steer_angle is documented in radians; converting here
+  // would silently disagree with the CAN log recorded from the same bus in the same
+  // session, and the conversion factor belongs to whoever reads the bag.
+  void handle_steer(const struct can_frame & frame)
+  {
+    struct ter_steer_t dst;
+    if (ter_steer_unpack(&dst, frame.data, frame.can_dlc) != 0) {
+      return;
+    }
+
+    steer_ = ter_steer_angle_decode(dst.angle);
+    publish_pedal_control();
+  }
+
+  // Publishes the latest known pedal state. Called on every pedal frame, so gas and
+  // steering are latched: whichever of them did not change in this frame keeps its
+  // previous value rather than dropping to zero and back.
+  void publish_pedal_control()
+  {
+    mirena_common::msg::CarControl out;
+    // Stamped on arrival, like the wheel speeds: the bus carries no timestamp, so
+    // this is the earliest moment the sample can be attributed to, and the polling
+    // delay it hides is bounded by the 5 ms rx timer. No frame_id -- a pedal command
+    // is not expressed in any of this workspace's frames, and the one on /control
+    // leaves it to whoever is commanding.
+    out.header.stamp = now();
+    out.gas = std::clamp(gas_apps_ - gas_brake_, -1.0, 1.0);
+    out.steer_angle = steer_;
+    car_control_pub_->publish(out);
+  }
+
   // DBC AS_status choices use a different enumeration than the ROS AsInfo status constants.
   static uint8_t map_as_status(uint8_t dbc_value)
   {
@@ -500,6 +604,11 @@ private:
 
   std::string iface_;
   int can_fd_ {-1};
+  double bpps_full_scale_bar_ {1.0};
+  // Latest manual (pedal) input, latched across frames. See publish_pedal_control.
+  double gas_apps_ {0.0};
+  double gas_brake_ {0.0};
+  double steer_ {0.0};
   /// Null unless the `log` parameter asked for recording. Its presence is also
   /// what decides whether the socket runs filtered.
   std::unique_ptr<mirena::CanLogger> logger_;
@@ -507,6 +616,7 @@ private:
   rclcpp::Subscription<mirena_common::msg::MissionInfo>::SharedPtr mission_info_sub_;
   rclcpp::Publisher<mirena_common::msg::AsInfo>::SharedPtr as_info_pub_;
   rclcpp::Publisher<mirena_common::msg::WheelSpeeds>::SharedPtr wheel_speeds_pub_;
+  rclcpp::Publisher<mirena_common::msg::CarControl>::SharedPtr car_control_pub_;
   rclcpp::TimerBase::SharedPtr rx_timer_;
 };
 

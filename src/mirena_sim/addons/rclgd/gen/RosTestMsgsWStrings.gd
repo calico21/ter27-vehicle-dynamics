@@ -31,4 +31,3 @@ var bounded_sequence_of_wstrings : Array:
 var unbounded_sequence_of_wstrings : Array:
 	get: return get_member(&"unbounded_sequence_of_wstrings")
 	set(v): set_member(&"unbounded_sequence_of_wstrings", v)
-

@@ -14,7 +14,8 @@ func _ready() -> void:
 func _setup_ros_system() -> void:
 	_node = RosNode.new()
 	_node.init("SimDebug")
-	
+	_node.set_parameter("use_sim_time", true)
+
 	_tasks.append(PublishTask.new("control",  50.0, _node.create_publisher("/sim/debug/control",        "mirena_common/msg/CarControl"),      _publish_control))
 	_tasks.append(PublishTask.new("slam",     10.0, _node.create_publisher("/sim/debug/slam",           "mirena_common/msg/EntityList"),      _publish_slam))
 	_tasks.append(PublishTask.new("map",      1.0,  _node.create_publisher("/sim/debug/full_map",       "mirena_common/msg/EntityList"),      _publish_full_map))

@@ -43,7 +43,7 @@ def generate_launch_description():
         # Owns /state/car and the odom->car/cog TF.
         Node(
             package='mirena_state',
-            executable='mirena_state',
+            executable='mirena_state_ekf',
             name='mirena_state',
             parameters=[{
                 'use_sim_time': use_sim_time,
@@ -59,6 +59,11 @@ def generate_launch_description():
                 # reported variance by construction.
                 'init_cov_floor_diag': [0.01, 0.01, 0.001, 0.01, 0.01, 0.001],
                 'gyro_meas_var': 1.0e-5,                       # rad^2/s^2
+                # -- INS disagreement gate. An INS solution this far from the estimate -- the
+                # innovation the update is about to apply -- is absorbed by re-anchoring
+                # T_odom <- ins rather than applied to the pose, so /state/car never
+                # teleports when the solution returns from a dropout. <= 0 disables it.
+                'ins_reanchor_m': 12.0,                      # m of disagreement that triggers a re-anchor
             }],
         ),
 
