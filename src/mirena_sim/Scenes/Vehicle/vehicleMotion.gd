@@ -14,12 +14,21 @@ const GEAR_RATIO = 5 # 1:5
 ## were different once: 0.23 here, 0.26 in the scene, 0.20 in the fusion.
 const WHEEL_RADIUS = 0.20 # m
 const BRAKE_F = 20
+## --- Brakes (real-car spec) ---
+## Godot applies a wheel's brake force against that wheel's own friction
+## coefficient, so with wheel_friction at 1.4 this car would brake with 4120 N.
+## The real car's brake_mu is 0.40, and the recorded bag shows it decelerating
+## at 3.93 m/s^2 -- 0.40*g to three significant figures -- so its whole
+## braking budget is 1177 N, split 60/40 front/rear.
+const BRAKE_MU = 0.40
+const BRAKE_BIAS_F = 0.60
+## Keep in step with `mass` on the MirenaCar node in mirena_car.tscn.
+const MASS_KG = 300.0
+const GRAVITY = 9.81
 const MAX_STEER = deg_to_rad(30)
-## Forward speed over which regen is at full strength. Below it regen fades out
-## and the friction brakes take over, so a braking command can only ever remove
-## speed: /control carries a [-1, 1] throttle where -1 is full braking, never
-## reverse, and the car must not drive backwards on one.
-const REGEN_FADE_SPEED = 0.5 # m/s
+## /control carries a [-1, 1] throttle where -1 is full braking, never reverse,
+## so the car must not drive backwards on one. The friction brakes are what
+## holds it at a standstill now, not a regen term.
 
 # --- Pilot Settings ---
 @export var pilot: PilotMode = PilotMode.NO_PILOT
@@ -420,17 +429,34 @@ func _apply_vehicle_physics(_delta: float) -> void:
 
 	var throttle = max(gas, 0.0)
 	var braking = max(-gas, 0.0)
-	var regen_scale = clamp(u / REGEN_FADE_SPEED, 0.0, 1.0)
-	var fx = (throttle - braking * regen_scale) * max_fx_motor
 
-	# Rear left and right 
-	# mirena_car.tscn. RR free-rolls and still reports an encoder speed.
-	$RL_WHEEL.engine_force = fx
-	$RR_WHEEL.engine_force = fx
-	
-	var brake_force = min(brake + braking * (1.0 - regen_scale) * BRAKE_F, BRAKE_F)
-	$RL_WHEEL.brake = brake_force
-	$RR_WHEEL.brake = brake_force
+	# The whole braking budget, and how it is split between the axles.
+	var brake_budget = BRAKE_MU * MASS_KG * GRAVITY
+	var front_share = brake_budget * BRAKE_BIAS_F * 0.5
+	var rear_share = brake_budget * (1.0 - BRAKE_BIAS_F)
+
+	# No separate regen term. Scaling one by the motor's drive torque made it
+	# saturate the rear axle's share at 6% of the brake command -- a light
+	# pedal touch was shedding 1.3 m/s^2, and the recorded car shows a coast
+	# of only 1.9 m/s^2 including gradient. The tyre-limited friction brake
+	# carries the whole budget instead, and it also holds the car at rest,
+	# which is what bounding the braking at zero needed the regen for.
+	var fx = throttle * max_fx_motor
+
+	# Rear left and right. max_fx_motor is the total tractive force, so each
+	# driven wheel gets half of it -- otherwise the pair asks for twice the
+	# motor's output.
+	$RL_WHEEL.engine_force = fx / 2.0
+	$RR_WHEEL.engine_force = fx / 2.0
+
+	# The front axle carries 60% of the budget -- which the old code never
+	# applied at all, it braked the rear wheels only. Both axles scale with
+	# the brake command, so a light pedal touch stays a light brake.
+	var ebs = min(brake, 1.0) * BRAKE_F
+	$FL_WHEEL.brake = front_share * braking + ebs
+	$FR_WHEEL.brake = front_share * braking + ebs
+	$RL_WHEEL.brake = rear_share * 0.5 * braking + ebs
+	$RR_WHEEL.brake = rear_share * 0.5 * braking + ebs
 
 func _smooth_steer(current: float, target: float, delta: float, speed: float) -> float:
 	var diff = target - current
