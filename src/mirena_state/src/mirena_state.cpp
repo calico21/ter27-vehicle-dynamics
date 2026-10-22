@@ -106,6 +106,9 @@ class MirenaState : public rclcpp::Node
     double _track_width = 1.2;        // m
     double _encoder_base_var = 0.01;  // (m/s)^2
 
+    double _encoder_yaw_var_max = 0.5;   // miembro
+    
+    
 public:
     MirenaState() : rclcpp::Node("mirena_state")
     {
@@ -125,6 +128,8 @@ public:
         this->declare_parameter<double>("encoder_var", 0.01);
         this->declare_parameter<bool>("use_encoders", true);
         this->declare_parameter<double>("ins_reanchor_m", 12.0);
+        this->declare_parameter<double>("encoder_yaw_var_max", 0.5);
+        _encoder_yaw_var_max = this->get_parameter("encoder_yaw_var_max").as_double();
 
         RCLCPP_INFO(this->get_logger(), "Starting Mirena State");
 
@@ -205,22 +210,27 @@ private:
     }
 
     void log_step(mirena::Ekf::Step step, const char *what)
+{
+    using Step = mirena::Ekf::Step;
+    if (step == Step::Diverged)
     {
-        using Step = mirena::Ekf::Step;
-        if (step == Step::Diverged)
-        {
-          RCLCPP_ERROR(this->get_logger(),
-             "EKF diverged on %s (non-finite state or covariance) — filter reset, "
-             "re-initializing from the next INS fix. Reset #%u.",
-             what, static_cast<unsigned int>(_ekf->divergences()));
-        }
-        else if (step == Step::Ignored)
-        {
-            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
-                                 "EKF ignored %s: non-finite values or a stamp that did not "
-                                 "advance. Check the sensor layer.", what);
-        }
+        RCLCPP_ERROR(this->get_logger(),
+            "EKF diverged on %s (non-finite state or covariance) — filter reset, "
+            "re-initializing from the next INS fix. Reset #%u.",
+            what, static_cast<unsigned int>(_ekf->divergences()));
     }
+    else if (step == Step::Ignored)
+    {
+        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                             "EKF ignored %s: non-finite values or a stamp that did not "
+                             "advance. Check the sensor layer.", what);
+    }
+    else if (step == Step::Rejected)
+    {
+        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                             "EKF rejected %s: innovation failed the NIS gate.", what);
+    }
+}
 
     void init_at_origin(const sensor_msgs::msg::Imu &msg)
     {
@@ -258,8 +268,7 @@ private:
         const double t = rclcpp::Time(msg->header.stamp).seconds();
         log_step(_ekf->predict(t, msg->linear_acceleration.x, msg->linear_acceleration.y), "IMU predict");
         if (!_ekf->is_initialized()) return;
-        log_step(_ekf->update_gyro(msg->angular_velocity.z), "gyro update");
-
+        log_step(_ekf->update_gyro(msg->angular_velocity.z, _gyro_meas_var), "gyro update");
         publish_state();
     }
     
@@ -299,6 +308,7 @@ private:
         const double v_left = (msg->rl * 2.0 * M_PI / 60.0) * _wheel_radius;
         const double v_right = (msg->rr * 2.0 * M_PI / 60.0) * _wheel_radius;
         const double u = 0.5 * (v_left + v_right);
+        const double w = (v_right - v_left) / _track_width;
 
         if (std::abs(u) > 15.0)
         {
@@ -309,6 +319,11 @@ private:
 
         const double v_diff = std::abs(v_left - v_right);
         const double dynamic_var = std::min(_encoder_base_var + 0.10 * (v_diff * v_diff), 1.0);
+
+        const double var_w = 2.0 * _encoder_base_var / (_track_width * _track_width)
+                   + 0.10 * (v_diff * v_diff);   // opcional, ajusta o quita
+        const double dynamic_var_w = std::min(var_w, _encoder_yaw_var_max);
+
 
         const double t = rclcpp::Time(msg->header.stamp).seconds();
         if (t < _ekf->stamp())
@@ -324,6 +339,7 @@ private:
         }
 
         log_step(_ekf->update_velocity_u(u, dynamic_var), "encoder speed update");
+        log_step(_ekf->update_gyro(w, dynamic_var_w), "encoder yaw-rate update");
     }
 
     /// Recompute T_odom <- ins so the given INS solution lands exactly on the
