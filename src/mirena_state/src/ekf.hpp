@@ -17,22 +17,24 @@ public:
     {
         Ok,
         Ignored,
+        Rejected,
         Diverged
     };
 
-    struct Config
-    {
-        Vec6 process_noise_diag;
-        Vec6 odom_meas_floor_diag;
-        Vec6 init_cov_floor_diag;
-        double gyro_meas_var = 1e-4;
-        double max_dt = 0.1;
+struct Config
+{
+    Vec6 process_noise_diag;
+    Vec6 odom_meas_floor_diag;
+    Vec6 init_cov_floor_diag;
+    double gyro_meas_var = 1e-4;
+    double gyro_gate_chi2 = 6.63;   // 99 %, 1 gl
+    double max_dt = 0.1;
 
-        Config()
-            : process_noise_diag(Vec6::Constant(0.01)),
-              odom_meas_floor_diag(Vec6::Constant(1e-6)),
-              init_cov_floor_diag(Vec6::Constant(1e-3)) {}
-    };
+    Config()
+        : process_noise_diag(Vec6::Constant(0.01)),
+          odom_meas_floor_diag(Vec6::Constant(1e-6)),
+          init_cov_floor_diag(Vec6::Constant(1e-3)) {}
+};
 
     explicit Ekf(const Config &cfg = Config()) : cfg_(cfg) { reset(); }
 
@@ -48,7 +50,7 @@ public:
 
     Step init(const Vec6 &z, const Vec6 &r_diag, double stamp);
     Step predict(double stamp, double ax, double ay);
-    Step update_gyro(double omega_meas);
+    Step update_gyro(double omega_meas, double var_omega);
     Step update_odom(const Vec6 &z, const Vec6 &r_diag);
     Step update_pose(const Vec3 &z, const Vec3 &r_diag);
     Step update_velocity(const Vec3 &z, const Vec3 &r_diag);

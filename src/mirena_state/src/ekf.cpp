@@ -95,20 +95,29 @@ Ekf::Step Ekf::predict(double stamp, double ax, double ay)
     return commit();
 }
 
-Ekf::Step Ekf::update_gyro(double omega_meas)
+Ekf::Step Ekf::update_gyro(double omega_meas, double var_omega)
 {
     if (!initialized_) return Step::Ignored;
-    if (!std::isfinite(omega_meas)) return Step::Ignored;
+    if (!std::isfinite(omega_meas) || !std::isfinite(var_omega) || !(var_omega > 0.0))
+        return Step::Ignored;
 
-    // Scalar update on omega: H = [0 0 0 0 0 1]
     const double innovation = omega_meas - x_(5);
-    const double s_var = P_(5, 5) + cfg_.gyro_meas_var;
+    const double R = var_omega;                       
+    const double s_var = P_(5, 5) + R;
     if (!(s_var > 0.0)) return Step::Ignored;
+
+    const double nis = innovation * innovation / s_var;
+    if (nis > cfg_.gyro_gate_chi2) return Step::Ignored;
+
     const Vec6 K = P_.col(5) / s_var;
 
     x_ += K * innovation;
     x_(2) = wrap_angle(x_(2));
-    P_ -= K * P_.row(5);
+
+    Mat6 IKH = Mat6::Identity();
+    IKH.col(5) -= K;
+    P_ = IKH * P_ * IKH.transpose() + K * R * K.transpose();
+
     symmetrize();
     return commit();
 }
