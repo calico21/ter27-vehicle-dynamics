@@ -225,6 +225,47 @@ Ekf::Step Ekf::update_velocity_u(double u_meas, double var_u)
     return commit();
 }
 
+// Rear-axle no-slip constraint: v = l_rear * omega.
+//
+// The wheel encoders give the rear axle's yaw rate but no lateral speed, so
+// without this the only observation of v is the INS -- which is absent during
+// its dropouts and, when present, only reports v to ~0.2 m/s. Position then
+// integrates an unconstrained v and y drifts while x stays pinned by the
+// encoder's u. This is the missing half of the encoder update: u pins the
+// longitudinal axis, this pins the lateral one.
+//
+// The state lives at the COG, so the rear axle's lateral velocity is
+// v - l_rear * omega (see dbm_model.py, alpha_r). Zero slip at that axle is
+// therefore the scalar measurement (v - l_rear * omega) == 0. var_v is the
+// tolerance for real slip and is inflated with speed by the caller.
+Ekf::Step Ekf::update_nonholonomic(double l_rear, double var_v)
+{
+    if (!initialized_) return Step::Ignored;
+    if (!std::isfinite(l_rear) || !std::isfinite(var_v) || !(var_v > 0.0))
+        return Step::Ignored;
+
+    // H = [0, 0, 0, 0, 1, -l_rear], z = 0
+    Eigen::Matrix<double, 1, 6> H = Eigen::Matrix<double, 1, 6>::Zero();
+    H(0, 4) = 1.0;
+    H(0, 5) = -l_rear;
+
+    const double innovation = -(x_(4) - l_rear * x_(5));
+    const double S = (H * P_ * H.transpose())(0, 0) + var_v;
+    if (!(S > 0.0) || !std::isfinite(S)) return Step::Ignored;
+
+    const Vec6 K = (P_ * H.transpose()) / S;
+
+    x_ += K * innovation;
+    x_(2) = wrap_angle(x_(2));
+
+    // Joseph form: the short (I - K H) update can lose positive-definiteness.
+    const Mat6 IKH = Mat6::Identity() - K * H;
+    P_ = IKH * P_ * IKH.transpose() + K * var_v * K.transpose();
+
+    symmetrize();
+    return commit();
+}
+
 
 void Ekf::symmetrize()
 {

@@ -55,6 +55,7 @@ struct Config
     Step update_pose(const Vec3 &z, const Vec3 &r_diag);
     Step update_velocity(const Vec3 &z, const Vec3 &r_diag);
     Step update_velocity_u(double u_meas, double var_u);
+    Step update_nonholonomic(double l_rear, double var_v);
     Step update_zupt(const Vec3 &r_diag);
 
 private:

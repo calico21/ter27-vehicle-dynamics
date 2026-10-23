@@ -45,6 +45,11 @@ namespace
     constexpr double kUnknownVelVar = 25.0;  // (5 m/s)^2, if it is already rolling
     constexpr double kStationaryAccel = 0.5; // m/s^2, gravity already removed
     constexpr double kStationaryRate = 0.05; // rad/s
+
+    /// Variance added to the rear-axle no-slip constraint per (m/s)^2 of
+    /// speed. Slip grows with speed, so a constraint that is tight while
+    /// parked must not fight the car in a fast corner.
+    constexpr double kNoSlipSpeedGain = 0.004;
 } // namespace
 
 class MirenaState : public rclcpp::Node
@@ -107,6 +112,12 @@ class MirenaState : public rclcpp::Node
     double _encoder_base_var = 0.01;  // (m/s)^2
 
     double _encoder_yaw_var_max = 0.5;   // miembro
+
+    /// Rear-axle no-slip constraint, the lateral half of the encoder update.
+    /// The state is at the COG, so the rear-axle lateral velocity is
+    /// v - L_R * omega; L_R is the COG-to-rear-axle distance (dbm_model.py).
+    double _cog_to_rear_axle_m = 0.744;  // m
+    double _no_slip_var = 0.01;          // (m/s)^2 at standstill
     
     
 public:
@@ -129,7 +140,11 @@ public:
         this->declare_parameter<bool>("use_encoders", true);
         this->declare_parameter<double>("ins_reanchor_m", 12.0);
         this->declare_parameter<double>("encoder_yaw_var_max", 0.5);
+        this->declare_parameter<double>("cog_to_rear_axle_m", 0.744);
+        this->declare_parameter<double>("no_slip_var", 0.01);
         _encoder_yaw_var_max = this->get_parameter("encoder_yaw_var_max").as_double();
+        _cog_to_rear_axle_m = this->get_parameter("cog_to_rear_axle_m").as_double();
+        _no_slip_var = this->get_parameter("no_slip_var").as_double();
 
         RCLCPP_INFO(this->get_logger(), "Starting Mirena State");
 
@@ -340,6 +355,20 @@ private:
 
         log_step(_ekf->update_velocity_u(u, dynamic_var), "encoder speed update");
         log_step(_ekf->update_gyro(w, dynamic_var_w), "encoder yaw-rate update");
+
+        // Lateral half of the encoder update: no slip at the rear axle means
+        // v = L_R * omega. On its own u pins x and nothing pins y, so this is
+        // what keeps the cross-track position from random-walking whenever the
+        // INS drops out (or simply reading noisy v while it is up). Setting
+        // no_slip_var <= 0 disables it.
+        if (_no_slip_var > 0.0)
+        {
+            const double v_est = _ekf->state()(4);
+            const double no_slip_var =
+                std::min(_no_slip_var + kNoSlipSpeedGain * (u * u + v_est * v_est), 1.0);
+            log_step(_ekf->update_nonholonomic(_cog_to_rear_axle_m, no_slip_var),
+                     "encoder no-slip update");
+        }
     }
 
     /// Recompute T_odom <- ins so the given INS solution lands exactly on the

@@ -5,7 +5,8 @@ rosbag_analyzer.py — Analisis profundo de TODOS los topics de una rosbag ROS 2
 
     source /opt/ros/jazzy/setup.bash
     source ~/ws/install/setup.bash          # para los mensajes propios
-    python3 rosbag_analyzer.py /ruta/al/bag --save figs/
+    python3 bag_analayzer.py /ruta/al/bag --save figs/
+    python3 bag_analayzer.py /ruta/grabacion.mcap --save figs/
 
 Una sola pasada del fichero. Cada topic recibe el mismo nivel de analisis que
 la IMU, segun su tipo:
@@ -15,8 +16,25 @@ la IMU, segun su tipo:
                  desfase de relojes y ROTACION RELATIVA entre ellas por Kabsch.
   Odometry       trayectoria, velocidades, y CONSISTENCIA DE FRAMES: d(yaw)/dt
                  contra angular.z, y la direccion de (dx,dy) contra R(yaw)*v.
+  Car            salida de mirena_state: trayectoria, covarianza y, si hay
+                 odometria en el mismo bag, COMPARACION sensor solo vs EKF.
+  Pose / Twist   PoseStamped, PoseWithCovariance, TwistStamped, TwistWithCov:
+                 trayectoria, orientacion, velocidades y covarianzas.
+  PoseArray      numero de poses, centroide y dispersion.
+  Path           numero de poses y longitud del camino.
   NavSatFix      dispersion, CEP o recorrido, altitud, estado del fix.
   PointCloud2    tasa, tamano por nube, puntos y layout de campos, sin decodificar.
+  LaserScan      puntos por barrido, haces validos, rango min/medio/max y
+                 dibujo XY del ultimo barrido.
+  Image          resolucion, encoding, bytes/frame, brillo y miniaturas
+                 (CompressedImage se decodifica si OpenCV esta instalado).
+  Range          distancia, limites y FOV.
+  BatteryState   voltaje, corriente, carga, porcentaje, temperatura y celdas.
+  JointState     posicion, velocidad y esfuerzo por joint.
+  Diagnostic     estados OK/WARN/ERROR agrupados por nombre.
+  Clock          avance del reloj, saltos y deriva frente al bag.
+  Temperature, FluidPressure, MagneticField, Illuminance, RelativeHumidity
+                 series escalares con sus unidades.
   TFMessage      arbol de transformadas con traslacion y RPY.
   Log            WARN/ERROR agrupados por nodo y mensaje.
   cualquier otro estadistica y series temporales de todos sus campos numericos
@@ -24,6 +42,9 @@ la IMU, segun su tipo:
 
 Ademas, figuras globales: tasa de cada topic normalizada a su mediana (donde
 se ve exactamente cuando y quien perdio mensajes) y reparto de ancho de banda.
+Si el bag trae a la vez /state/car y la odometria del sensor, se genera una
+figura de comparacion (EKF frente a sensor solo) con error de posicion y yaw.
+Para reproducir el bag EN VIVO contra un nodo, usa bag_replay.py.
 
 Opciones:
     --topic A [B ...]  solo esos topics
@@ -58,11 +79,33 @@ IMU_TYPE = "sensor_msgs/msg/Imu"
 FIX_TYPE = "sensor_msgs/msg/NavSatFix"
 ODOM_TYPE = "nav_msgs/msg/Odometry"
 CLOUD_TYPE = "sensor_msgs/msg/PointCloud2"
+SCAN_TYPE = "sensor_msgs/msg/LaserScan"
+IMAGE_TYPE = "sensor_msgs/msg/Image"
+COMPRESSED_TYPE = "sensor_msgs/msg/CompressedImage"
+RANGE_TYPE = "sensor_msgs/msg/Range"
+BATTERY_TYPE = "sensor_msgs/msg/BatteryState"
+JOINT_TYPE = "sensor_msgs/msg/JointState"
+DIAG_TYPE = "diagnostic_msgs/msg/DiagnosticArray"
+CLOCK_TYPE = "rosgraph_msgs/msg/Clock"
+TEMPERATURE_TYPE = "sensor_msgs/msg/Temperature"
+PRESSURE_TYPE = "sensor_msgs/msg/FluidPressure"
+MAGNETIC_TYPE = "sensor_msgs/msg/MagneticField"
+ILLUMINANCE_TYPE = "sensor_msgs/msg/Illuminance"
+HUMIDITY_TYPE = "sensor_msgs/msg/RelativeHumidity"
+CAR_TYPE = "mirena_common/msg/Car"
+POSE_TYPES = ("geometry_msgs/msg/PoseStamped",
+              "geometry_msgs/msg/PoseWithCovarianceStamped")
+POSE_ARRAY_TYPE = "geometry_msgs/msg/PoseArray"
+TWIST_TYPES = ("geometry_msgs/msg/TwistStamped",
+               "geometry_msgs/msg/TwistWithCovarianceStamped")
+PATH_TYPE = "nav_msgs/msg/Path"
 TF_TYPES = ("tf2_msgs/msg/TFMessage",)
 LOG_TYPE = "rcl_interfaces/msg/Log"
-HEAVY_TYPES = (CLOUD_TYPE, "sensor_msgs/msg/Image",
-               "sensor_msgs/msg/CompressedImage", "sensor_msgs/msg/LaserScan")
-HEAVY_SAMPLE = 25          # de los tipos pesados basta con unos pocos
+HEAVY_TYPES = (CLOUD_TYPE,)
+HEAVY_SAMPLE = 25          # de las nubes basta con unas pocas
+MEDIA_TYPES = (IMAGE_TYPE, COMPRESSED_TYPE)
+MEDIA_SAMPLE = 80          # metadatos de imagen; solo se decodifican 6
+MEDIA_THUMBS = 6
 
 SEV = {10: "DEBUG", 20: "INFO", 30: "WARN", 40: "ERROR", 50: "FATAL"}
 
@@ -181,6 +224,7 @@ class Base:
     def __init__(self, topic: str, ty: str):
         self.topic, self.type = topic, ty
         self.t_bag: List[float] = []
+        self.t_msg: List[float] = []      # stamps de los mensajes deserializados
         self.t_hdr: List[float] = []
         self.sizes: List[int] = []
 
@@ -190,15 +234,24 @@ class Base:
 
     def add(self, msg) -> None:
         hs = header_stamp(msg)
+        # La marca del mensaje real, no la de recepcion: si --sample corta la
+        # deserializacion, t_bag tiene mas entradas que los arrays de datos y
+        # todas las graficas se desplazan. Con t_msg las longitudes coinciden.
+        self.t_msg.append(hs if hs is not None else
+                          (self.t_bag[-1] if self.t_bag else 0.0))
         self.t_hdr.append(hs if hs is not None else 0.0)
 
     def finish(self) -> None:
         self.t_bag = np.asarray(self.t_bag, dtype=float)
         self.sizes = np.asarray(self.sizes, dtype=float)
         self.t_hdr = np.asarray(self.t_hdr, dtype=float)
-        # Eje de tiempos: header si existe, si no el de recepcion.
-        self.t = (self.t_hdr if self.t_hdr.size == self.t_bag.size
-                  and np.any(self.t_hdr > 0) else self.t_bag)
+        self.t_msg = np.asarray(self.t_msg, dtype=float)
+        # Eje de tiempos de los datos: header si existe, si no recepcion.
+        if self.t_msg.size:
+            self.t = self.t_msg
+        else:
+            self.t = self.t_bag
+        del self.t_msg
 
 
 class ImuC(Base):
@@ -256,6 +309,168 @@ class OdomC(Base):
         self.pose_cov = np.asarray(self.pcov, float)
         self.twist_cov = np.asarray(self.tcov, float)
         del self.p, self.q, self.v, self.w, self.pcov, self.tcov
+
+
+class PoseC(Base):
+    """PoseStamped / PoseWithCovarianceStamped: trayectoria y orientacion."""
+
+    kind = "pose"
+
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.p, self.q, self.pc = [], [], []
+        self.frame = ""
+
+    def add(self, m):
+        super().add(m)
+        if not self.frame:
+            self.frame = m.header.frame_id
+        pose = m.pose
+        if hasattr(pose, "pose"):                 # PoseWithCovariance
+            cov = np.asarray(m.pose.covariance, float)
+            self.pc.append(cov[[0, 7, 35]])
+            pose = pose.pose
+        else:
+            self.pc.append((float("nan"),) * 3)
+        po, o = pose.position, pose.orientation
+        self.p.append((po.x, po.y, po.z))
+        self.q.append((o.x, o.y, o.z, o.w))
+
+    def finish(self):
+        super().finish()
+        self.pos = np.asarray(self.p, float)
+        self.quat = np.asarray(self.q, float)
+        self.cov = np.asarray(self.pc, float)
+        del self.p, self.q, self.pc
+
+
+class TwistC(Base):
+    """TwistStamped / TwistWithCovarianceStamped: velocidades lineales y angulares."""
+
+    kind = "twist"
+
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.v, self.w, self.vc = [], [], []
+        self.frame = ""
+
+    def add(self, m):
+        super().add(m)
+        if not self.frame:
+            self.frame = m.header.frame_id
+        tw = m.twist
+        if hasattr(tw, "twist"):                  # TwistWithCovariance
+            cov = np.asarray(m.twist.covariance, float)
+            self.vc.append(cov[[0, 7, 35]])
+            tw = tw.twist
+        else:
+            self.vc.append((float("nan"),) * 3)
+        tl, ta = tw.linear, tw.angular
+        self.v.append((tl.x, tl.y, tl.z))
+        self.w.append((ta.x, ta.y, ta.z))
+
+    def finish(self):
+        super().finish()
+        self.vel = np.asarray(self.v, float)
+        self.omega = np.asarray(self.w, float)
+        self.cov = np.asarray(self.vc, float)
+        del self.v, self.w, self.vc
+
+
+class CarC(Base):
+    """mirena_common/Car: la salida del filtro de estado."""
+
+    kind = "car"
+
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.p, self.q, self.v, self.w, self.cv = [], [], [], [], []
+        self.frame = ""
+
+    def add(self, m):
+        super().add(m)
+        if not self.frame:
+            self.frame = m.header.frame_id
+        self.p.append((m.x, m.y, 0.0))
+        self.q.append((0.0, 0.0, math.sin(0.5 * m.psi), math.cos(0.5 * m.psi)))
+        self.v.append((m.u, m.v, 0.0))
+        self.w.append((0.0, 0.0, m.omega))
+        c = np.asarray(m.covariance, float)
+        self.cv.append(c[[0, 7, 35]] if c.size >= 36 else (float("nan"),) * 3)
+
+    def finish(self):
+        super().finish()
+        self.pos = np.asarray(self.p, float)
+        self.quat = np.asarray(self.q, float)
+        self.vel = np.asarray(self.v, float)
+        self.omega = np.asarray(self.w, float)
+        self.pose_cov = np.asarray(self.cv, float)
+        del self.p, self.q, self.v, self.w, self.cv
+
+
+class PoseArrayC(Base):
+    kind = "posearray"
+
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.count, self.cx, self.cy, self.span = [], [], [], []
+        self.last = None
+        self.frame = ""
+
+    def add(self, m):
+        super().add(m)
+        if not self.frame:
+            self.frame = m.header.frame_id
+        pts = np.asarray([(p.position.x, p.position.y) for p in m.poses], float)
+        self.count.append(len(pts))
+        if pts.size:
+            c = pts.mean(axis=0)
+            self.cx.append(float(c[0]))
+            self.cy.append(float(c[1]))
+            self.span.append(float(np.hypot(pts[:, 0] - c[0],
+                                            pts[:, 1] - c[1]).max()))
+            self.last = pts[:5000]
+        else:
+            self.cx.append(float("nan"))
+            self.cy.append(float("nan"))
+            self.span.append(0.0)
+
+    def finish(self):
+        super().finish()
+        self.counts = np.asarray(self.count, float)
+        self.centroid = np.column_stack([self.cx, self.cy])
+        self.spread = np.asarray(self.span, float)
+        del self.count, self.cx, self.cy, self.span
+
+
+class PathC(Base):
+    kind = "path"
+
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.count, self.length = [], []
+        self.last = None
+        self.frame = ""
+
+    def add(self, m):
+        super().add(m)
+        if not self.frame:
+            self.frame = m.header.frame_id
+        pts = np.asarray([(p.pose.position.x, p.pose.position.y)
+                          for p in m.poses], float)
+        self.count.append(len(pts))
+        if pts.shape[0] > 1:
+            self.length.append(float(np.hypot(*np.diff(pts, axis=0).T).sum()))
+            self.last = pts
+        else:
+            self.length.append(0.0)
+            self.last = pts if pts.size else self.last
+
+    def finish(self):
+        super().finish()
+        self.counts = np.asarray(self.count, float)
+        self.lengths = np.asarray(self.length, float)
+        del self.count, self.length
 
 
 class FixC(Base):
@@ -357,6 +572,180 @@ def decode_cloud(s: Dict, max_points: int = 60000) -> Optional[Dict]:
         return None
 
 
+class ScanC(Base):
+    """LaserScan: resumen por barrido y ultimo barrido completo para dibujar."""
+
+    kind = "scan"
+
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.rows: List[Tuple[float, ...]] = []
+        self.last: Optional[Dict] = None
+        self.frame = ""
+        self.angle_min = self.angle_max = self.angle_inc = float("nan")
+        self.range_min = self.range_max = float("nan")
+        self.scan_time = float("nan")
+
+    def add(self, m):
+        super().add(m)
+        if not self.frame:
+            self.frame = m.header.frame_id
+            self.angle_min, self.angle_max = float(m.angle_min), float(m.angle_max)
+            self.angle_inc = float(m.angle_increment)
+            self.range_min, self.range_max = float(m.range_min), float(m.range_max)
+            self.scan_time = float(m.scan_time)
+        r = np.asarray(m.ranges, float)
+        valid = np.isfinite(r) & (r >= self.range_min) & (r <= self.range_max)
+        rv = r[valid]
+        self.rows.append((
+            float(r.size), float(rv.size),
+            float(rv.min()) if rv.size else float("nan"),
+            float(rv.mean()) if rv.size else float("nan"),
+            float(np.median(rv)) if rv.size else float("nan"),
+            float(rv.max()) if rv.size else float("nan")))
+        # Guarda el ultimo barrido, submuestreado si es enorme.
+        step = max(1, int(math.ceil(r.size / 4000.0))) if r.size else 1
+        ang = self.angle_min + self.angle_inc * np.arange(r.size)
+        self.last = {"angle": ang[::step].copy(), "range": r[::step].copy(),
+                     "valid": valid[::step].copy()}
+
+    def finish(self):
+        super().finish()
+        self.stats = (np.asarray(self.rows, float) if self.rows
+                      else np.zeros((0, 6)))
+        del self.rows
+
+
+# Codificaciones de sensor_msgs/Image que se pueden interpretar sin cv2.
+IMG_ENCODINGS = {
+    "mono8": ("u1", 1), "8uc1": ("u1", 1), "mono16": ("u2", 1),
+    "16uc1": ("u2", 1), "32fc1": ("f4", 1),
+    "rgb8": ("u1", 3), "bgr8": ("u1", 3), "rgba8": ("u1", 4),
+    "bgra8": ("u1", 4),
+}
+
+
+def image_to_arrays(m) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    """Devuelve (gris float, rgb uint8) de un sensor_msgs/Image, o (None, None)."""
+    spec = IMG_ENCODINGS.get((m.encoding or "").lower())
+    if spec is None:
+        return None, None
+    dt, ch = spec
+    h, w, step = int(m.height), int(m.width), int(m.step)
+    itemsize = np.dtype(dt).itemsize
+    if h <= 0 or w <= 0 or step < w * ch * itemsize:
+        return None, None
+    try:
+        flat = np.frombuffer(m.data, dtype=dt, count=h * step // itemsize)
+        arr = flat.reshape(h, step // itemsize)[:, :w * ch].reshape(h, w, ch)
+    except Exception:  # noqa: BLE001
+        return None, None
+    if ch >= 3:
+        rgb = arr[..., :3]
+        if (m.encoding or "").lower() in ("bgr8", "bgra8"):
+            rgb = rgb[..., ::-1]
+        gray = rgb.astype(np.float32).mean(axis=2)
+        return gray, np.ascontiguousarray(rgb)
+    gray = arr[..., 0].astype(np.float32)
+    if (m.encoding or "").lower() in ("mono16", "16uc1") and \
+            gray.size and float(np.nanmax(gray)) > 255.0:
+        gray /= 256.0
+    return gray, None
+
+
+def compressed_to_arrays(m) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    """Decodifica un CompressedImage si OpenCV esta disponible."""
+    try:
+        import cv2
+    except ImportError:
+        return None, None
+    try:
+        buf = np.frombuffer(m.data, np.uint8)
+        img = cv2.imdecode(buf, cv2.IMREAD_UNCHANGED)
+    except Exception:  # noqa: BLE001
+        return None, None
+    if img is None:
+        return None, None
+    if img.ndim == 2:
+        return img.astype(np.float32), None
+    rgb = img[..., 2::-1] if img.shape[2] >= 3 else img[..., :3]
+    gray = np.asarray(rgb, np.float32).mean(axis=2)
+    return gray, np.ascontiguousarray(rgb)
+
+
+def thumbnail(gray: Optional[np.ndarray], rgb: Optional[np.ndarray],
+              max_side: int = 260):
+    if gray is None or gray.size == 0:
+        return None, None
+    h, w = gray.shape[:2]
+    step = max(1, int(math.ceil(max(h, w) / float(max_side))))
+    g = gray[::step, ::step]
+    r = rgb[::step, ::step] if rgb is not None else None
+    return g, r
+
+
+class ImageC(Base):
+    kind = "image"
+
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.meta: List[Tuple] = []
+        self.stat: List[Tuple[float, float]] = []
+        self.thumbs: List[Tuple[float, np.ndarray, Optional[np.ndarray]]] = []
+        self._seen = 0
+        self._step = max(1, MEDIA_SAMPLE // MEDIA_THUMBS)
+        self.frame = ""
+        self.encoding = ""
+        self.format = ""
+
+    def arrays(self, m):
+        return image_to_arrays(m)
+
+    def add(self, m):
+        super().add(m)
+        if not self.frame:
+            self.frame = m.header.frame_id
+        if hasattr(m, "width"):                    # Image
+            self.meta.append((int(m.width), int(m.height), int(m.step),
+                              len(m.data)))
+            if not self.encoding:
+                self.encoding = str(m.encoding)
+        else:                                      # CompressedImage
+            self.meta.append((0, 0, 0, len(m.data)))
+            if not self.format:
+                self.format = str(m.format)
+        gray, rgb = self.arrays(m)
+        if gray is not None and gray.size:
+            finite = gray[np.isfinite(gray)]
+            self.stat.append((float(finite.mean()) if finite.size else
+                              float("nan"),
+                              float(finite.std()) if finite.size else
+                              float("nan")))
+        else:
+            self.stat.append((float("nan"), float("nan")))
+        self._seen += 1
+        if gray is not None and len(self.thumbs) < MEDIA_THUMBS and \
+                (self._seen <= MEDIA_THUMBS or self._seen % self._step == 0):
+            g, r = thumbnail(gray, rgb)
+            if g is not None:
+                self.thumbs.append((self.t_msg[-1], g, r))
+
+    def finish(self):
+        super().finish()
+        self.metadata = (np.asarray(self.meta, float) if self.meta
+                         else np.zeros((0, 4)))
+        self.image_stat = (np.asarray(self.stat, float) if self.stat
+                           else np.zeros((0, 2)))
+        del self.meta, self.stat
+
+
+class CompressedImageC(ImageC):
+    kind = "image"
+
+    def arrays(self, m):
+        return compressed_to_arrays(m)
+
+
 class TfC(Base):
     kind = "tf"
 
@@ -385,7 +774,200 @@ class LogC(Base):
     def add(self, m):
         super().add(m)
         self.rows.append((int(m.level), m.name, m.msg.strip(),
-                          self.t_bag[-1] if self.t_bag else 0.0))
+                          self.t_msg[-1] if self.t_msg else 0.0))
+
+
+def _get_path(msg, path: str) -> float:
+    v = msg
+    for part in path.split("."):
+        v = getattr(v, part)
+    return float(v)
+
+
+class ScalarC(Base):
+    """Una o varias magnitudes escalares (temperatura, presion, campo...)."""
+
+    kind = "scalar"
+    fields: Tuple[str, ...] = ("data",)
+    labels: Tuple[str, ...] = ("valor",)
+    unit = ""
+
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.vals: List[Tuple[float, ...]] = []
+
+    def add(self, m):
+        super().add(m)
+        try:
+            self.vals.append(tuple(_get_path(m, f) for f in self.fields))
+        except (AttributeError, TypeError, ValueError):
+            self.vals.append((float("nan"),) * len(self.fields))
+
+    def finish(self):
+        super().finish()
+        self.value = (np.asarray(self.vals, float) if self.vals
+                      else np.zeros((0, len(self.fields))))
+        del self.vals
+
+
+class TemperatureC(ScalarC):
+    fields, labels, unit = ("temperature",), ("temperatura",), "degC"
+
+
+class PressureC(ScalarC):
+    fields, labels, unit = ("fluid_pressure",), ("presion",), "Pa"
+
+
+class IlluminanceC(ScalarC):
+    fields, labels, unit = ("illuminance",), ("iluminancia",), "lux"
+
+
+class HumidityC(ScalarC):
+    fields, labels, unit = ("relative_humidity",), ("humedad",), "%"
+
+
+class MagneticC(ScalarC):
+    fields = ("magnetic_field.x", "magnetic_field.y", "magnetic_field.z")
+    labels = ("x", "y", "z")
+    unit = "T"
+
+
+class RangeC(Base):
+    kind = "range"
+
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.r, self.lo, self.hi, self.fov, self.rad = [], [], [], [], []
+        self.frame = ""
+
+    def add(self, m):
+        super().add(m)
+        if not self.frame:
+            self.frame = m.header.frame_id
+        self.r.append(float(m.range))
+        self.lo.append(float(m.min_range))
+        self.hi.append(float(m.max_range))
+        self.fov.append(float(m.field_of_view))
+        self.rad.append(int(m.radiation_type))
+
+    def finish(self):
+        super().finish()
+        self.range = np.asarray(self.r, float)
+        self.min_range = np.asarray(self.lo, float)
+        self.max_range = np.asarray(self.hi, float)
+        self.field_of_view = np.asarray(self.fov, float)
+        self.radiation = np.asarray(self.rad, int)
+        del self.r, self.lo, self.hi, self.fov, self.rad
+
+
+class BatteryC(Base):
+    kind = "battery"
+
+    FIELDS = ("voltage", "temperature", "current", "charge", "capacity",
+              "design_capacity", "percentage", "power_supply_status",
+              "power_supply_health", "power_supply_technology", "present")
+
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.vals: List[Tuple[float, ...]] = []
+        self.cell_v: List[float] = []
+        self.cell_t: List[float] = []
+
+    def add(self, m):
+        super().add(m)
+        self.vals.append(tuple(float(getattr(m, f)) for f in self.FIELDS))
+        cv = np.asarray(m.cell_voltage, float)
+        ct = np.asarray(m.cell_temperature, float)
+        self.cell_v.append(float(np.nanmean(cv)) if cv.size else float("nan"))
+        self.cell_t.append(float(np.nanmean(ct)) if ct.size else float("nan"))
+
+    def finish(self):
+        super().finish()
+        self.data = (np.asarray(self.vals, float) if self.vals
+                     else np.zeros((0, len(self.FIELDS))))
+        self.cell_voltage = np.asarray(self.cell_v, float)
+        self.cell_temperature = np.asarray(self.cell_t, float)
+        del self.vals, self.cell_v, self.cell_t
+
+
+class JointC(Base):
+    kind = "joint"
+
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.rows: List[Dict[str, Tuple[float, float, float]]] = []
+
+    def add(self, m):
+        super().add(m)
+        row: Dict[str, Tuple[float, float, float]] = {}
+        for i, name in enumerate(m.name):
+            row[name] = (
+                float(m.position[i]) if i < len(m.position) else float("nan"),
+                float(m.velocity[i]) if i < len(m.velocity) else float("nan"),
+                float(m.effort[i]) if i < len(m.effort) else float("nan"))
+        self.rows.append(row)
+
+    def finish(self):
+        super().finish()
+        names: List[str] = []
+        for r in self.rows:
+            for n in r:
+                if n not in names:
+                    names.append(n)
+        self.names = names
+        self.position = {n: np.asarray([r.get(n, (np.nan,) * 3)[0]
+                                        for r in self.rows], float) for n in names}
+        self.velocity = {n: np.asarray([r.get(n, (np.nan,) * 3)[1]
+                                        for r in self.rows], float) for n in names}
+        self.effort = {n: np.asarray([r.get(n, (np.nan,) * 3)[2]
+                                      for r in self.rows], float) for n in names}
+        del self.rows
+
+
+class DiagC(Base):
+    kind = "diag"
+
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.rows: List[Tuple[float, int, str, str, str]] = []
+        self.levels: List[int] = []
+        self.latest: Dict[str, Tuple[int, str, List[Tuple[str, str, str]]]] = {}
+
+    def add(self, m):
+        super().add(m)
+        worst = 0
+        for st in m.status:
+            lv = int(st.level)
+            worst = max(worst, lv)
+            self.rows.append((self.t_msg[-1], lv, st.name, st.message,
+                              st.hardware_id))
+            self.latest[st.name] = (lv, st.message,
+                                    [(v.key, v.value) for v in st.values])
+        self.levels.append(worst)
+
+    def finish(self):
+        super().finish()
+        self.level = np.asarray(self.levels, int)
+        del self.levels
+
+
+class ClockC(Base):
+    kind = "clock"
+
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.sec, self.nsec = [], []
+
+    def add(self, m):
+        super().add(m)
+        self.sec.append(int(m.clock.sec))
+        self.nsec.append(int(m.clock.nanosec))
+
+    def finish(self):
+        super().finish()
+        self.clock = np.asarray(self.sec, float) + \
+            np.asarray(self.nsec, float) * 1e-9
+        del self.sec, self.nsec
 
 
 class GenericC(Base):
@@ -448,13 +1030,38 @@ def flatten_numeric(msg, prefix: str = "", depth: int = 0) -> Dict[str, float]:
                         out.update(flatten_numeric(e, f"{key}[{i}].", depth + 1))
             except TypeError:
                 pass
+        elif hasattr(v, "__len__") and len(v) > 16:
+            # Arrays grandes (covarianzas, listas de puntos, espectros): en vez
+            # de descartarlos, se resume su contenido. Asi un mensaje propio
+            # desconocido sigue produciendo series utiles.
+            try:
+                arr = np.asarray(v, dtype=float)
+                if arr.size and np.any(np.isfinite(arr)):
+                    out[f"{key}.n"] = float(arr.size)
+                    out[f"{key}.mean"] = float(np.nanmean(arr))
+                    out[f"{key}.std"] = float(np.nanstd(arr))
+                    out[f"{key}.min"] = float(np.nanmin(arr))
+                    out[f"{key}.max"] = float(np.nanmax(arr))
+            except (TypeError, ValueError):
+                pass
     return out
 
 
 COLLECTORS = {IMU_TYPE: ImuC, ODOM_TYPE: OdomC, FIX_TYPE: FixC,
-              CLOUD_TYPE: CloudC, LOG_TYPE: LogC}
+              CLOUD_TYPE: CloudC, LOG_TYPE: LogC, SCAN_TYPE: ScanC,
+              IMAGE_TYPE: ImageC, COMPRESSED_TYPE: CompressedImageC,
+              RANGE_TYPE: RangeC, BATTERY_TYPE: BatteryC,
+              JOINT_TYPE: JointC, DIAG_TYPE: DiagC, CLOCK_TYPE: ClockC,
+              TEMPERATURE_TYPE: TemperatureC, PRESSURE_TYPE: PressureC,
+              MAGNETIC_TYPE: MagneticC, ILLUMINANCE_TYPE: IlluminanceC,
+              HUMIDITY_TYPE: HumidityC, CAR_TYPE: CarC,
+              POSE_ARRAY_TYPE: PoseArrayC, PATH_TYPE: PathC}
 for _t in TF_TYPES:
     COLLECTORS[_t] = TfC
+for _t in POSE_TYPES:
+    COLLECTORS[_t] = PoseC
+for _t in TWIST_TYPES:
+    COLLECTORS[_t] = TwistC
 
 
 # --------------------------------------------------------------------------- #
@@ -470,8 +1077,18 @@ def open_reader(path: str):
     import rosbag2_py
     if not os.path.exists(path):
         raise SystemExit(f"\nNo existe la ruta: {path}")
+    # Un .mcap/.db3 suelto se abre directamente con su plugin; para una
+    # carpeta conviene dejar que rosbag2 detecte el almacenamiento
+    # (metadata.yaml).
+    low = path.lower()
+    if low.endswith(".mcap"):
+        ids = ("mcap", "sqlite3")
+    elif low.endswith(".db3"):
+        ids = ("sqlite3", "mcap")
+    else:
+        ids = ("", "mcap", "sqlite3")
     last = None
-    for sid in ("", "mcap", "sqlite3"):
+    for sid in ids:
         try:
             r = rosbag2_py.SequentialReader()
             r.open(rosbag2_py.StorageOptions(uri=str(path), storage_id=sid),
@@ -523,7 +1140,12 @@ def scan(path: str, wanted: Optional[Sequence[str]], sample: int
     cap: Dict[str, int] = {}
     for n, ty in types.items():
         col[n] = COLLECTORS.get(ty, GenericC)(n, ty)
-        cap[n] = HEAVY_SAMPLE if ty in HEAVY_TYPES else sample
+        if ty in HEAVY_TYPES:
+            cap[n] = HEAVY_SAMPLE
+        elif ty in MEDIA_TYPES:
+            cap[n] = min(sample, MEDIA_SAMPLE)
+        else:
+            cap[n] = sample
         try:
             cls[n] = get_message(ty)
         except Exception as exc:  # noqa: BLE001
@@ -559,20 +1181,46 @@ def window(c: Base, t0: float, start: Optional[float], end: Optional[float]) -> 
     """Recorta en sitio todos los arrays alineados con las muestras."""
     if start is None and end is None:
         return
-    tr = c.t - t0
-    m = np.ones_like(tr, dtype=bool)
-    if start is not None:
-        m &= tr >= start
-    if end is not None:
-        m &= tr <= end
-    n = len(tr)
+
+    def keep(tr: np.ndarray) -> np.ndarray:
+        m = np.ones_like(tr, dtype=bool)
+        if start is not None:
+            m &= tr >= start
+        if end is not None:
+            m &= tr <= end
+        return m
+
+    md = keep(c.t - t0) if c.t.size else np.zeros(0, bool)
+    mr = keep(c.t_bag - t0) if c.t_bag.size else np.zeros(0, bool)
+    nd, nr = len(md), len(mr)
+
+    def cut(list_like):
+        if len(list_like) == nd:
+            return [v for v, k in zip(list_like, md) if k]
+        return list_like
+
     for k, v in list(vars(c).items()):
-        if isinstance(v, np.ndarray) and v.ndim >= 1 and v.shape[0] == n:
-            setattr(c, k, v[m])
-    if isinstance(getattr(c, "data", None), dict):
-        c.data = {kk: vv[m] for kk, vv in c.data.items() if vv.shape[0] == n}
+        if isinstance(v, np.ndarray) and v.ndim >= 1:
+            if k in ("t_bag", "sizes") and v.shape[0] == nr:
+                setattr(c, k, v[mr])
+            elif v.shape[0] == nd:
+                setattr(c, k, v[md])
+            elif v.shape[0] == nr:
+                setattr(c, k, v[mr])
+        elif isinstance(v, dict) and v and \
+                isinstance(next(iter(v.values())), np.ndarray) and \
+                next(iter(v.values())).shape[0] == nd:
+            setattr(c, k, {kk: vv[md] for kk, vv in v.items()
+                           if isinstance(vv, np.ndarray) and vv.shape[0] == nd})
+        elif isinstance(v, list) and v and len(v) == nd and \
+                k not in ("thumbs", "rows", "latest", "names", "fields"):
+            setattr(c, k, cut(v))
     if c.kind == "log":
-        c.rows = [r for r, keep in zip(c.rows, m) if keep]
+        c.rows = [r for r, k in zip(c.rows, md) if k]
+    elif c.kind == "diag":
+        lo = (t0 + start) if start is not None else -float("inf")
+        hi = (t0 + end) if end is not None else float("inf")
+        c.rows = [r for r in c.rows if lo <= r[0] <= hi]
 
 
 # --------------------------------------------------------------------------- #
@@ -890,6 +1538,306 @@ def report_cloud(c: CloudC, b: Dict) -> None:
               f"point_step {int(np.median(ps))} B   frame '{c.frame}'")
         print(f"  campos: {', '.join(c.fields)}")
     print("  (no se decodifica el payload: solo tasa, tamano y layout)")
+
+
+def report_pose(c: PoseC, b: Dict) -> Dict:
+    print("\n" + "=" * 72)
+    print(f"  {c.topic} — Pose")
+    print("=" * 72)
+    print(f"  {b['n']} muestras, {b['hz']:.2f} Hz, {b['gaps']} huecos, "
+          f"frame '{c.frame}'")
+    out = {}
+    if not c.pos.size:
+        return out
+    x, y = c.pos[:, 0], c.pos[:, 1]
+    dist = float(np.hypot(np.diff(x), np.diff(y)).sum())
+    yaw = np.degrees(np.unwrap(rpy_from_quat(c.quat)[:, 2]))
+    print(f"  recorrido {dist:.1f} m   yaw [{yaw.min():+.1f}, {yaw.max():+.1f}] deg")
+    if c.t.size > 3 and np.all(np.diff(c.t) > 0):
+        v = np.hypot(np.gradient(x, c.t), np.gradient(y, c.t))
+        print(f"  velocidad derivada: media {v.mean():.2f}  max {v.max():.2f} m/s")
+        out["speed"] = v
+    if np.all(c.cov == 0):
+        print("  ATENCION: covarianza de pose TODA A CERO")
+    return out
+
+
+def report_twist(c: TwistC, b: Dict) -> None:
+    print("\n" + "=" * 72)
+    print(f"  {c.topic} — Twist")
+    print("=" * 72)
+    print(f"  {b['n']} muestras, {b['hz']:.2f} Hz, {b['gaps']} huecos, "
+          f"frame '{c.frame}'")
+    if not c.vel.size:
+        return
+    vn = np.linalg.norm(c.vel, axis=1)
+    wn = np.degrees(np.linalg.norm(c.omega, axis=1))
+    print(f"  |v| media {vn.mean():.3f}  max {vn.max():.3f} m/s   "
+          f"|w| media {wn.mean():.2f}  max {wn.max():.2f} deg/s")
+    for i, k in enumerate("xyz"):
+        print(f"  v{k} sigma {c.vel[:, i].std():.4f} m/s   "
+              f"w{k} sigma {np.degrees(c.omega[:, i].std()):.4f} deg/s")
+    if np.all(c.cov == 0):
+        print("  ATENCION: covarianza de twist TODA A CERO")
+
+
+def report_car(c: CarC, b: Dict) -> Dict:
+    print("\n" + "=" * 72)
+    print(f"  {c.topic} — Car (salida del filtro de estado)")
+    print("=" * 72)
+    print(f"  {b['n']} muestras, {b['hz']:.2f} Hz, {b['gaps']} huecos, "
+          f"frame '{c.frame}'")
+    out = {}
+    if not c.pos.size:
+        return out
+    x, y = c.pos[:, 0], c.pos[:, 1]
+    yaw = np.degrees(np.unwrap(rpy_from_quat(c.quat)[:, 2]))
+    print(f"  recorrido {np.hypot(x - x[0], y - y[0]).max():.1f} m   "
+          f"|v| max {np.hypot(c.vel[:, 0], c.vel[:, 1]).max():.2f} m/s   "
+          f"|omega| max {math.degrees(np.abs(c.omega[:, 2]).max()):.1f} deg/s")
+    sd = np.sqrt(np.maximum(c.pose_cov, 0.0))
+    if np.all(c.pose_cov == 0):
+        print("  ATENCION: covarianza TODA A CERO")
+    else:
+        print(f"  sigma final x {sd[-1, 0]:.3f} m  y {sd[-1, 1]:.3f} m  "
+              f"yaw {math.degrees(sd[-1, 2]):.3f} deg")
+    return out
+
+
+def report_state_compare(car: CarC, odom: OdomC) -> None:
+    """Texto del EKF frente al sensor solo, con alineacion en el primer estado."""
+    if not car.pos.size or not odom.pos.size:
+        return
+    lo, hi = max(car.t[0], odom.t[0]), min(car.t[-1], odom.t[-1])
+    if hi - lo < 0.5:
+        return
+    yc0 = rpy_from_quat(car.quat[:1])[0, 2]
+    yo0 = rpy_from_quat(odom.quat[:1])[0, 2]
+    dy = yc0 - yo0
+    c, s = math.cos(dy), math.sin(dy)
+    raw = odom.pos[:, :2].copy() - odom.pos[0, :2]
+    raw = np.column_stack([c * raw[:, 0] - s * raw[:, 1],
+                           s * raw[:, 0] + c * raw[:, 1]]) + car.pos[0, :2]
+    g = np.linspace(lo, hi, max(2, int((hi - lo) * 20)))
+    cx = np.interp(g, car.t, car.pos[:, 0])
+    cy = np.interp(g, car.t, car.pos[:, 1])
+    rx = np.interp(g, odom.t, raw[:, 0])
+    ry = np.interp(g, odom.t, raw[:, 1])
+    err = np.hypot(cx - rx, cy - ry)
+    yc = np.interp(g, car.t, _yaw_deg(car))
+    yo = np.interp(g, odom.t,
+                   np.degrees(np.unwrap(rpy_from_quat(odom.quat)[:, 2]))) + \
+        math.degrees(dy)
+    ye = (yc - yo + 180.0) % 360.0 - 180.0
+    print("\n" + "=" * 72)
+    print(f"  EKF {car.topic}  vs  sensor solo {odom.topic}")
+    print("=" * 72)
+    print(f"  {g.size} muestras comunes, {hi-lo:.1f} s")
+    print(f"  error de posicion: RMS {np.sqrt(np.mean(err**2)):.3f} m   "
+          f"max {err.max():.3f} m   final {err[-1]:.3f} m")
+    print(f"  error de yaw:      RMS {np.sqrt(np.mean(ye**2)):.3f} deg   "
+          f"max {np.abs(ye).max():.3f} deg")
+    print("  (el sensor se alinea con el primer estado del EKF; la deriva")
+    print("   acumulada es lo que corrige el filtro)")
+
+
+def report_posearray(c: PoseArrayC, b: Dict) -> None:
+    print("\n" + "=" * 72)
+    print(f"  {c.topic} — PoseArray")
+    print("=" * 72)
+    print(f"  {b['n']} mensajes, {b['hz']:.2f} Hz, frame '{c.frame}'")
+    if not c.counts.size:
+        return
+    print(f"  poses por mensaje: mediana {np.median(c.counts):.0f}  "
+          f"max {int(c.counts.max())}")
+    ok = np.isfinite(c.centroid[:, 0])
+    if ok.any():
+        print(f"  centroide medio ({c.centroid[ok, 0].mean():+.2f}, "
+              f"{c.centroid[ok, 1].mean():+.2f}) m   "
+              f"dispersion max {c.spread[ok].max():.2f} m")
+
+
+def report_path(c: PathC, b: Dict) -> None:
+    print("\n" + "=" * 72)
+    print(f"  {c.topic} — Path")
+    print("=" * 72)
+    print(f"  {b['n']} mensajes, {b['hz']:.2f} Hz, frame '{c.frame}'")
+    if c.counts.size:
+        print(f"  poses por path: mediana {np.median(c.counts):.0f}  "
+              f"max {int(c.counts.max())}")
+        print(f"  longitud del path: max {c.lengths.max():.1f} m")
+
+
+def report_scan(c: ScanC, b: Dict) -> None:
+    print("\n" + "=" * 72)
+    print(f"  {c.topic} — LaserScan")
+    print("=" * 72)
+    print(f"  {b['n']} barridos, {b['hz']:.2f} Hz, {b['gaps']} huecos, "
+          f"{human(b['bytes'])} ({b['bw']/1024/1024:.2f} MB/s)")
+    print(f"  frame '{c.frame}'   FOV {math.degrees(c.angle_max-c.angle_min):.1f} deg   "
+          f"incremento {math.degrees(c.angle_inc):.3f} deg")
+    print(f"  rango declarado [{c.range_min:.3f}, {c.range_max:.3f}] m   "
+          f"scan_time {c.scan_time*1e3:.1f} ms")
+    if not c.stats.size:
+        return
+    s = c.stats
+    valid_ratio = np.divide(s[:, 1], s[:, 0], out=np.zeros_like(s[:, 1]),
+                            where=s[:, 0] > 0)
+    print(f"  puntos por barrido: mediana {np.median(s[:, 0]):.0f}")
+    print(f"  puntos validos: mediana {np.median(s[:, 1]):.0f} "
+          f"({100*np.median(valid_ratio):.1f} %)")
+    ok = np.isfinite(s[:, 3])
+    if ok.any():
+        print(f"  rango medio {np.nanmedian(s[ok, 3]):.3f} m   "
+              f"min {np.nanmin(s[ok, 2]):.3f}   max {np.nanmax(s[ok, 5]):.3f}")
+    if np.median(valid_ratio) < 0.05:
+        print("  ATENCION: casi todos los haces son inf/NaN. Puede ser un")
+        print("            escaner sin retorno, un frame mal montado o datos en crudo.")
+
+
+def report_image(c: ImageC, b: Dict) -> None:
+    kind = "CompressedImage" if isinstance(c, CompressedImageC) else "Image"
+    print("\n" + "=" * 72)
+    print(f"  {c.topic} — {kind}")
+    print("=" * 72)
+    print(f"  {b['n']} mensajes, {b['hz']:.2f} Hz, {b['gaps']} huecos, "
+          f"{human(b['bytes'])} ({b['bw']/1024/1024:.2f} MB/s)")
+    if c.metadata.size:
+        w, h = c.metadata[:, 0], c.metadata[:, 1]
+        bw = c.metadata[:, 3]
+        if np.any(w > 0):
+            print(f"  resolucion {int(np.median(w))}x{int(np.median(h))}   "
+                  f"encoding '{c.encoding or c.format}'")
+        print(f"  tamano por frame: mediana {human(float(np.median(bw)))}, "
+              f"max {human(float(bw.max()))}")
+    n_dec = len(c.thumbs)
+    print(f"  frames decodificados para vista previa: {n_dec}")
+    if c.image_stat.size and np.isfinite(c.image_stat[:, 0]).any():
+        m = c.image_stat[:, 0]
+        print(f"  brillo medio {np.nanmean(m):.1f}   "
+              f"contraste (sigma) {np.nanmean(c.image_stat[:, 1]):.1f}")
+    if n_dec < 2 and isinstance(c, CompressedImageC):
+        print("  (instala opencv-python para decodificar JPEG/PNG)")
+
+
+def report_range(c: RangeC, b: Dict) -> None:
+    print("\n" + "=" * 72)
+    print(f"  {c.topic} — Range")
+    print("=" * 72)
+    print(f"  {b['n']} muestras, {b['hz']:.2f} Hz, frame '{c.frame}'")
+    if not c.range.size:
+        return
+    r = c.range
+    valid = np.isfinite(r) & (r >= c.min_range) & (r <= c.max_range)
+    print(f"  rango valido {int(valid.sum())}/{r.size}   "
+          f"min {np.nanmin(r):.3f}  media {np.nanmean(r):.3f}  "
+          f"max {np.nanmax(r):.3f} m")
+    print(f"  limites declarados [{c.min_range[0]:.3f}, {c.max_range[0]:.3f}] m   "
+          f"FOV {math.degrees(c.field_of_view[0]):.1f} deg   "
+          f"tipo {int(c.radiation[0])}")
+
+
+def report_battery(c: BatteryC, b: Dict) -> None:
+    print("\n" + "=" * 72)
+    print(f"  {c.topic} — BatteryState")
+    print("=" * 72)
+    print(f"  {b['n']} muestras, {b['hz']:.2f} Hz")
+    if not c.data.size:
+        return
+    labels = ("voltaje [V]", "temperatura [degC]", "corriente [A]",
+              "carga [Ah]", "capacidad [Ah]", "capacidad diseno [Ah]",
+              "porcentaje [0-1]", "estado", "salud", "tecnologia", "presente")
+    for i, lab in enumerate(labels):
+        v = c.data[:, i]
+        if np.all(np.isnan(v)):
+            continue
+        print(f"  {lab:<22} media {np.nanmean(v):>10.4g}   "
+              f"min {np.nanmin(v):>10.4g}   max {np.nanmax(v):>10.4g}")
+    if c.cell_voltage.size and np.isfinite(c.cell_voltage).any():
+        print(f"  celda: voltaje medio {np.nanmean(c.cell_voltage):.3f} V   "
+              f"temperatura media {np.nanmean(c.cell_temperature):.2f} degC")
+    pct = c.data[:, 6]
+    if np.isfinite(pct).any() and np.nanmax(pct) <= 1.0:
+        print("  (el porcentaje viene en 0..1, no en 0..100)")
+
+
+def report_joint(c: JointC, b: Dict) -> None:
+    print("\n" + "=" * 72)
+    print(f"  {c.topic} — JointState")
+    print("=" * 72)
+    print(f"  {b['n']} muestras, {b['hz']:.2f} Hz, {b['gaps']} huecos")
+    if not c.names:
+        return
+    print(f"  {len(c.names)} joints")
+    w = max(len(n) for n in c.names) + 2
+    print(f"  {'joint':<{w}}{'pos min':>10}{'pos max':>10}"
+          f"{'vel max':>10}{'eff max':>10}")
+    for n in c.names:
+        p = c.position[n]
+        v = c.velocity[n]
+        e = c.effort[n]
+        rng = (f"{np.nanmin(p):>10.4g}{np.nanmax(p):>10.4g}" if np.isfinite(p).any()
+               else f"{'-':>10}{'-':>10}")
+        vm = f"{np.nanmax(np.abs(v)):>10.4g}" if np.isfinite(v).any() else f"{'-':>10}"
+        em = f"{np.nanmax(np.abs(e)):>10.4g}" if np.isfinite(e).any() else f"{'-':>10}"
+        print(f"  {n:<{w}}{rng}{vm}{em}")
+
+
+def report_diag(c: DiagC, b: Dict) -> None:
+    print("\n" + "=" * 72)
+    print(f"  {c.topic} — DiagnosticArray")
+    print("=" * 72)
+    print(f"  {b['n']} mensajes, {b['hz']:.2f} Hz")
+    if not c.rows:
+        return
+    lv = np.asarray([r[1] for r in c.rows])
+    names = {0: "OK", 1: "WARN", 2: "ERROR", 3: "STALE"}
+    counts = {int(k): int((lv == k).sum()) for k in np.unique(lv)}
+    print("  estados: " + "  ".join(f"{names.get(k, k)} {v}" for k, v in counts.items()))
+    for name, (level, message, values) in sorted(c.latest.items()):
+        flag = names.get(level, str(level))
+        print(f"  [{flag:<5}] {name}: {message[:120]}")
+        if level >= 1 and values:
+            print("          " + "  ".join(f"{k}={v}" for k, v in values[:6]))
+
+
+def report_scalar(c: ScalarC, b: Dict) -> None:
+    print("\n" + "=" * 72)
+    print(f"  {c.topic} — {c.type.split('/')[-1]}")
+    print("=" * 72)
+    print(f"  {b['n']} muestras, {b['hz']:.2f} Hz, {b['gaps']} huecos")
+    if not c.value.size:
+        return
+    for i, lab in enumerate(c.labels):
+        v = c.value[:, i]
+        v = v[np.isfinite(v)]
+        if not v.size:
+            continue
+        note = "  (constante)" if v.std() == 0 else ""
+        print(f"  {lab:<16} media {v.mean():>12.5g}   min {v.min():>12.5g}   "
+              f"max {v.max():>12.5g}   sigma {v.std():>10.4g} {c.unit}{note}")
+    if c.value.shape[1] == 3:
+        mag = np.linalg.norm(c.value, axis=1)
+        print(f"  |vector| media {np.nanmean(mag):.5g}   max {np.nanmax(mag):.5g} {c.unit}")
+
+
+def report_clock(c: ClockC, b: Dict) -> None:
+    print("\n" + "=" * 72)
+    print(f"  {c.topic} — Clock")
+    print("=" * 72)
+    print(f"  {b['n']} muestras, {b['hz']:.2f} Hz")
+    if c.clock.size < 2:
+        return
+    d = np.diff(c.clock)
+    print(f"  avance del reloj {d.sum():.3f} s   "
+          f"intervalo mediano {np.median(d)*1e3:.3f} ms")
+    if np.any(d < 0):
+        print(f"  ATENCION: {int((d < 0).sum())} saltos hacia atras")
+    if np.any(d == 0):
+        print(f"  ATENCION: {int((d == 0).sum())} repeticiones de reloj")
+    if c.t.size == c.clock.size:
+        ratio = (c.clock[-1] - c.clock[0]) / (c.t[-1] - c.t[0]) if c.t[-1] > c.t[0] else float("nan")
+        print(f"  reloj / tiempo del bag = {ratio:.6f} (1.0 = sin deriva)")
 
 
 def report_tf(c: TfC) -> None:
@@ -1245,6 +2193,404 @@ def fig_cloud(c: CloudC, b: Dict, t0: float):
     stats_text(ax[1], f"mediana {np.median(dt):.1f} ms")
     fig.suptitle(f"{c.topic}   ({b['n']} nubes, {b['hz']:.1f} Hz, "
                  f"{b['bw']/1024/1024:.2f} MB/s)", x=0.01, ha="left")
+    return fig
+
+
+def _yaw_deg(c) -> Optional[np.ndarray]:
+    if getattr(c, "quat", None) is None or not c.quat.size:
+        return None
+    return np.degrees(np.unwrap(rpy_from_quat(c.quat)[:, 2]))
+
+
+def fig_pose(c: PoseC, b: Dict, t0: float):
+    import matplotlib.pyplot as plt
+    t = c.t - t0
+    fig = plt.figure(figsize=(13.5, 8.6), layout="constrained")
+    gs = fig.add_gridspec(2, 2)
+    ax_xy = fig.add_subplot(gs[0, 0])
+    ax_t = fig.add_subplot(gs[0, 1])
+    ax_y = fig.add_subplot(gs[1, 0])
+    ax_v = fig.add_subplot(gs[1, 1])
+
+    x, y = c.pos[:, 0], c.pos[:, 1]
+    ax_xy.plot(x, y, color=BLUE, lw=1.0)
+    ax_xy.scatter([x[0]], [y[0]], color=AQUA, s=30, marker="o", label="inicio")
+    ax_xy.scatter([x[-1]], [y[-1]], color=ORANGE, s=30, marker="s", label="fin")
+    ax_xy.set_aspect("equal", adjustable="datalim")
+    ax_xy.set_xlabel("x [m]")
+    ax_xy.set_ylabel("y [m]")
+    ax_xy.set_title("Trayectoria", loc="left", pad=6)
+    ax_xy.legend(loc="best")
+
+    line(ax_t, t, x, BLUE, "x")
+    line(ax_t, t, y, ORANGE, "y")
+    finish(ax_t, "m", "Posición")
+    ax_t.set_xlabel("tiempo [s]")
+
+    yaw = _yaw_deg(c)
+    if yaw is not None:
+        line(ax_y, t, yaw, AQUA, "yaw")
+        finish(ax_y, "grados", "Yaw (desenrollado)")
+    else:
+        ax_y.set_visible(False)
+    ax_y.set_xlabel("tiempo [s]")
+
+    if c.t.size > 3 and np.all(np.diff(c.t) > 0):
+        v = np.hypot(np.gradient(x, c.t), np.gradient(y, c.t))
+        line(ax_v, t, v, BLUE, "|v| derivada")
+        finish(ax_v, "m/s", "Velocidad")
+        stats_text(ax_v, f"max {v.max():.2f} m/s")
+    else:
+        ax_v.set_visible(False)
+    ax_v.set_xlabel("tiempo [s]")
+    fig.suptitle(f"{c.topic}   ({b['n']} muestras, {b['hz']:.1f} Hz)",
+                 x=0.01, ha="left")
+    return fig
+
+
+def fig_twist(c: TwistC, b: Dict, t0: float):
+    import matplotlib.pyplot as plt
+    t = c.t - t0
+    fig, ax = plt.subplots(2, 2, figsize=(13.5, 7.0), layout="constrained")
+    for i, k in enumerate("xyz"):
+        line(ax[0, 0], t, c.vel[:, i], AXIS_COLOR[k], f"v{k}")
+        line(ax[1, 0], t, np.degrees(c.omega[:, i]), AXIS_COLOR[k], f"w{k}")
+    finish(ax[0, 0], "m/s", "Velocidad lineal")
+    finish(ax[1, 0], "grados/s", "Velocidad angular")
+    line(ax[0, 1], t, np.linalg.norm(c.vel, axis=1), BLUE, "|v|")
+    finish(ax[0, 1], "m/s", "Módulo lineal")
+    line(ax[1, 1], t, np.degrees(np.linalg.norm(c.omega, axis=1)), ORANGE, "|w|")
+    finish(ax[1, 1], "grados/s", "Módulo angular")
+    for a in ax.ravel():
+        a.set_xlabel("tiempo [s]")
+    fig.suptitle(f"{c.topic}   ({b['n']} muestras, {b['hz']:.1f} Hz)",
+                 x=0.01, ha="left")
+    return fig
+
+
+def _fig_state(c, b: Dict, t0: float, title: str):
+    import matplotlib.pyplot as plt
+    t = c.t - t0
+    x, y = c.pos[:, 0], c.pos[:, 1]
+    fig = plt.figure(figsize=(13.5, 8.6), layout="constrained")
+    gs = fig.add_gridspec(2, 2)
+    ax_xy = fig.add_subplot(gs[0, 0])
+    ax_t = fig.add_subplot(gs[0, 1])
+    ax_y = fig.add_subplot(gs[1, 0])
+    ax_v = fig.add_subplot(gs[1, 1])
+
+    ax_xy.plot(x, y, color=BLUE, lw=1.0)
+    ax_xy.scatter([x[0]], [y[0]], color=AQUA, s=30, marker="o", label="inicio")
+    ax_xy.scatter([x[-1]], [y[-1]], color=ORANGE, s=30, marker="s", label="fin")
+    ax_xy.set_aspect("equal", adjustable="datalim")
+    ax_xy.set_xlabel("x [m]")
+    ax_xy.set_ylabel("y [m]")
+    ax_xy.set_title("Trayectoria", loc="left", pad=6)
+    ax_xy.legend(loc="best")
+
+    line(ax_t, t, x, BLUE, "x")
+    line(ax_t, t, y, ORANGE, "y")
+    cov = getattr(c, "pose_cov", None)
+    if cov is not None and cov.size and np.any(np.isfinite(cov)):
+        sx = 2.0 * np.sqrt(np.maximum(cov[:, 0], 0.0))
+        sy = 2.0 * np.sqrt(np.maximum(cov[:, 1], 0.0))
+        ax_t.fill_between(t, x - sx, x + sx, color=BLUE, alpha=0.10, lw=0)
+        ax_t.fill_between(t, y - sy, y + sy, color=ORANGE, alpha=0.10, lw=0)
+        stats_text(ax_t, "banda: ±2σ")
+    finish(ax_t, "m", "Posición")
+    ax_t.set_xlabel("tiempo [s]")
+
+    yaw = _yaw_deg(c)
+    if yaw is not None:
+        line(ax_y, t, yaw, AQUA, "yaw")
+    finish(ax_y, "grados", "Yaw (desenrollado)")
+    ax_y.set_xlabel("tiempo [s]")
+
+    line(ax_v, t, np.hypot(c.vel[:, 0], c.vel[:, 1]), BLUE, "|v|")
+    finish(ax_v, "m/s", "Velocidad")
+    ax_v.set_xlabel("tiempo [s]")
+    fig.suptitle(f"{c.topic} — {title}   ({b['n']} muestras, {b['hz']:.1f} Hz)",
+                 x=0.01, ha="left")
+    return fig
+
+
+def fig_car(c: CarC, b: Dict, t0: float):
+    return _fig_state(c, b, t0, "Car")
+
+
+def fig_scan(c: ScanC, b: Dict, t0: float):
+    import matplotlib.pyplot as plt
+    t = c.t - t0
+    fig = plt.figure(figsize=(13.5, 8.6), layout="constrained")
+    gs = fig.add_gridspec(2, 2)
+    ax_xy = fig.add_subplot(gs[0, 0])
+    ax_p = fig.add_subplot(gs[0, 1])
+    ax_t = fig.add_subplot(gs[1, 0])
+    ax_v = fig.add_subplot(gs[1, 1])
+
+    if c.last is not None:
+        ang, r, ok = c.last["angle"], c.last["range"], c.last["valid"]
+        rr = r[ok]
+        aa = ang[ok]
+        ax_xy.plot(rr * np.cos(aa), rr * np.sin(aa), ".", color=BLUE, ms=2)
+        ax_xy.scatter([0], [0], color=ORANGE, s=26, marker="^")
+        ax_xy.set_aspect("equal", adjustable="datalim")
+    ax_xy.set_xlabel("x [m]")
+    ax_xy.set_ylabel("y [m]")
+    ax_xy.set_title("Último barrido (vista XY)", loc="left", pad=6)
+
+    if c.last is not None:
+        ax_p.plot(np.degrees(c.last["angle"]), c.last["range"], ".", color=BLUE, ms=2)
+    ax_p.set_xlabel("ángulo [grados]")
+    ax_p.set_ylabel("rango [m]")
+    ax_p.set_title("Rango por haz", loc="left", pad=6)
+
+    if c.stats.size:
+        s = c.stats
+        line(ax_t, t, s[:, 3], BLUE, "medio")
+        line(ax_t, t, s[:, 2], AQUA, "min")
+        line(ax_t, t, s[:, 5], ORANGE, "max")
+        finish(ax_t, "m", "Rango por barrido")
+        valid_ratio = np.divide(s[:, 1], s[:, 0], out=np.zeros_like(s[:, 1]),
+                                where=s[:, 0] > 0)
+        line(ax_v, t, 100 * valid_ratio, ORANGE, "válidos [%]")
+        finish(ax_v, "%", "Haces con retorno")
+        stats_text(ax_v, f"mediana {100*np.median(valid_ratio):.1f} %")
+    for a in (ax_t, ax_v):
+        a.set_xlabel("tiempo [s]")
+    fig.suptitle(f"{c.topic}   ({b['n']} barridos, {b['hz']:.1f} Hz)",
+                 x=0.01, ha="left")
+    return fig
+
+
+def fig_image(c: ImageC, b: Dict, t0: float):
+    import matplotlib.pyplot as plt
+    n = max(1, len(c.thumbs))
+    fig = plt.figure(figsize=(13.5, 8.0), layout="constrained")
+    gs = fig.add_gridspec(2, n)
+    for i, (ts, g, r) in enumerate(c.thumbs):
+        ax = fig.add_subplot(gs[0, i])
+        ax.imshow(r if r is not None else g,
+                  cmap=None if r is not None else "gray")
+        ax.set_title(f"t = {ts - t0:.2f} s", fontsize=9, loc="left", pad=3)
+        ax.set_axis_off()
+    if not c.thumbs:
+        ax = fig.add_subplot(gs[0, :])
+        ax.text(0.5, 0.5, "sin frames decodificables (instala opencv-python)",
+                ha="center", va="center", transform=ax.transAxes, color=INK_MUTED)
+        ax.set_axis_off()
+
+    ax_b = fig.add_subplot(gs[1, :])
+    t = c.t - t0
+    if c.image_stat.size:
+        line(ax_b, t, c.image_stat[:, 0], BLUE, "brillo medio")
+        line(ax_b, t, c.image_stat[:, 1], ORANGE, "contraste (sigma)")
+    finish(ax_b, "nivel", "Estadística de la imagen")
+    ax_b.set_xlabel("tiempo [s]")
+    fig.suptitle(f"{c.topic}   ({b['n']} mensajes, {b['hz']:.1f} Hz)",
+                 x=0.01, ha="left")
+    return fig
+
+
+def fig_range(c: RangeC, b: Dict, t0: float):
+    import matplotlib.pyplot as plt
+    t = c.t - t0
+    fig, ax = plt.subplots(1, 2, figsize=(13.5, 4.3), layout="constrained")
+    line(ax[0], t, c.range, BLUE, "rango")
+    ax[0].axhline(c.min_range[0], color=INK_MUTED, ls="--", lw=1.0, label="min")
+    ax[0].axhline(c.max_range[0], color=INK_MUTED, ls=":", lw=1.0, label="max")
+    finish(ax[0], "m", "Distancia")
+    ax[0].set_xlabel("tiempo [s]")
+    r = c.range[np.isfinite(c.range)]
+    ax[1].hist(r, bins=100, color=BLUE, edgecolor="none")
+    ax[1].set_xlabel("rango [m]")
+    ax[1].set_ylabel("cuentas")
+    ax[1].set_title("Distribución", loc="left", pad=6)
+    fig.suptitle(f"{c.topic}   ({b['n']} muestras)", x=0.01, ha="left")
+    return fig
+
+
+def fig_battery(c: BatteryC, b: Dict, t0: float):
+    import matplotlib.pyplot as plt
+    t = c.t - t0
+    fig, ax = plt.subplots(2, 2, figsize=(13.5, 7.0), layout="constrained")
+    for a, col, lab, ttl in (
+            (ax[0, 0], 0, "V", "Voltaje"),
+            (ax[0, 1], 2, "A", "Corriente"),
+            (ax[1, 0], 6, "0..1", "Porcentaje"),
+            (ax[1, 1], 1, "degC", "Temperatura")):
+        line(a, t, c.data[:, col], BLUE, lab)
+        finish(a, lab, ttl)
+        a.set_xlabel("tiempo [s]")
+    fig.suptitle(f"{c.topic}   ({b['n']} muestras)", x=0.01, ha="left")
+    return fig
+
+
+def fig_joint(c: JointC, b: Dict, t0: float):
+    import matplotlib.pyplot as plt
+    names = c.names[:8]
+    fig, ax = plt.subplots(1, 2, figsize=(13.5, 5.0), layout="constrained")
+    t = c.t - t0
+    for i, n in enumerate(names):
+        col = SERIES[i % len(SERIES)]
+        line(ax[0], t, c.position[n], col, n)
+        line(ax[1], t, c.velocity[n], col, n)
+    finish(ax[0], "posición", "Posición por joint")
+    finish(ax[1], "velocidad", "Velocidad por joint")
+    for a in ax:
+        a.set_xlabel("tiempo [s]")
+    fig.suptitle(f"{c.topic}   ({len(c.names)} joints)", x=0.01, ha="left")
+    return fig
+
+
+def fig_diag(c: DiagC, b: Dict, t0: float):
+    import matplotlib.pyplot as plt
+    t = c.t - t0
+    fig, ax = plt.subplots(1, 2, figsize=(13.5, 4.3), layout="constrained")
+    if c.level.size:
+        ax[0].step(t, c.level, where="post", color=ORANGE)
+        ax[0].set_yticks([0, 1, 2, 3])
+        ax[0].set_yticklabels(["OK", "WARN", "ERROR", "STALE"])
+    ax[0].set_xlabel("tiempo [s]")
+    ax[0].set_title("Peor nivel del mensaje", loc="left", pad=6)
+    if c.rows:
+        lv = np.asarray([r[1] for r in c.rows])
+        u, n = np.unique(lv, return_counts=True)
+        ax[1].bar([str(int(x)) for x in u], n, color=BLUE)
+    ax[1].set_xlabel("nivel")
+    ax[1].set_ylabel("cuentas")
+    ax[1].set_title("Estados por nivel", loc="left", pad=6)
+    fig.suptitle(f"{c.topic}   ({b['n']} mensajes)", x=0.01, ha="left")
+    return fig
+
+
+def fig_scalar(c: ScalarC, b: Dict, t0: float):
+    import matplotlib.pyplot as plt
+    t = c.t - t0
+    fig, ax = plt.subplots(1, 1, figsize=(13.5, 4.2), layout="constrained")
+    for i, lab in enumerate(c.labels):
+        line(ax, t, c.value[:, i],
+             SERIES[i % len(SERIES)] if c.value.shape[1] > 1 else BLUE, lab)
+    ax.set_xlabel("tiempo [s]")
+    finish(ax, c.unit, f"{c.type.split('/')[-1]}")
+    fig.suptitle(f"{c.topic}   ({b['n']} muestras, {b['hz']:.1f} Hz)",
+                 x=0.01, ha="left")
+    return fig
+
+
+def fig_clock(c: ClockC, b: Dict, t0: float):
+    import matplotlib.pyplot as plt
+    t = c.t - t0
+    fig, ax = plt.subplots(1, 2, figsize=(13.5, 4.3), layout="constrained")
+    if c.clock.size:
+        ax[0].plot(t, c.clock - c.clock[0], color=BLUE, lw=1.0)
+    ax[0].set_xlabel("tiempo del bag [s]")
+    ax[0].set_ylabel("avance [s]")
+    ax[0].set_title("Reloj frente al bag", loc="left", pad=6)
+    if c.clock.size > 1:
+        d = np.diff(c.clock)
+        ax[1].hist(d * 1e3, bins=100, color=BLUE, edgecolor="none")
+    ax[1].set_xlabel("intervalo [ms]")
+    ax[1].set_ylabel("cuentas")
+    ax[1].set_title("Intervalos del reloj", loc="left", pad=6)
+    fig.suptitle(f"{c.topic}   ({b['n']} muestras)", x=0.01, ha="left")
+    return fig
+
+
+def fig_posearray(c: PoseArrayC, b: Dict, t0: float):
+    import matplotlib.pyplot as plt
+    t = c.t - t0
+    fig, ax = plt.subplots(1, 2, figsize=(13.5, 5.0), layout="constrained")
+    if c.last is not None and c.last.size:
+        ax[0].scatter(c.last[:, 0], c.last[:, 1], s=8, color=BLUE)
+        ax[0].set_aspect("equal", adjustable="datalim")
+    ax[0].set_xlabel("x [m]")
+    ax[0].set_ylabel("y [m]")
+    ax[0].set_title("Último PoseArray", loc="left", pad=6)
+    line(ax[1], t, c.counts, BLUE, "poses")
+    finish(ax[1], "poses", "Elementos por mensaje")
+    ax[1].set_xlabel("tiempo [s]")
+    fig.suptitle(f"{c.topic}   ({b['n']} mensajes)", x=0.01, ha="left")
+    return fig
+
+
+def fig_path(c: PathC, b: Dict, t0: float):
+    import matplotlib.pyplot as plt
+    t = c.t - t0
+    fig, ax = plt.subplots(1, 2, figsize=(13.5, 5.0), layout="constrained")
+    if c.last is not None and c.last.size:
+        ax[0].plot(c.last[:, 0], c.last[:, 1], color=BLUE, lw=1.2)
+        ax[0].set_aspect("equal", adjustable="datalim")
+    ax[0].set_xlabel("x [m]")
+    ax[0].set_ylabel("y [m]")
+    ax[0].set_title("Último path", loc="left", pad=6)
+    line(ax[1], t, c.lengths, BLUE, "longitud")
+    finish(ax[1], "m", "Longitud del path")
+    ax[1].set_xlabel("tiempo [s]")
+    fig.suptitle(f"{c.topic}   ({b['n']} mensajes)", x=0.01, ha="left")
+    return fig
+
+
+def fig_state_compare(car: CarC, odom: OdomC, t0: float):
+    """Compara en el mismo grafico la salida del EKF con el sensor solo."""
+    import matplotlib.pyplot as plt
+    fig = plt.figure(figsize=(13.5, 9.0), layout="constrained")
+    gs = fig.add_gridspec(2, 2)
+    ax_xy = fig.add_subplot(gs[0, 0])
+    ax_p = fig.add_subplot(gs[0, 1])
+    ax_y = fig.add_subplot(gs[1, 0])
+    ax_e = fig.add_subplot(gs[1, 1])
+
+    tc, to = car.t - t0, odom.t - t0
+    # Alinea el sensor al primer estado con una rototraslacion rígida.
+    yc0 = rpy_from_quat(car.quat[:1])[0, 2]
+    yo0 = rpy_from_quat(odom.quat[:1])[0, 2]
+    dy = yc0 - yo0
+    c, s = math.cos(dy), math.sin(dy)
+    raw = odom.pos[:, :2].copy()
+    raw -= odom.pos[0, :2]
+    raw = np.column_stack([c * raw[:, 0] - s * raw[:, 1],
+                           s * raw[:, 0] + c * raw[:, 1]]) + car.pos[0, :2]
+
+    ax_xy.plot(car.pos[:, 0], car.pos[:, 1], color=BLUE, lw=1.2, label="EKF")
+    ax_xy.plot(raw[:, 0], raw[:, 1], color=ORANGE, lw=1.0, ls="--",
+               label="sensor solo")
+    ax_xy.set_aspect("equal", adjustable="datalim")
+    ax_xy.set_xlabel("x [m]")
+    ax_xy.set_ylabel("y [m]")
+    ax_xy.set_title("Trayectoria", loc="left", pad=6)
+    ax_xy.legend(loc="best")
+
+    line(ax_p, tc, car.pos[:, 0], BLUE, "EKF x")
+    line(ax_p, tc, car.pos[:, 1], BLUE, "EKF y")
+    line(ax_p, to, raw[:, 0], ORANGE, "sensor x")
+    line(ax_p, to, raw[:, 1], ORANGE, "sensor y")
+    finish(ax_p, "m", "Posición")
+    ax_p.set_xlabel("tiempo [s]")
+
+    yc = _yaw_deg(car)
+    yo = np.degrees(np.unwrap(rpy_from_quat(odom.quat)[:, 2])) + math.degrees(dy)
+    if yc is not None:
+        line(ax_y, tc, yc, BLUE, "EKF")
+    line(ax_y, to, yo, ORANGE, "sensor")
+    finish(ax_y, "grados", "Yaw")
+    ax_y.set_xlabel("tiempo [s]")
+
+    # Error de posicion sobre una rejilla comun.
+    lo, hi = max(tc[0], to[0]), min(tc[-1], to[-1])
+    if hi > lo:
+        g = np.linspace(lo, hi, max(2, int((hi - lo) * 20)))
+        cx = np.interp(g, tc, car.pos[:, 0])
+        cy = np.interp(g, tc, car.pos[:, 1])
+        rx = np.interp(g, to, raw[:, 0])
+        ry = np.interp(g, to, raw[:, 1])
+        err = np.hypot(cx - rx, cy - ry)
+        line(ax_e, g, err, ORANGE, "|EKF - sensor|")
+        finish(ax_e, "m", "Error de posición")
+        stats_text(ax_e, f"RMS {np.sqrt(np.mean(err**2)):.2f} m   "
+                         f"max {err.max():.2f} m")
+        ax_e.set_xlabel("tiempo [s]")
+    fig.suptitle(f"EKF {car.topic}  vs  sensor {odom.topic}", x=0.01, ha="left")
     return fig
 
 
@@ -1609,6 +2955,46 @@ def export_csv(c: Base, prefix: str) -> None:
     elif c.kind == "fix":
         cols += [c.lat, c.lon, c.alt, c.status]
         hdr += ["lat", "lon", "alt", "status"]
+    elif c.kind in ("odom", "car", "pose"):
+        cols += [c.pos, c.quat]
+        hdr += ["px", "py", "pz", "qx", "qy", "qz", "qw"]
+        if getattr(c, "vel", None) is not None and c.vel.size:
+            cols += [c.vel, c.omega]
+            hdr += ["vx", "vy", "vz", "wx", "wy", "wz"]
+    elif c.kind == "twist":
+        cols += [c.vel, c.omega]
+        hdr += ["vx", "vy", "vz", "wx", "wy", "wz"]
+    elif c.kind == "scan" and c.stats.size:
+        cols += [c.stats]
+        hdr += ["puntos", "validos", "r_min", "r_medio", "r_mediana", "r_max"]
+    elif c.kind == "image":
+        cols += [c.metadata, c.image_stat]
+        hdr += ["ancho", "alto", "step", "bytes", "brillo", "contraste"]
+    elif c.kind == "range":
+        cols += [c.range, c.min_range, c.max_range, c.field_of_view]
+        hdr += ["range", "min", "max", "fov"]
+    elif c.kind == "battery":
+        cols += [c.data, c.cell_voltage, c.cell_temperature]
+        hdr += list(BatteryC.FIELDS) + ["cell_v", "cell_t"]
+    elif c.kind == "joint":
+        for n in c.names:
+            cols += [c.position[n], c.velocity[n], c.effort[n]]
+            hdr += [f"pos_{n}", f"vel_{n}", f"eff_{n}"]
+    elif c.kind == "scalar":
+        cols += [c.value]
+        hdr += list(c.labels)
+    elif c.kind == "clock":
+        cols += [c.clock]
+        hdr += ["clock"]
+    elif c.kind in ("posearray", "path"):
+        cols += [c.counts]
+        hdr += ["count"]
+        if c.kind == "posearray":
+            cols += [c.centroid, c.spread]
+            hdr += ["cx", "cy", "spread"]
+        else:
+            cols += [c.lengths]
+            hdr += ["length"]
     elif c.kind == "generic" and c.data:
         ks = sorted(c.data)
         cols += [c.data[k] for k in ks]
@@ -1620,6 +3006,9 @@ def export_csv(c: Base, prefix: str) -> None:
     except ValueError:
         return
     path = f"{prefix}_{slug(c.topic)}.csv"
+    parent = os.path.dirname(os.path.abspath(path))
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     np.savetxt(path, M, delimiter=",", comments="", fmt="%.9g",
                header=",".join(hdr))
     print(f"  CSV -> {path}  ({M.shape[0]} filas, {M.shape[1]} columnas)")
@@ -1663,6 +3052,8 @@ def main() -> int:
     imus: Dict[str, ImuC] = {}
     imu_st: Dict[str, Dict] = {}
     cons: Dict[str, Dict] = {}
+    cars: Dict[str, CarC] = {}
+    odoms: Dict[str, OdomC] = {}
     for n in sorted(col):
         c, b = col[n], st[n]
         if c.t_bag.size == 0:
@@ -1673,14 +3064,51 @@ def main() -> int:
             imus[n], imu_st[n] = c, s
         elif c.kind == "odom" and c.pos.size:
             cons[n] = report_odom(c, b)
+            odoms[n] = c
+        elif c.kind == "car" and c.pos.size:
+            report_car(c, b)
+            cars[n] = c
+        elif c.kind == "pose" and c.pos.size:
+            report_pose(c, b)
+        elif c.kind == "twist" and c.vel.size:
+            report_twist(c, b)
         elif c.kind == "fix" and c.lat.size:
             report_fix(c, b)
         elif c.kind == "cloud":
             report_cloud(c, b)
+        elif c.kind == "scan":
+            report_scan(c, b)
+        elif c.kind == "image":
+            report_image(c, b)
+        elif c.kind == "range":
+            report_range(c, b)
+        elif c.kind == "battery":
+            report_battery(c, b)
+        elif c.kind == "joint":
+            report_joint(c, b)
+        elif c.kind == "diag":
+            report_diag(c, b)
+        elif c.kind == "clock":
+            report_clock(c, b)
+        elif c.kind == "scalar":
+            report_scalar(c, b)
+        elif c.kind == "posearray":
+            report_posearray(c, b)
+        elif c.kind == "path":
+            report_path(c, b)
         elif c.kind == "tf" and c.tf:
             report_tf(c)
         elif c.kind == "generic":
             report_generic(c, b)
+
+    for cn, cc in cars.items():
+        best = None
+        for on, oc in odoms.items():
+            lo, hi = max(cc.t[0], oc.t[0]), min(cc.t[-1], oc.t[-1])
+            if hi - lo > 0.5 and (best is None or hi - lo > best[0]):
+                best = (hi - lo, on, oc)
+        if best:
+            report_state_compare(cc, best[2])
 
     notes: List[str] = []
     rel_rot: Dict = {}
@@ -1709,12 +3137,38 @@ def main() -> int:
                 figs[f"imu_{sg}"] = fig_imu(c, b, imu_st[n], t0)
             elif c.kind == "odom" and c.pos.size:
                 figs[f"odom_{sg}"] = fig_odom(c, b, t0, cons.get(n, {}))
+            elif c.kind == "car" and c.pos.size:
+                figs[f"car_{sg}"] = fig_car(c, b, t0)
+            elif c.kind == "pose" and c.pos.size:
+                figs[f"pose_{sg}"] = fig_pose(c, b, t0)
+            elif c.kind == "twist" and c.vel.size:
+                figs[f"twist_{sg}"] = fig_twist(c, b, t0)
             elif c.kind == "fix" and c.lat.size:
                 f = fig_fix(c, b, t0)
                 if f is not None:
                     figs[f"fix_{sg}"] = f
             elif c.kind == "cloud" and c.t_bag.size > 2:
                 figs[f"cloud_{sg}"] = fig_cloud(c, b, t0)
+            elif c.kind == "scan" and c.t_bag.size > 2:
+                figs[f"scan_{sg}"] = fig_scan(c, b, t0)
+            elif c.kind == "image" and c.t_bag.size:
+                figs[f"image_{sg}"] = fig_image(c, b, t0)
+            elif c.kind == "range" and c.range.size:
+                figs[f"range_{sg}"] = fig_range(c, b, t0)
+            elif c.kind == "battery" and c.data.size:
+                figs[f"battery_{sg}"] = fig_battery(c, b, t0)
+            elif c.kind == "joint" and c.names:
+                figs[f"joint_{sg}"] = fig_joint(c, b, t0)
+            elif c.kind == "diag" and c.rows:
+                figs[f"diag_{sg}"] = fig_diag(c, b, t0)
+            elif c.kind == "clock" and c.clock.size:
+                figs[f"clock_{sg}"] = fig_clock(c, b, t0)
+            elif c.kind == "scalar" and c.value.size:
+                figs[f"scalar_{sg}"] = fig_scalar(c, b, t0)
+            elif c.kind == "posearray" and c.counts.size:
+                figs[f"posearray_{sg}"] = fig_posearray(c, b, t0)
+            elif c.kind == "path" and c.counts.size:
+                figs[f"path_{sg}"] = fig_path(c, b, t0)
             elif c.kind == "generic" and c.data:
                 f = fig_generic(c, b, t0)
                 if f is not None:
@@ -1737,6 +3191,15 @@ def main() -> int:
                     figs[f"timing_{sg}"] = tf
         except Exception as exc:  # noqa: BLE001
             print(f"  [aviso] no pude dibujar {n}: {exc}")
+    for cn, cc in cars.items():
+        best = None
+        for on, oc in odoms.items():
+            lo = max(cc.t[0], oc.t[0])
+            hi = min(cc.t[-1], oc.t[-1])
+            if hi - lo > 0.5 and (best is None or hi - lo > best[0]):
+                best = (hi - lo, on, oc)
+        if best:
+            figs[f"compare_{slug(cn)}"] = fig_state_compare(cc, best[2], t0)
     if len(imus) > 1:
         figs["imu_compare"] = fig_imu_compare(imus, t0, notes)
     if imus and not args.no_3d:
