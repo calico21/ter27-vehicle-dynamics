@@ -43,7 +43,7 @@ def generate_launch_description():
             # Owns /state/car and the odom->car/cog TF.
             Node(
                 package="mirena_state",
-                executable="mirena_state_ekf",
+                executable="mirena_state",
                 name="mirena_state",
                 parameters=[
                     {
@@ -65,6 +65,16 @@ def generate_launch_description():
                         # T_odom <- ins rather than applied to the pose, so /state/car never
                         # teleports when the solution returns from a dropout. <= 0 disables it.
                         "ins_reanchor_m": 12.0,  # m of disagreement that triggers a re-anchor
+                        # -- Vehicle model calibration (bags/bici_bias, 2026-10-23)
+                        # Effective rolling radius and steering gain measured
+                        # from the bag; see utilities/calibrate_wheel_steering.py.
+                        # Keep the simulator on 0.2 m / 1.0.
+                        "use_bicycle_model": True,
+                        "steering_degrees": True,
+                        "steering_sign": 1.0,
+                        "steering_ratio": 1.35,  # effective steering gain
+                        "steering_offset_rad": 0.030,  # rad
+                        "wheel_radius": 0.191,  # m, effective rolling radius
                     }
                 ],
             ),

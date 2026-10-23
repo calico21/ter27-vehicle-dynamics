@@ -21,6 +21,7 @@
 #include <sensor_msgs/msg/imu.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include "mirena_common/msg/car.hpp"
+#include "mirena_common/msg/car_control.hpp"
 #include "mirena_common/msg/heartbeat.hpp"
 #include "mirena_common/msg/wheel_speeds.hpp"
 
@@ -62,6 +63,7 @@ class MirenaState : public rclcpp::Node
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr _imu_sub;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr _ins_odom_sub;
     rclcpp::Subscription<mirena_common::msg::WheelSpeeds>::SharedPtr _encoder_sub;
+    rclcpp::Subscription<mirena_common::msg::CarControl>::SharedPtr _steering_sub;
 
     // Publishers
     rclcpp::Publisher<mirena_common::msg::Car>::SharedPtr _car_pub;
@@ -99,6 +101,36 @@ class MirenaState : public rclcpp::Node
     double _gyro_meas_var = 0.0001;
     bool _use_encoders = true;
 
+    // Kinematic bicycle prediction and the measured steering it needs.
+    // /control/can is what mirena_can republishes from the CAN steering
+    // sensor; it is raw CAN "Grad" (degrees), not radians, so the conversion
+    // is a parameter rather than an assumption.
+    bool _use_bicycle_model = true;
+    bool _steering_seen = false;
+    double _steering_rad = 0.0;
+    rclcpp::Time _last_steering_stamp{0, 0, RCL_ROS_TIME};
+    std::string _steering_topic = "/control/can";
+    bool _steering_degrees = true;
+    double _steering_sign = 1.0;
+    double _steering_ratio = 1.0;     // steering-wheel : road-wheel, if the sensor
+                                      // reports the wheel rather than the rack
+    double _steering_offset_rad = 0.0;
+    double _steering_timeout_sec = 0.2;
+    double _max_steering_rad = 0.6;   // ~34 deg, clamp on the sensor reading
+    double _steering_noise_rad = 0.02;
+    double _cog_to_front_axle_m = 0.806;
+    double _bicycle_relaxation = 20.0;
+    double _bicycle_min_speed = 0.5;
+
+    /// Let the encoder and INS callbacks advance the filter clock to their own
+    /// stamp before applying their measurement. On bags whose IMU stamps run a
+    /// few milliseconds behind the encoder/INS (the IMU driver's latency), the
+    /// encoder then advances past every IMU and the prediction is never
+    /// integrated. Disable it to keep the IMU as the clock and apply the other
+    /// measurements at the current stamp; their age is then at most one IMU
+    /// period.
+    bool _sensor_time_sync_predict = true;
+
     /// Metres by which the INS solution may disagree with the estimate before
     /// the update is absorbed by re-anchoring instead of applied to the state.
     /// <= 0 disables the gate. Measured: routine disagreement is 3-5 m (the
@@ -127,12 +159,17 @@ public:
         this->declare_parameter<double>("imu_timeout_sec", 0.2);
         this->declare_parameter<double>("encoder_timeout_sec", 0.2);
         this->declare_parameter<double>("max_predict_dt_sec", 0.1);
+        // El estado interno tiene 7 componentes: los 6 estados cinemáticos
+        // más el bias de a_x. El INS/GPS sigue midiendo solo 6, por lo que
+        // odom_meas_floor_diag conserva 6 elementos. Los dos vectores de
+        // proceso/inicialización aceptan 6 elementos por compatibilidad y
+        // añaden la prior del bias si falta el séptimo.
         this->declare_parameter<std::vector<double>>(
-            "process_noise_diag", {0.01, 0.01, 0.005, 0.5, 0.5, 0.5});
+            "process_noise_diag", {0.01, 0.01, 0.005, 0.5, 0.5, 0.5, 1e-6});
         this->declare_parameter<std::vector<double>>(
             "odom_meas_floor_diag", {1e-2, 1e-2, 1e-2, 1e-2, 1e-2, 1e-2});
         this->declare_parameter<std::vector<double>>(
-            "init_cov_floor_diag", {0.01, 0.01, 0.001, 0.01, 0.01, 0.001});
+            "init_cov_floor_diag", {0.01, 0.01, 0.001, 0.01, 0.01, 0.001, 0.04});
         this->declare_parameter<double>("gyro_meas_var", 1.0e-5);
         this->declare_parameter<double>("wheel_radius", 0.2);
         this->declare_parameter<double>("track_width", 1.2);
@@ -142,9 +179,54 @@ public:
         this->declare_parameter<double>("encoder_yaw_var_max", 0.5);
         this->declare_parameter<double>("cog_to_rear_axle_m", 0.744);
         this->declare_parameter<double>("no_slip_var", 0.01);
+        this->declare_parameter<bool>("use_bicycle_model", true);
+        this->declare_parameter<std::string>("steering_topic", "/control/can");
+        this->declare_parameter<bool>("steering_degrees", true);
+        this->declare_parameter<double>("steering_sign", 1.0);
+        this->declare_parameter<double>("steering_ratio", 1.0);
+        this->declare_parameter<double>("steering_offset_rad", 0.0);
+        this->declare_parameter<double>("steering_timeout_sec", 0.2);
+        this->declare_parameter<double>("max_steering_rad", 0.6);
+        this->declare_parameter<double>("steering_noise_rad", 0.02);
+        this->declare_parameter<double>("cog_to_front_axle_m", 0.806);
+        this->declare_parameter<double>("bicycle_relaxation", 20.0);
+        this->declare_parameter<double>("bicycle_min_speed", 0.5);
+        this->declare_parameter<bool>("sensor_time_sync_predict", true);
         _encoder_yaw_var_max = this->get_parameter("encoder_yaw_var_max").as_double();
         _cog_to_rear_axle_m = this->get_parameter("cog_to_rear_axle_m").as_double();
         _no_slip_var = this->get_parameter("no_slip_var").as_double();
+        _use_bicycle_model = this->get_parameter("use_bicycle_model").as_bool();
+        _steering_topic = this->get_parameter("steering_topic").as_string();
+        _steering_degrees = this->get_parameter("steering_degrees").as_bool();
+        _steering_sign = this->get_parameter("steering_sign").as_double();
+        _steering_ratio = this->get_parameter("steering_ratio").as_double();
+        _steering_offset_rad = this->get_parameter("steering_offset_rad").as_double();
+        if (_steering_ratio <= 0.0)
+        {
+            RCLCPP_WARN(this->get_logger(),
+                        "steering_ratio must be > 0 (got %.3f); using 1.0.", _steering_ratio);
+            _steering_ratio = 1.0;
+        }
+        _steering_timeout_sec = this->get_parameter("steering_timeout_sec").as_double();
+        _max_steering_rad = this->get_parameter("max_steering_rad").as_double();
+        _steering_noise_rad = this->get_parameter("steering_noise_rad").as_double();
+        _cog_to_front_axle_m = this->get_parameter("cog_to_front_axle_m").as_double();
+        _bicycle_relaxation = this->get_parameter("bicycle_relaxation").as_double();
+        _bicycle_min_speed = this->get_parameter("bicycle_min_speed").as_double();
+        _sensor_time_sync_predict = this->get_parameter("sensor_time_sync_predict").as_bool();
+        if (_bicycle_relaxation <= 0.0)
+        {
+            RCLCPP_WARN(this->get_logger(),
+                        "bicycle_relaxation must be > 0 (got %.3f); using 20.0.",
+                        _bicycle_relaxation);
+            _bicycle_relaxation = 20.0;
+        }
+        if (_max_steering_rad <= 0.0)
+        {
+            RCLCPP_WARN(this->get_logger(),
+                        "max_steering_rad must be > 0 (got %.3f); using 0.6.", _max_steering_rad);
+            _max_steering_rad = 0.6;
+        }
 
         RCLCPP_INFO(this->get_logger(), "Starting Mirena State");
 
@@ -169,12 +251,18 @@ public:
         _tf_broadcaster = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
         mirena::Ekf::Config cfg;
-        cfg.process_noise_diag = param_vec6("process_noise_diag");
+        cfg.process_noise_diag = param_vec7("process_noise_diag", 1e-6);
         cfg.odom_meas_floor_diag = param_vec6("odom_meas_floor_diag");
-        cfg.init_cov_floor_diag = param_vec6("init_cov_floor_diag");
+        cfg.init_cov_floor_diag = param_vec7("init_cov_floor_diag", 0.04);
         _gyro_meas_var = this->get_parameter("gyro_meas_var").as_double();
         cfg.gyro_meas_var = _gyro_meas_var;
         cfg.max_dt = this->get_parameter("max_predict_dt_sec").as_double();
+        cfg.use_bicycle = _use_bicycle_model;
+        cfg.wheelbase = _cog_to_front_axle_m + _cog_to_rear_axle_m;
+        cfg.l_rear = _cog_to_rear_axle_m;
+        cfg.steering_relaxation = _bicycle_relaxation;
+        cfg.steering_noise_rad = _steering_noise_rad;
+        cfg.bicycle_min_speed = _bicycle_min_speed;
         _ekf = std::make_unique<mirena::Ekf>(cfg);
 
         // Sensor subscriptions
@@ -199,6 +287,30 @@ public:
                         WHEEL_SPEEDS_TOPIC);
         }
 
+        // Measured steering for the kinematic bicycle prediction. This is the
+        // CAN steering sensor, not the command on /control: the prediction
+        // wants what the wheels did, not what the controller asked for.
+        if (_use_bicycle_model)
+        {
+            _steering_sub = this->create_subscription<mirena_common::msg::CarControl>(
+                _steering_topic, rclcpp::SensorDataQoS(),
+                std::bind(&MirenaState::steering_callback, this, std::placeholders::_1),
+                filter_sub_options);
+            RCLCPP_INFO(this->get_logger(),
+                        "Prediction: kinematic bicycle (L=%.3f m, L_R=%.3f m, lag=%.1f 1/s), "
+                        "steering from %s (%s, sign %.1f, ratio %.2f). Falls back to Euler "
+                        "while steering is older than %.2f s.",
+                        _cog_to_front_axle_m + _cog_to_rear_axle_m, _cog_to_rear_axle_m,
+                        _bicycle_relaxation, _steering_topic.c_str(),
+                        _steering_degrees ? "degrees" : "radians", _steering_sign,
+                        _steering_ratio, _steering_timeout_sec);
+        }
+        else
+        {
+            RCLCPP_INFO(this->get_logger(),
+                        "Prediction: body-frame Euler (use_bicycle_model=false).");
+        }
+
         // Health/status report timer
         _report_timer = rclcpp::create_timer(
             this, this->get_clock(), kReportPeriod,
@@ -217,6 +329,26 @@ private:
             throw std::runtime_error("invalid " + name);
         }
         return mirena::Ekf::Vec6(v.data());
+    }
+
+    /// Vectores de 7 componentes para el estado aumentado con b_ax. Se acepta
+    /// un vector de 6 por compatibilidad con las launch/configuraciones
+    /// existentes: en ese caso se añade la prior del bias indicada.
+    mirena::Ekf::Vec7 param_vec7(const std::string &name, double default_bias)
+    {
+        auto v = this->get_parameter(name).as_double_array();
+        if (v.size() == 6)
+        {
+            v.push_back(default_bias);
+        }
+        else if (v.size() != 7)
+        {
+            RCLCPP_FATAL(this->get_logger(),
+                         "Parameter %s must have 6 or 7 elements, got %zu.",
+                         name.c_str(), v.size());
+            throw std::runtime_error("invalid " + name);
+        }
+        return mirena::Ekf::Vec7(v.data());
     }
 
     static double yaw_from_quat(const geometry_msgs::msg::Quaternion &q)
@@ -246,6 +378,52 @@ private:
                              "EKF rejected %s: innovation failed the NIS gate.", what);
     }
 }
+
+    /// Latest measured steering, if it is fresh enough to drive the bicycle
+    /// prediction. A missing or stale steering sample makes predict() fall
+    /// back to the Euler model, which is what keeps the sim (no /control/can)
+    /// and a dead steering sensor working.
+    bool steering_at(double t, double &delta) const
+    {
+        if (!_use_bicycle_model || !_steering_seen) return false;
+        if (t - _last_steering_stamp.seconds() > _steering_timeout_sec) return false;
+        delta = _steering_rad;
+        return true;
+    }
+
+    /// Advance the filter to t, choosing the motion model from steering
+    /// freshness. Used by all three sensor callbacks so the time-sync predict
+    /// uses the same model as the IMU-driven one.
+    void predict_at(double t, double ax, double ay, const char *what)
+    {
+        double delta = 0.0;
+        const bool have_steering = steering_at(t, delta);
+        log_step(_ekf->predict(t, ax, ay, have_steering, delta), what);
+    }
+
+    void steering_callback(const mirena_common::msg::CarControl::ConstSharedPtr &msg)
+    {
+        if (!std::isfinite(msg->steer_angle)) return;
+
+        std::lock_guard<std::mutex> lock(_filter_mutex);
+
+        // /control/can carries the steering sensor raw, in CAN "Grad"
+        // (degrees), not in the radians CarControl documents. The sign, zero
+        // and wheel:road ratio are per-car and are parameters. The CAN signal
+        // spans +-327 deg, so if it is a steering-wheel sensor rather than a
+        // rack sensor, steering_ratio is what turns it into a road-wheel angle.
+        double delta = msg->steer_angle;
+        if (_steering_degrees) delta *= M_PI / 180.0;
+        delta = _steering_sign * delta / _steering_ratio + _steering_offset_rad;
+        delta = std::clamp(delta, -_max_steering_rad, _max_steering_rad);
+
+        _steering_rad = delta;
+        _last_steering_stamp =
+            (msg->header.stamp.sec == 0 && msg->header.stamp.nanosec == 0)
+                ? this->now()
+                : rclcpp::Time(msg->header.stamp);
+        _steering_seen = true;
+    }
 
     void init_at_origin(const sensor_msgs::msg::Imu &msg)
     {
@@ -281,7 +459,7 @@ private:
         }
 
         const double t = rclcpp::Time(msg->header.stamp).seconds();
-        log_step(_ekf->predict(t, msg->linear_acceleration.x, msg->linear_acceleration.y), "IMU predict");
+        predict_at(t, msg->linear_acceleration.x, msg->linear_acceleration.y, "IMU predict");
         if (!_ekf->is_initialized()) return;
         log_step(_ekf->update_gyro(msg->angular_velocity.z, _gyro_meas_var), "gyro update");
         publish_state();
@@ -341,16 +519,19 @@ private:
 
 
         const double t = rclcpp::Time(msg->header.stamp).seconds();
-        if (t < _ekf->stamp())
+        if (_sensor_time_sync_predict)
         {
-            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
-                                 "[Encoder] Discarding out-of-order message: stamp %.6f s < EKF stamp %.6f s.",
-                                 t, _ekf->stamp());
-            return;
-        }
-        if (t > _ekf->stamp())
-        {
-            log_step(_ekf->predict(t, 0.0, 0.0), "encoder time sync predict");
+            if (t < _ekf->stamp())
+            {
+                RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                                     "[Encoder] Discarding out-of-order message: stamp %.6f s < EKF stamp %.6f s.",
+                                     t, _ekf->stamp());
+                return;
+            }
+            if (t > _ekf->stamp())
+            {
+                predict_at(t, 0.0, 0.0, "encoder time sync predict");
+            }
         }
 
         log_step(_ekf->update_velocity_u(u, dynamic_var), "encoder speed update");
@@ -498,10 +679,11 @@ private:
             // Advance to the measurement's stamp first. ins_odom_callback does
             // not otherwise move the filter's clock, so without this the
             // innovation is taken against a pose up to one IMU period stale.
-            // Same time-sync predict the encoder callback uses.
-            if (t > _ekf->stamp())
+            // Same time-sync predict the encoder callback uses, and disabled
+            // by the same parameter when the IMU is the only clock.
+            if (_sensor_time_sync_predict && t > _ekf->stamp())
             {
-                log_step(_ekf->predict(t, 0.0, 0.0), "INS time sync predict");
+                predict_at(t, 0.0, 0.0, "INS time sync predict");
             }
 
             if (_ekf->is_initialized())
@@ -647,14 +829,38 @@ private:
             if (have_odom) report_json["odom_age_s"] = odom_age;
             if (have_imu) report_json["imu_age_s"] = imu_age;
             if (have_encoder) report_json["encoder_age_s"] = encoder_age;
+            report_json["motion_model"] = _use_bicycle_model ? "kinematic_bicycle" : "euler";
+            if (_use_bicycle_model)
+            {
+                const double steering_age = now_s - _last_steering_stamp.seconds();
+                report_json["steering_seen"] = _steering_seen;
+                report_json["steering_stale"] =
+                    !_steering_seen || steering_age > _steering_timeout_sec;
+                if (_steering_seen)
+                {
+                    report_json["steering_rad"] = _steering_rad;
+                    report_json["steering_age_s"] = steering_age;
+                }
+            }
             report_json["ekf_resets"] = _ekf->divergences();
             if (_ekf->is_initialized())
             {
                 const auto &x = _ekf->state();
+                const auto &P = _ekf->covariance();
                 report_json["car_pos_x"] = x(0);
                 report_json["car_pos_y"] = x(1);
                 report_json["car_pos_yaw"] = x(2);
                 report_json["car_vel_u"] = x(3);
+                // Estado aumentado: bias estimado de la aceleración
+                // longitudinal de la IMU y su incertidumbre.
+                report_json["imu_ax_bias"] = x(6);
+                report_json["imu_ax_bias_var"] = P(6, 6);
+                report_json["prediction_active"] =
+                    (_use_bicycle_model && _steering_seen &&
+                     now_s - _last_steering_stamp.seconds() <= _steering_timeout_sec &&
+                     std::abs(x(3)) >= _bicycle_min_speed)
+                        ? "bicycle"
+                        : "euler";
             }
         }
 
