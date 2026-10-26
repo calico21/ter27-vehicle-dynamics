@@ -6,17 +6,25 @@ rosbag_gui.py — Interfaz grafica para rosbag_analyzer.py
     source ~/ws/install/setup.bash
     python3 rosbag_gui.py [/ruta/al/bag | /ruta/al/fichero.mcap]
 
-Requiere bag_analayzer.py y bag_replay.py en la misma carpeta, y tkinter
+Requiere bag_analayzer.py en la misma carpeta, y tkinter
 (sudo apt install python3-tk).
 
-  * Ventana principal: lista de topics, informe de texto y resumen general.
+  * Ventana principal: lista de topics (con filtro y ordenacion), informe de
+    texto y resumen general.
   * Cada grafica se abre en su propia ventana con barra de zoom/pan/guardar
     (y rotacion con el raton en las figuras 3D).
   * Seccion "Solo IMU" y "Solo GPS": dashboard, selector de canales y 3D.
   * "Solo IMU + GPS" al cargar: lee unicamente esos topics (carga rapida).
   * Ventana temporal (inicio/fin en segundos) aplicada a todas las graficas.
-  * Pestana "Reproduccion + Kalman": reproduce el bag, arranca el nodo y
-    dibuja en vivo el sensor solo frente al EKF, sin abrir otra ventana.
+  * Pestana "Regrabar con nodo": reproduce un bag, ejecuta el nodo elegido
+    y graba un bag nuevo con los topics que selecciones.
+  * Tema claro/oscuro (Ctrl+D), atajos de teclado y menu contextual.
+  * Regrabacion: crea la carpeta de salida si no existe, barra de progreso con
+    porcentaje y ETA, resumen del bag nuevo, ajustes recordados entre sesiones.
+
+Atajos:  Ctrl+O abrir carpeta · Ctrl+Shift+O abrir fichero · Ctrl+F filtrar
+         Ctrl+D tema · Enter graficar seleccion · Clic derecho: menu
+         F5 regrabar (reproducir + nodo + grabar) · F6 detener
 """
 
 from __future__ import annotations
@@ -24,12 +32,18 @@ from __future__ import annotations
 import contextlib
 import copy
 import io
+import json
 import math
 import os
 import queue
+import re
 import shlex
+import shutil
+import signal
+import subprocess
 import sys
 import threading
+import time
 import traceback
 from typing import Dict, List, Optional, Tuple
 
@@ -38,6 +52,7 @@ import numpy as np
 try:
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
+    from tkinter import font as tkfont
 except ImportError:
     raise SystemExit("\nFalta tkinter:  sudo apt install python3-tk\n")
 
@@ -48,10 +63,178 @@ import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.backends.backend_tkagg import (  # noqa: E402
     FigureCanvasTkAgg, NavigationToolbar2Tk)
 
-try:                         # el modulo de reproduccion es opcional
-    import bag_replay as R  # noqa: E402
-except Exception:            # noqa: BLE001
-    R = None
+# --------------------------------------------------------------------------- #
+#  Tema (claro / oscuro)
+# --------------------------------------------------------------------------- #
+
+PALETTES = {
+    "light": dict(bg="#f3f4f7", card="#ffffff", fg="#1f2430", muted="#6b7280",
+                  border="#d9dce3", accent="#2563eb", accent_fg="#ffffff",
+                  accent_hover="#1d4ed8", sel="#dbe7ff", stripe="#f7f8fa",
+                  danger="#dc2626", danger_hover="#b91c1c", field="#ffffff"),
+    "dark": dict(bg="#14171c", card="#1c2027", fg="#e6e8ec", muted="#8b93a1",
+                 border="#2e3440", accent="#3b82f6", accent_fg="#ffffff",
+                 accent_hover="#2563eb", sel="#23406b", stripe="#20242c",
+                 danger="#ef4444", danger_hover="#dc2626", field="#232832"),
+}
+PAL: Dict[str, str] = dict(PALETTES["light"])
+
+
+def _pick_font(root, prefs, default):
+    have = set(tkfont.families(root))
+    return next((f for f in prefs if f in have), default)
+
+
+def apply_theme(root, mode: str) -> Dict[str, str]:
+    """Aplica un tema plano y moderno a ttk y a los widgets clasicos de Tk."""
+    p = PALETTES[mode]
+    PAL.clear()
+    PAL.update(p)
+    ui = _pick_font(root, ("Inter", "Segoe UI", "SF Pro Text", "Noto Sans",
+                           "Ubuntu", "Cantarell", "DejaVu Sans"), "TkDefaultFont")
+    mono = _pick_font(root, ("JetBrains Mono", "Cascadia Mono", "Fira Code",
+                             "Ubuntu Mono", "DejaVu Sans Mono", "Consolas"),
+                      "TkFixedFont")
+    PAL["ui"], PAL["mono"] = ui, mono
+    for name, fam, size in (("TkDefaultFont", ui, 10), ("TkTextFont", ui, 10),
+                            ("TkMenuFont", ui, 10), ("TkHeadingFont", ui, 10),
+                            ("TkFixedFont", mono, 10)):
+        try:
+            tkfont.nametofont(name).configure(family=fam, size=size)
+        except tk.TclError:
+            pass
+
+    root.configure(bg=p["bg"])
+    # widgets clasicos (Toplevel, Listbox, Menu, Text) heredan estos valores
+    root.option_add("*Toplevel.background", p["bg"])
+    root.option_add("*Listbox.background", p["card"])
+    root.option_add("*Listbox.foreground", p["fg"])
+    root.option_add("*Listbox.selectBackground", p["sel"])
+    root.option_add("*Listbox.selectForeground", p["fg"])
+    root.option_add("*Menu.background", p["card"])
+    root.option_add("*Menu.foreground", p["fg"])
+    root.option_add("*Menu.activeBackground", p["accent"])
+    root.option_add("*Menu.activeForeground", p["accent_fg"])
+    root.option_add("*Menu.borderWidth", 0)
+    root.option_add("*Menu.relief", "flat")
+
+    st = ttk.Style(root)
+    st.theme_use("clam")
+    st.configure(".", background=p["bg"], foreground=p["fg"],
+                 fieldbackground=p["field"], bordercolor=p["border"],
+                 lightcolor=p["bg"], darkcolor=p["bg"], troughcolor=p["border"],
+                 focuscolor=p["bg"], insertcolor=p["fg"], font=(ui, 10))
+
+    st.configure("TLabel", background=p["bg"], foreground=p["fg"])
+    st.configure("Muted.TLabel", foreground=p["muted"])
+    st.configure("Title.TLabel", font=(ui, 11, "bold"))
+    st.configure("Status.TLabel", background=p["card"], foreground=p["muted"],
+                 padding=(12, 5))
+
+    st.configure("TLabelframe", background=p["bg"], bordercolor=p["border"],
+                 relief="solid", borderwidth=1)
+    st.configure("TLabelframe.Label", background=p["bg"],
+                 foreground=p["muted"], font=(ui, 9, "bold"))
+
+    for sty, bg, hov, fg in (("TButton", p["card"], p["sel"], p["fg"]),
+                             ("Accent.TButton", p["accent"], p["accent_hover"],
+                              p["accent_fg"]),
+                             ("Danger.TButton", p["danger"], p["danger_hover"],
+                              p["accent_fg"])):
+        border = p["border"] if sty == "TButton" else bg
+        st.configure(sty, padding=(12, 6), relief="flat", borderwidth=1,
+                     background=bg, foreground=fg, bordercolor=border,
+                     lightcolor=bg, darkcolor=bg, focusthickness=0,
+                     focuscolor=bg)
+        st.map(sty,
+               background=[("disabled", p["bg"]), ("pressed", hov),
+                           ("active", hov)],
+               foreground=[("disabled", p["muted"])],
+               bordercolor=[("disabled", p["border"])],
+               lightcolor=[("disabled", p["bg"]), ("active", hov)],
+               darkcolor=[("disabled", p["bg"]), ("active", hov)])
+
+    st.configure("TEntry", padding=(6, 5), fieldbackground=p["field"],
+                 foreground=p["fg"], bordercolor=p["border"],
+                 lightcolor=p["border"], darkcolor=p["border"])
+    st.map("TEntry", bordercolor=[("focus", p["accent"])],
+           lightcolor=[("focus", p["accent"])],
+           darkcolor=[("focus", p["accent"])])
+
+    st.configure("TCheckbutton", background=p["bg"], foreground=p["fg"],
+                 indicatorbackground=p["field"], indicatorforeground=p["accent_fg"])
+    st.map("TCheckbutton", background=[("active", p["bg"])],
+           indicatorbackground=[("selected", p["accent"]),
+                                ("pressed", p["accent"])])
+
+    st.configure("Treeview", background=p["card"], fieldbackground=p["card"],
+                 foreground=p["fg"], rowheight=27, borderwidth=0,
+                 lightcolor=p["card"], darkcolor=p["card"])
+    st.map("Treeview", background=[("selected", p["sel"])],
+           foreground=[("selected", p["fg"])])
+    st.configure("Treeview.Heading", background=p["bg"], foreground=p["muted"],
+                 relief="flat", padding=(8, 6), font=(ui, 9, "bold"))
+    st.map("Treeview.Heading", background=[("active", p["card"])])
+
+    st.configure("TNotebook", background=p["bg"], borderwidth=0,
+                 tabmargins=(0, 2, 0, 0))
+    st.configure("TNotebook.Tab", padding=(16, 8), background=p["bg"],
+                 foreground=p["muted"], borderwidth=0)
+    st.map("TNotebook.Tab",
+           background=[("selected", p["card"]), ("active", p["stripe"])],
+           foreground=[("selected", p["accent"]), ("active", p["fg"])])
+
+    st.configure("TScrollbar", background=p["border"], troughcolor=p["bg"],
+                 bordercolor=p["bg"], lightcolor=p["border"],
+                 darkcolor=p["border"], arrowcolor=p["muted"], relief="flat",
+                 gripcount=0)
+    st.map("TScrollbar", background=[("active", p["muted"])])
+
+    st.configure("Horizontal.TProgressbar", background=p["accent"],
+                 troughcolor=p["border"], bordercolor=p["bg"],
+                 lightcolor=p["accent"], darkcolor=p["accent"], thickness=5)
+    st.configure("Big.Horizontal.TProgressbar", background=p["accent"],
+                 troughcolor=p["border"], bordercolor=p["bg"],
+                 lightcolor=p["accent"], darkcolor=p["accent"], thickness=16)
+    st.configure("TPanedwindow", background=p["bg"])
+    st.configure("TSeparator", background=p["border"])
+    return PAL
+
+
+def style_text(txt: tk.Text) -> None:
+    txt.configure(bg=PAL["card"], fg=PAL["fg"], insertbackground=PAL["fg"],
+                  selectbackground=PAL["sel"], selectforeground=PAL["fg"],
+                  relief="flat", borderwidth=0, highlightthickness=0,
+                  padx=14, pady=10, spacing1=1, spacing3=1)
+
+
+SETTINGS_PATH = os.path.join(os.path.expanduser("~"), ".config", "rosbag_gui",
+                             "settings.json")
+
+
+def load_settings() -> Dict:
+    try:
+        with open(SETTINGS_PATH, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_settings(d: Dict) -> None:
+    try:
+        os.makedirs(os.path.dirname(SETTINGS_PATH), exist_ok=True)
+        with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+            json.dump(d, f, indent=2, ensure_ascii=False)
+    except OSError:
+        pass
+
+
+def center_on(win, master) -> None:
+    win.update_idletasks()
+    x = master.winfo_rootx() + (master.winfo_width() - win.winfo_reqwidth()) // 2
+    y = master.winfo_rooty() + (master.winfo_height() - win.winfo_reqheight()) // 3
+    win.geometry(f"+{max(x, 0)}+{max(y, 0)}")
 
 
 # --------------------------------------------------------------------------- #
@@ -301,6 +484,8 @@ def has_data(c) -> bool:
 class PlotWindow(tk.Toplevel):
     """Una figura de matplotlib en su propia ventana, con barra de herramientas."""
 
+    _count = 0
+
     def __init__(self, master, fig, title: str):
         super().__init__(master)
         self.title(title)
@@ -309,7 +494,9 @@ class PlotWindow(tk.Toplevel):
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         w = min(1300, sw - 80)
         h = min(int(w * hi / wi) + 50, sh - 120)
-        self.geometry(f"{w}x{max(h, 380)}")
+        off = 28 * (PlotWindow._count % 8)       # cascada: no se tapan entre si
+        PlotWindow._count += 1
+        self.geometry(f"{w}x{max(h, 380)}+{50 + off}+{30 + off}")
         canvas = FigureCanvasTkAgg(fig, master=self)
         bar = NavigationToolbar2Tk(canvas, self, pack_toolbar=False)
         bar.update()
@@ -318,6 +505,9 @@ class PlotWindow(tk.Toplevel):
         canvas.draw_idle()
         self.canvas = canvas
         self.protocol("WM_DELETE_WINDOW", self._close)
+        self.bind("<Escape>", lambda _e: self._close())
+        self.bind("<Control-w>", lambda _e: self._close())
+        self.focus_set()
 
     def _close(self) -> None:
         plt.close(self.fig)
@@ -330,19 +520,33 @@ class ListDialog(tk.Toplevel):
         self.title(title)
         self.result: List[str] = []
         self.transient(master)
-        self.lb = tk.Listbox(self, selectmode=tk.EXTENDED if multi else tk.SINGLE,
+        body = ttk.Frame(self, padding=14)
+        body.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(body, text=title, style="Title.TLabel").pack(anchor="w", pady=(0, 8))
+        self.lb = tk.Listbox(body, selectmode=tk.EXTENDED if multi else tk.SINGLE,
                              width=64, height=min(12, max(3, len(items))),
-                             exportselection=False)
+                             exportselection=False, activestyle="none",
+                             relief="flat", borderwidth=0, highlightthickness=1,
+                             highlightbackground=PAL["border"],
+                             highlightcolor=PAL["accent"],
+                             bg=PAL["card"], fg=PAL["fg"],
+                             selectbackground=PAL["sel"], selectforeground=PAL["fg"])
         for it in items:
             self.lb.insert(tk.END, it)
         self.lb.selection_set(0)
-        self.lb.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+        self.lb.pack(fill=tk.BOTH, expand=True)
         self.lb.bind("<Double-Button-1>", lambda _e: self._ok())
-        row = ttk.Frame(self)
-        row.pack(pady=(0, 10))
-        ttk.Button(row, text="Aceptar", command=self._ok).pack(side=tk.LEFT, padx=4)
-        ttk.Button(row, text="Cancelar", command=self.destroy).pack(side=tk.LEFT, padx=4)
+        self.lb.focus_set()
+        row = ttk.Frame(body)
+        row.pack(fill=tk.X, pady=(12, 0))
+        ttk.Button(row, text="Aceptar", style="Accent.TButton",
+                   command=self._ok).pack(side=tk.RIGHT)
+        ttk.Button(row, text="Cancelar", command=self.destroy).pack(
+            side=tk.RIGHT, padx=(0, 6))
         self.items = items
+        self.bind("<Return>", lambda _e: self._ok())
+        self.bind("<Escape>", lambda _e: self.destroy())
+        center_on(self, master)
         self._modal()
 
     def _ok(self) -> None:
@@ -365,17 +569,29 @@ class CheckDialog(tk.Toplevel):
         self.transient(master)
         self.result: Optional[List[str]] = None
         self.vars: Dict[str, tk.BooleanVar] = {}
+        body = ttk.Frame(self, padding=14)
+        body.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(body, text=title, style="Title.TLabel").pack(anchor="w", pady=(0, 8))
         for gname, items in groups:
-            lf = ttk.LabelFrame(self, text=gname, padding=6)
-            lf.pack(fill=tk.X, padx=10, pady=4)
+            lf = ttk.LabelFrame(body, text=gname, padding=8)
+            lf.pack(fill=tk.X, pady=4)
             for key, label, default in items:
                 v = tk.BooleanVar(value=default)
                 self.vars[key] = v
                 ttk.Checkbutton(lf, text=label, variable=v).pack(side=tk.LEFT, padx=6)
-        row = ttk.Frame(self)
-        row.pack(pady=8)
-        ttk.Button(row, text="Graficar", command=self._ok).pack(side=tk.LEFT, padx=4)
-        ttk.Button(row, text="Cancelar", command=self.destroy).pack(side=tk.LEFT, padx=4)
+        row = ttk.Frame(body)
+        row.pack(fill=tk.X, pady=(12, 0))
+        ttk.Button(row, text="Todos", command=lambda: self._set_all(True)).pack(
+            side=tk.LEFT)
+        ttk.Button(row, text="Ninguno", command=lambda: self._set_all(False)).pack(
+            side=tk.LEFT, padx=6)
+        ttk.Button(row, text="Graficar", style="Accent.TButton",
+                   command=self._ok).pack(side=tk.RIGHT)
+        ttk.Button(row, text="Cancelar", command=self.destroy).pack(
+            side=tk.RIGHT, padx=(0, 6))
+        self.bind("<Return>", lambda _e: self._ok())
+        self.bind("<Escape>", lambda _e: self.destroy())
+        center_on(self, master)
         try:
             self.wait_visibility()
             self.grab_set()
@@ -383,165 +599,429 @@ class CheckDialog(tk.Toplevel):
             pass
         self.wait_window(self)
 
+    def _set_all(self, value: bool) -> None:
+        for v in self.vars.values():
+            v.set(value)
+
     def _ok(self) -> None:
         self.result = [k for k, v in self.vars.items() if v.get()]
         self.destroy()
 
 
-class ReplayPanel(ttk.Frame):
-    """Reproduce el bag y compara en vivo sensor solo vs EKF, dentro de la GUI.
+class RecordPanel(ttk.Frame):
+    """Reproduce un bag, ejecuta un nodo y graba un bag nuevo con el resultado.
 
-    El canvas de matplotlib se incrusta en esta pestana y se refresca con
-    `after`; no se lanza ninguna ventana ni proceso grafico aparte. Los
-    procesos del nodo y de `ros2 bag play` se controlan desde aqui.
+    Orden: arranca `ros2 bag record` -> arranca el nodo -> espera -> lanza
+    `ros2 bag play` -> al terminar la reproduccion espera un poco, y cierra
+    play, nodo y record (en este orden, con SIGINT) para que el bag nuevo
+    quede bien cerrado. Todo corre en procesos aparte; la GUI no se bloquea.
     """
 
     def __init__(self, master):
-        super().__init__(master, padding=8)
+        super().__init__(master, padding=12)
         self.running = False
-        self.dash = None
-        self.canvas = None
-        self.placeholder = None
-        self.store = None
-        self.live = None
-        self.stop_evt = None
-        self.spin = None
-        self.node_proc = None
-        self.play_proc = None
-        self._poll_after = None
-        self._start_after = None
-        self._owns_ctx = False
+        self.procs: Dict[str, Optional[subprocess.Popen]] = {}
+        self.logq: "queue.Queue" = queue.Queue()
+        self.pull_selection = None       # callable -> topics elegidos en el arbol
+        self.open_cb = None              # callable(path) -> abrir bag nuevo
+        self._after: Optional[str] = None
+        self._stage = ""
+        self._t_stage = 0.0
+        self._t_play = 0.0
+        self._wait = 2.0
+        self._play_cmd_v: Optional[List[str]] = None
+        self._node_cmd_v: Optional[List[str]] = None
+        self._out = ""
+        self._last_out = ""
+        self._final_msg: Optional[str] = None
+        self._manual = False
+        self._stop_done = False
+        self._warned_node = False
+        self._out_touched = False
+        self._topics: List[str] = []
+        self._all_nodes: List[str] = []
+        self._hint = None                # (ruta, duracion s) calculada por la app
+        self._span: Optional[float] = None
+        self._rate = 1.0
+        self._t_size = 0.0
+        self._size = 0
+        self.progress_cb = None          # callable(pct | None)
 
         self.bag = tk.StringVar()
-        self.raw = tk.StringVar(value=R.DEFAULT_RAW if R else "/sensors/imu/odom")
-        self.filt = tk.StringVar(value=R.DEFAULT_FILTERED if R else "/state/car")
-        self.node_cmd = tk.StringVar(
-            value=R.DEFAULT_NODE if R else "ros2 run mirena_state mirena_state")
         self.rate = tk.StringVar(value="1.0")
-        self.delay = tk.StringVar(value="2.0")
         self.start_s = tk.StringVar()
         self.duration = tk.StringVar()
-        self.loop = tk.BooleanVar(value=False)
+        self.play_only = tk.StringVar()
+        self.clock = tk.BooleanVar(value=False)
+        self.fast = tk.BooleanVar(value=True)
+        self.queue_sz = tk.StringVar(value="10000")
+        self.cache_mb = tk.StringVar(value="256")
+        self.node_simtime = tk.BooleanVar(value=False)
+        self.speed_hint = tk.StringVar(value="")
+        self.node = tk.StringVar(value="mirena_state mirena_state")
+        self.args = tk.StringVar()
         self.no_node = tk.BooleanVar(value=False)
-        self.no_play = tk.BooleanVar(value=False)
-        self.no_align = tk.BooleanVar(value=False)
-        self.status = tk.StringVar(value="Elige un bag y pulsa Iniciar.")
+        self.node_wait = tk.StringVar(value="2.0")
+        self.tail = tk.StringVar(value="2.0")
+        self.out_dir = tk.StringVar(value=os.path.expanduser("~"))
+        self.out_name = tk.StringVar()
+        self.storage = tk.StringVar(value="mcap")
+        self.all_topics = tk.BooleanVar(value=False)
+        self.extra = tk.StringVar()
+        self.auto_open = tk.BooleanVar(value=False)
+        self.pct = tk.StringVar(value="")
+        self.status = tk.StringVar(
+            value="Elige un bag de entrada, un nodo y pulsa «Reproducir y grabar».")
 
         self._build()
+        for v in (self.rate, self.bag, self.clock):
+            v.trace_add("write", self._update_hint)
+        self._update_hint()
+        self.after(600, self._find_nodes)
+        self._after = self.after(150, self._tick)
 
     # ---- construccion ----------------------------------------------------- #
 
     def _build(self) -> None:
-        cfg = ttk.LabelFrame(self, text="Bag y nodo", padding=8)
-        cfg.pack(fill=tk.X)
+        top = ttk.Frame(self)
+        top.pack(fill=tk.X)
+        left = ttk.Frame(top)
+        left.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        ttk.Label(cfg, text="Bag").grid(row=0, column=0, sticky="w", pady=2)
-        ttk.Entry(cfg, textvariable=self.bag, width=14).grid(
-            row=0, column=1, columnspan=5, sticky="we", padx=6, pady=2)
-        btns = ttk.Frame(cfg)
-        btns.grid(row=0, column=6, columnspan=2, sticky="e", pady=2)
-        ttk.Button(btns, text="Carpeta…", width=8,
-                   command=self._ask_folder).pack(side=tk.LEFT)
-        ttk.Button(btns, text="Fichero…", width=8,
-                   command=self._ask_file).pack(side=tk.LEFT, padx=(4, 0))
+        # 1 · bag de entrada
+        f1 = ttk.LabelFrame(left, text="1 · Bag de entrada (se reproduce)", padding=10)
+        f1.pack(fill=tk.X)
+        ttk.Label(f1, text="Bag").grid(row=0, column=0, sticky="w", pady=3)
+        ttk.Entry(f1, textvariable=self.bag).grid(
+            row=0, column=1, columnspan=5, sticky="we", padx=6)
+        b = ttk.Frame(f1)
+        b.grid(row=0, column=6, sticky="e")
+        ttk.Button(b, text="Carpeta…", width=8, command=self._ask_folder).pack(side=tk.LEFT)
+        ttk.Button(b, text="Fichero…", width=8, command=self._ask_file).pack(
+            side=tk.LEFT, padx=(4, 0))
+        ttk.Label(f1, text="Velocidad").grid(row=1, column=0, sticky="w", pady=3)
+        ttk.Entry(f1, textvariable=self.rate, width=7).grid(row=1, column=1, sticky="w", padx=6)
+        ttk.Label(f1, text="Inicio [s]").grid(row=1, column=2, sticky="w", padx=(8, 0))
+        ttk.Entry(f1, textvariable=self.start_s, width=7).grid(row=1, column=3, sticky="w", padx=6)
+        ttk.Label(f1, text="Duración [s]").grid(row=1, column=4, sticky="w", padx=(8, 0))
+        ttk.Entry(f1, textvariable=self.duration, width=7).grid(row=1, column=5, sticky="w", padx=6)
+        ttk.Label(f1, text="Rápido").grid(row=2, column=0, sticky="w", pady=3)
+        pre = ttk.Frame(f1)
+        pre.grid(row=2, column=1, columnspan=6, sticky="w", padx=6)
+        for txt, val in (("×1", "1"), ("×2", "2"), ("×5", "5"), ("×10", "10"),
+                         ("×20", "20"), ("×50", "50"), ("×100", "100"), ("MÁX", "1000")):
+            ttk.Button(pre, text=txt, width=5,
+                       command=lambda v=val: self.rate.set(v)).pack(side=tk.LEFT, padx=(0, 3))
+        ttk.Label(f1, text="Solo topics").grid(row=3, column=0, sticky="w", pady=3)
+        ttk.Entry(f1, textvariable=self.play_only).grid(
+            row=3, column=1, columnspan=5, sticky="we", padx=6)
+        ttk.Checkbutton(f1, text="Reloj simulado (/clock)", variable=self.clock,
+                        command=self._on_clock).grid(row=3, column=6, sticky="e")
+        fast = ttk.Frame(f1)
+        fast.grid(row=4, column=0, columnspan=7, sticky="w", pady=(4, 0))
+        ttk.Checkbutton(fast, text="Optimizar para velocidad", variable=self.fast).pack(
+            side=tk.LEFT)
+        ttk.Label(fast, text="Cola lectura", style="Muted.TLabel").pack(
+            side=tk.LEFT, padx=(16, 4))
+        ttk.Entry(fast, textvariable=self.queue_sz, width=7).pack(side=tk.LEFT)
+        ttk.Label(fast, text="Caché [MB]", style="Muted.TLabel").pack(
+            side=tk.LEFT, padx=(16, 4))
+        ttk.Entry(fast, textvariable=self.cache_mb, width=6).pack(side=tk.LEFT)
+        ttk.Label(f1, textvariable=self.speed_hint, style="Muted.TLabel",
+                  wraplength=600, justify="left").grid(
+            row=5, column=0, columnspan=7, sticky="w", pady=(4, 0))
+        f1.columnconfigure(1, weight=1)
 
-        ttk.Label(cfg, text="Sensor solo").grid(row=1, column=0, sticky="w", pady=2)
-        ttk.Entry(cfg, textvariable=self.raw, width=18).grid(
-            row=1, column=1, sticky="we", padx=6)
-        ttk.Label(cfg, text="Estado EKF").grid(row=1, column=2, sticky="w", padx=(8, 0))
-        ttk.Entry(cfg, textvariable=self.filt, width=14).grid(
-            row=1, column=3, sticky="we", padx=6)
-
-        ttk.Label(cfg, text="Nodo").grid(row=2, column=0, sticky="w", pady=2)
-        self.node_entry = ttk.Entry(cfg, textvariable=self.node_cmd)
-        self.node_entry.grid(row=2, column=1, columnspan=5, sticky="we", padx=6)
-
-        ttk.Label(cfg, text="Velocidad").grid(row=3, column=0, sticky="w", pady=2)
-        ttk.Entry(cfg, textvariable=self.rate, width=7).grid(
-            row=3, column=1, sticky="w", padx=6)
-        ttk.Label(cfg, text="Espera [s]").grid(row=3, column=2, sticky="w", padx=(8, 0))
-        ttk.Entry(cfg, textvariable=self.delay, width=7).grid(
-            row=3, column=3, sticky="w", padx=6)
-        ttk.Label(cfg, text="Inicio [s]").grid(row=3, column=4, sticky="w", padx=(8, 0))
-        ttk.Entry(cfg, textvariable=self.start_s, width=7).grid(
-            row=3, column=5, sticky="w", padx=6)
-        ttk.Label(cfg, text="Duración [s]").grid(row=3, column=6, sticky="w", padx=(8, 0))
-        ttk.Entry(cfg, textvariable=self.duration, width=7).grid(
-            row=3, column=7, sticky="w", padx=6)
-
-        opts = ttk.Frame(cfg)
-        opts.grid(row=4, column=0, columnspan=8, sticky="w", pady=(6, 0))
-        ttk.Checkbutton(opts, text="No arrancar nodo", variable=self.no_node,
+        # 2 · nodo
+        f2 = ttk.LabelFrame(left, text="2 · Nodo a ejecutar", padding=10)
+        f2.pack(fill=tk.X, pady=(8, 0))
+        ttk.Label(f2, text="Nodo").grid(row=0, column=0, sticky="w", pady=3)
+        self.node_cb = ttk.Combobox(f2, textvariable=self.node, values=[])
+        self.node_cb.grid(row=0, column=1, columnspan=3, sticky="we", padx=6)
+        self.node_cb.bind("<KeyRelease>", self._filter_nodes)
+        ttk.Button(f2, text="Buscar nodos", command=self._find_nodes).grid(
+            row=0, column=4, sticky="e")
+        ttk.Label(f2, text="Argumentos").grid(row=1, column=0, sticky="w", pady=3)
+        ttk.Entry(f2, textvariable=self.args).grid(
+            row=1, column=1, columnspan=4, sticky="we", padx=6)
+        opts = ttk.Frame(f2)
+        opts.grid(row=2, column=0, columnspan=5, sticky="w", pady=(4, 0))
+        ttk.Checkbutton(opts, text="Sin nodo (solo regrabar)", variable=self.no_node,
                         command=self._toggle_node).pack(side=tk.LEFT)
-        ttk.Checkbutton(opts, text="No reproducir",
-                        variable=self.no_play).pack(side=tk.LEFT, padx=10)
-        ttk.Checkbutton(opts, text="Bucle", variable=self.loop).pack(
-            side=tk.LEFT, padx=10)
-        ttk.Checkbutton(opts, text="No alinear", variable=self.no_align).pack(
-            side=tk.LEFT, padx=10)
+        ttk.Checkbutton(opts, text="use_sim_time", variable=self.node_simtime).pack(
+            side=tk.LEFT, padx=(12, 0))
+        ttk.Label(opts, text="Espera al nodo [s]", style="Muted.TLabel").pack(
+            side=tk.LEFT, padx=(16, 4))
+        ttk.Entry(opts, textvariable=self.node_wait, width=6).pack(side=tk.LEFT)
+        ttk.Label(opts, text="Cola final [s]", style="Muted.TLabel").pack(
+            side=tk.LEFT, padx=(16, 4))
+        ttk.Entry(opts, textvariable=self.tail, width=6).pack(side=tk.LEFT)
+        f2.columnconfigure(1, weight=1)
 
-        cfg.columnconfigure(1, weight=3)
-        cfg.columnconfigure(3, weight=2)
-        cfg.columnconfigure(5, weight=1)
-        cfg.columnconfigure(7, weight=1)
+        # 3 · grabacion
+        f3 = ttk.LabelFrame(left, text="3 · Bag nuevo (se graba)", padding=10)
+        f3.pack(fill=tk.X, pady=(8, 0))
+        ttk.Label(f3, text="Carpeta").grid(row=0, column=0, sticky="w", pady=3)
+        ttk.Entry(f3, textvariable=self.out_dir).grid(
+            row=0, column=1, columnspan=3, sticky="we", padx=6)
+        ttk.Button(f3, text="…", width=3, command=self._ask_out).grid(row=0, column=4)
+        ttk.Label(f3, text="Nombre").grid(row=1, column=0, sticky="w", pady=3)
+        ttk.Entry(f3, textvariable=self.out_name).grid(row=1, column=1, sticky="we", padx=6)
+        ttk.Label(f3, text="Formato").grid(row=1, column=2, sticky="w", padx=(8, 0))
+        ttk.Combobox(f3, textvariable=self.storage, values=["mcap", "sqlite3"],
+                     width=8, state="readonly").grid(row=1, column=3, sticky="w", padx=6)
+        ttk.Label(f3, text="Topics extra").grid(row=2, column=0, sticky="w", pady=3)
+        ttk.Entry(f3, textvariable=self.extra).grid(
+            row=2, column=1, columnspan=3, sticky="we", padx=6)
+        ttk.Checkbutton(f3, text="Grabar todos (-a)", variable=self.all_topics,
+                        command=self._toggle_all).grid(row=3, column=1, sticky="w", pady=(4, 0))
+        ttk.Label(f3, text="Nombre vacío = automático · «extra» = salidas del nodo "
+                           "(ej. /state/car)", style="Muted.TLabel").grid(
+            row=4, column=0, columnspan=5, sticky="w", pady=(4, 0))
+        f3.columnconfigure(1, weight=1)
+
+        # topics del bag
+        right = ttk.LabelFrame(top, text="Topics del bag a grabar", padding=8)
+        right.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+        lbox = ttk.Frame(right)
+        lbox.pack(fill=tk.BOTH, expand=True)
+        self.lb = tk.Listbox(lbox, selectmode=tk.EXTENDED, width=30, height=10,
+                             exportselection=False, activestyle="none",
+                             relief="flat", borderwidth=0, highlightthickness=1)
+        sy = ttk.Scrollbar(lbox, orient="vertical", command=self.lb.yview)
+        self.lb.configure(yscrollcommand=sy.set)
+        sy.pack(side=tk.RIGHT, fill=tk.Y)
+        self.lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        lb = ttk.Frame(right)
+        lb.pack(fill=tk.X, pady=(6, 0))
+        ttk.Button(lb, text="Todos", width=6,
+                   command=lambda: self.lb.selection_set(0, tk.END)).pack(side=tk.LEFT)
+        ttk.Button(lb, text="Ninguno", width=7,
+                   command=lambda: self.lb.selection_clear(0, tk.END)).pack(
+            side=tk.LEFT, padx=4)
+        ttk.Button(lb, text="Del árbol", command=self._from_tree).pack(side=tk.LEFT)
 
         row = ttk.Frame(self)
-        row.pack(fill=tk.X, pady=6)
-        self.btn_start = ttk.Button(row, text="Iniciar", command=self.start)
+        row.pack(fill=tk.X, pady=10)
+        self.btn_start = ttk.Button(row, text="▶  Reproducir y grabar",
+                                    style="Accent.TButton", command=self.start)
         self.btn_start.pack(side=tk.LEFT)
-        self.btn_stop = ttk.Button(row, text="Detener", command=self.stop,
-                                   state=tk.DISABLED)
+        self.btn_stop = ttk.Button(row, text="■  Detener", style="Danger.TButton",
+                                   command=self.stop, state=tk.DISABLED)
         self.btn_stop.pack(side=tk.LEFT, padx=6)
-        self.btn_save = ttk.Button(row, text="Guardar PNG…", command=self.save_png,
+        self.btn_open = ttk.Button(row, text="Abrir resultado", command=self._open_result,
                                    state=tk.DISABLED)
-        self.btn_save.pack(side=tk.LEFT)
-        ttk.Label(row, textvariable=self.status,
-                  foreground=A.INK_SOFT).pack(side=tk.LEFT, padx=12)
+        self.btn_open.pack(side=tk.LEFT)
+        ttk.Checkbutton(row, text="Abrir al terminar", variable=self.auto_open).pack(
+            side=tk.LEFT, padx=(14, 0))
+        ttk.Label(row, textvariable=self.status, style="Muted.TLabel").pack(
+            side=tk.LEFT, padx=14)
 
-        self.host = ttk.Frame(self, relief="sunken", borderwidth=1)
-        self.host.pack(fill=tk.BOTH, expand=True)
-        self._placeholder()
+        prow = ttk.Frame(self)
+        prow.pack(fill=tk.X, pady=(0, 8))
+        self.prog = ttk.Progressbar(prow, style="Big.Horizontal.TProgressbar",
+                                    mode="determinate", maximum=100)
+        self.prog.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Label(prow, textvariable=self.pct, width=36, anchor="e").pack(
+            side=tk.LEFT, padx=(10, 0))
 
-    def _placeholder(self) -> None:
-        if self.placeholder is None:
-            self.placeholder = ttk.Label(
-                self.host, anchor="center",
-                text="La gráfica en vivo aparecerá aquí.\n"
-                     "Configura el bag y pulsa Iniciar.")
-            self.placeholder.place(relx=0.5, rely=0.5, anchor="center")
+        logbox = ttk.LabelFrame(self, text="Registro", padding=4)
+        logbox.pack(fill=tk.BOTH, expand=True)
+        tools = ttk.Frame(logbox)
+        tools.pack(fill=tk.X, pady=(0, 4))
+        ttk.Button(tools, text="Copiar comandos", command=self.copy_cmds).pack(side=tk.LEFT)
+        ttk.Button(tools, text="Guardar registro…", command=self.save_log).pack(
+            side=tk.LEFT, padx=4)
+        ttk.Button(tools, text="Limpiar", command=self._clear_log).pack(side=tk.LEFT)
+        self.log = make_text(logbox)
+        self.restyle()
+
+    def restyle(self) -> None:
+        style_text(self.log)
+        self.log.tag_configure("err", foreground=PAL["danger"])
+        self.log.tag_configure("warn", foreground="#d97706")
+        self.log.tag_configure("gui", foreground=PAL["muted"])
+        self.log.tag_configure("cmd", foreground=PAL["accent"])
+        self.lb.configure(bg=PAL["card"], fg=PAL["fg"], selectbackground=PAL["sel"],
+                          selectforeground=PAL["fg"], highlightbackground=PAL["border"],
+                          highlightcolor=PAL["accent"])
+
+    # ---- entradas --------------------------------------------------------- #
 
     def _toggle_node(self) -> None:
-        self.node_entry.configure(
-            state=tk.DISABLED if self.no_node.get() else tk.NORMAL)
+        st = tk.DISABLED if self.no_node.get() else tk.NORMAL
+        self.node_cb.configure(state=st)
+
+    def _toggle_all(self) -> None:
+        self.lb.configure(state=tk.DISABLED if self.all_topics.get() else tk.NORMAL)
 
     def _ask_folder(self) -> None:
         p = filedialog.askdirectory(title="Carpeta del bag (con metadata.yaml)")
         if p:
-            self.bag.set(p)
+            self.set_bag(p)
 
     def _ask_file(self) -> None:
         p = filedialog.askopenfilename(
-            title="Fichero de bag",
-            filetypes=[("rosbag2", "*.mcap *.db3"), ("todos", "*.*")])
+            title="Fichero de bag", filetypes=[("rosbag2", "*.mcap *.db3"), ("todos", "*.*")])
         if p:
-            self.bag.set(p)
+            self.set_bag(p)
 
-    # ---- configuracion externa ------------------------------------------- #
+    def _ask_out(self) -> None:
+        p = filedialog.askdirectory(title="Carpeta donde crear el bag nuevo",
+                                    initialdir=self.out_dir.get() or None)
+        if p:
+            self._out_touched = True
+            self.out_dir.set(p)
+
+    def _from_tree(self) -> None:
+        if self.pull_selection is None or self.all_topics.get():
+            return
+        sel = set(self.pull_selection())
+        self.lb.selection_clear(0, tk.END)
+        for i, n in enumerate(self._topics):
+            if n in sel:
+                self.lb.selection_set(i)
 
     def set_bag(self, path: str) -> None:
-        if not path:
+        if not path or self.running:
             return
-        if not self.running:
-            self.bag.set(path)
+        self.bag.set(path)
+        if not self._out_touched:
+            parent = os.path.dirname(path.rstrip("/\\")) or os.path.expanduser("~")
+            self.out_dir.set(parent)
 
-    def configure_bag(self, path: str, raw: str, filt: str) -> None:
-        self.set_bag(path)
-        if raw:
-            self.raw.set(raw)
-        if filt:
-            self.filt.set(filt)
+    _STR = ("rate", "play_only", "node", "args", "node_wait", "tail", "storage", "extra",
+            "queue_sz", "cache_mb")
+    _BOOL = ("clock", "no_node", "all_topics", "auto_open", "fast", "node_simtime")
 
-    # ---- ciclo de vida ---------------------------------------------------- #
+    def get_settings(self) -> Dict:
+        d = {k: getattr(self, k).get() for k in self._STR + self._BOOL}
+        if self._out_touched:
+            d["out_dir"] = self.out_dir.get()
+        return d
+
+    def apply_settings(self, d: Dict) -> None:
+        for k in self._STR + self._BOOL:
+            if k in d:
+                try:
+                    getattr(self, k).set(d[k])
+                except (tk.TclError, ValueError):
+                    pass
+        if d.get("out_dir"):
+            self.out_dir.set(d["out_dir"])
+            self._out_touched = True
+        self._toggle_node()
+        self._toggle_all()
+
+    def set_duration_hint(self, path: str, secs: float) -> None:
+        self._hint = (path, secs)
+        self._update_hint()
+
+    @staticmethod
+    def _path_size(path: str) -> int:
+        try:
+            if os.path.isfile(path):
+                return os.path.getsize(path)
+        except OSError:
+            return 0
+        total = 0
+        for root, _d, files in os.walk(path):
+            for f in files:
+                try:
+                    total += os.path.getsize(os.path.join(root, f))
+                except OSError:
+                    pass
+        return total
+
+    @staticmethod
+    def _bag_info(path: str):
+        try:
+            with open(os.path.join(path, "metadata.yaml"), encoding="utf-8") as f:
+                txt = f.read()
+        except OSError:
+            return None
+
+        def num(pat: str) -> int:
+            m = re.search(pat, txt, re.M)
+            return int(m.group(1)) if m else 0
+        return {"msgs": num(r"^\s{2}message_count:\s*(\d+)"),
+                "topics": len(re.findall(r"^\s*-?\s*topic_metadata:", txt, re.M)),
+                "dur": num(r"^\s{2}duration:\s*\n\s+nanoseconds:\s*(\d+)") / 1e9}
+
+    def _read_duration(self, bag: str) -> Optional[float]:
+        d = bag if os.path.isdir(bag) else os.path.dirname(bag)
+        info = self._bag_info(d) if d else None
+        if info and info["dur"] > 0:
+            return info["dur"]
+        if self._hint and os.path.expanduser(self._hint[0]) == bag and self._hint[1] > 0:
+            return self._hint[1]
+        return None
+
+    @staticmethod
+    def _fmt_t(sec: float) -> str:
+        sec = int(max(0, sec))
+        return f"{sec // 60}:{sec % 60:02d}"
+
+    def _set_progress(self, pct: Optional[float], text: str = "") -> None:
+        if pct is not None and str(self.prog.cget("mode")) == "determinate":
+            self.prog["value"] = pct
+        self.pct.set(text)
+        if self.progress_cb:
+            self.progress_cb(pct)
+
+    def _update_progress(self, el: float, now: float) -> None:
+        if now - self._t_size >= 1.0:
+            self._size, self._t_size = self._path_size(self._out), now
+        mb = f"{self._size / 1e6:.1f} MB"
+        if self._span:
+            pct = min(99.0, el * self._rate / self._span * 100.0)
+            eta = max(0.0, self._span / self._rate - el)
+            tail = "finalizando…" if pct >= 99 else f"quedan ~{self._fmt_t(eta)}"
+            self._set_progress(pct, f"{pct:.0f} %  ·  {tail}  ·  {mb}")
+        else:
+            self._set_progress(None, f"{self._fmt_t(el)}  ·  {mb}  (duración desconocida)")
+
+    def copy_cmds(self) -> None:
+        try:
+            bag = os.path.expanduser(self.bag.get().strip())
+            if not bag:
+                raise ValueError("Elige un bag de entrada.")
+            rate = self._num(self.rate, "velocidad", 1.0)
+            out = os.path.join(os.path.expanduser(self.out_dir.get().strip()),
+                               self.out_name.get().strip() or "<nombre>")
+            cmds = [self._record_cmd(out)]
+            if not self.no_node.get():
+                cmds.append(self._node_cmd())
+            cmds.append(self._play_cmd(bag, rate, self._num(self.start_s, "inicio"),
+                                       self._num(self.duration, "duración")))
+        except ValueError as exc:
+            messagebox.showerror("Configuración no válida", str(exc))
+            return
+        self.clipboard_clear()
+        self.clipboard_append("\n".join(" ".join(shlex.quote(c) for c in cmd)
+                                        for cmd in cmds))
+        self.status.set("Comandos copiados (orden: record, nodo, play; uno por terminal).")
+
+    def save_log(self) -> None:
+        p = filedialog.asksaveasfilename(
+            title="Guardar registro", defaultextension=".log",
+            filetypes=[("log", "*.log"), ("texto", "*.txt")])
+        if p:
+            try:
+                with open(p, "w", encoding="utf-8") as f:
+                    f.write(self.log.get("1.0", "end-1c"))
+                self.status.set(f"Registro guardado en {p}")
+            except OSError as exc:
+                messagebox.showerror("Error", str(exc))
+
+    def set_topics(self, names: List[str]) -> None:
+        self._topics = list(names)
+        self.lb.configure(state=tk.NORMAL)
+        self.lb.delete(0, tk.END)
+        for n in self._topics:
+            self.lb.insert(tk.END, n)
+        self.lb.selection_set(0, tk.END)
+        self._toggle_all()
 
     @staticmethod
     def _num(var: tk.StringVar, name: str, default=None):
@@ -553,258 +1033,453 @@ class ReplayPanel(ttk.Frame):
         except ValueError as exc:
             raise ValueError(f"«{name}» debe ser numérico.") from exc
 
-    def _clear_plot(self) -> None:
-        if self.canvas is not None:
-            try:
-                self.canvas.get_tk_widget().destroy()
-            except Exception:  # noqa: BLE001
-                pass
-            self.canvas = None
-        if self.dash is not None:
-            try:
-                plt.close(self.dash.fig)
-            except Exception:  # noqa: BLE001
-                pass
-            self.dash = None
-        self.placeholder = None
-        self._placeholder()
+    @staticmethod
+    def _bag_target(path: str):
+        if os.path.isdir(path):
+            return path, None
+        ext = os.path.splitext(path)[1].lower()
+        return path, {".mcap": "mcap", ".db3": "sqlite3"}.get(ext)
 
-    def _embed(self) -> None:
-        if self.placeholder is not None:
-            self.placeholder.destroy()
-            self.placeholder = None
-        self.canvas = FigureCanvasTkAgg(self.dash.fig, master=self.host)
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        self.canvas.draw()
+    # ---- nodos disponibles ------------------------------------------------ #
+
+    def _find_nodes(self) -> None:
+        if shutil.which("ros2") is None:
+            self._log("[gui] «ros2» no está en el PATH: sourcea ROS 2 para listar nodos.")
+            return
+
+        def work() -> None:
+            try:
+                out = subprocess.run(["ros2", "pkg", "executables"], capture_output=True,
+                                     text=True, timeout=90).stdout
+                self.logq.put(("nodes", [ln.strip() for ln in out.splitlines()
+                                         if ln.strip()]))
+            except Exception as exc:  # noqa: BLE001
+                self.logq.put(f"[gui] no pude listar nodos: {exc}")
+        threading.Thread(target=work, daemon=True).start()
+
+    def _filter_nodes(self, _e=None) -> None:
+        q = self.node.get().strip().lower()
+        self.node_cb.configure(values=[n for n in self._all_nodes if q in n.lower()]
+                               if q else self._all_nodes)
+
+    # ---- comandos --------------------------------------------------------- #
+
+    def _node_cmd(self) -> List[str]:
+        txt = self.node.get().strip()
+        if not txt:
+            raise ValueError("Elige un nodo (paquete ejecutable) o marca «Sin nodo».")
+        parts = shlex.split(txt)
+        if parts[0] != "ros2":
+            parts = ["ros2", "run"] + parts
+        parts += shlex.split(self.args.get().strip())
+        if self.node_simtime.get() and "use_sim_time" not in " ".join(parts):
+            parts += ["--ros-args", "-p", "use_sim_time:=true"]
+        return parts
+
+    def _on_clock(self) -> None:
+        if self.clock.get():
+            self.node_simtime.set(True)
+
+    def _fast_params(self):
+        """(cola de lectura, caché en bytes) si hay que optimizar; None si no."""
+        if not self.fast.get():
+            return None
+        try:
+            rate = self._num(self.rate, "velocidad", 1.0)
+        except ValueError:
+            return None
+        if rate <= 1:
+            return None
+        try:
+            q = int(float(self.queue_sz.get().strip() or 0))
+            c = int(float(self.cache_mb.get().strip() or 0) * 1e6)
+        except ValueError:
+            raise ValueError("«Cola lectura» y «Caché» deben ser numéricos.")
+        return q, c
+
+    def _update_hint(self, *_a) -> None:
+        try:
+            rate = float(self.rate.get().strip() or 1)
+        except ValueError:
+            self.speed_hint.set("La velocidad debe ser numérica.")
+            return
+        if rate <= 0:
+            self.speed_hint.set("La velocidad debe ser > 0.")
+            return
+        bag = os.path.expanduser(self.bag.get().strip())
+        total = self._read_duration(bag) if bag and os.path.exists(bag) else None
+        parts = [f"Bag de {self._fmt_t(total)} → ~{self._fmt_t(total / rate)} a ×{rate:g} "
+                 "(si el nodo y el disco aguantan)." if total else f"Velocidad ×{rate:g}."]
+        if rate != 1 and not self.clock.get():
+            parts.append(f"⚠ Sin «Reloj simulado» el bag nuevo tendrá los tiempos "
+                         f"comprimidos ×{rate:g}.")
+        if rate > 20:
+            parts.append("A velocidades muy altas pueden perderse mensajes si el nodo "
+                         "no da abasto.")
+        self.speed_hint.set("  ".join(parts))
+
+    def _record_cmd(self, out: str) -> List[str]:
+        cmd = ["ros2", "bag", "record", "-o", out, "--storage", self.storage.get()]
+        if self.clock.get():
+            cmd.append("--use-sim-time")
+        fp = self._fast_params()
+        if fp and fp[1] > 0:
+            cmd += ["--max-cache-size", str(fp[1])]
+        if self.all_topics.get():
+            return cmd + ["-a"]
+        topics = [self._topics[i] for i in self.lb.curselection()]
+        topics += shlex.split(self.extra.get().strip())
+        topics = list(dict.fromkeys(topics))
+        if not topics:
+            raise ValueError("Selecciona topics a grabar, añade «Topics extra» "
+                             "o marca «Grabar todos (-a)».")
+        return cmd + topics
+
+    def _play_cmd(self, bag: str, rate: float, start, duration) -> List[str]:
+        uri, storage = self._bag_target(bag)
+        cmd = ["ros2", "bag", "play", uri, "--rate", f"{rate:g}"]
+        if storage:
+            cmd += ["--storage", storage]
+        if start is not None:
+            cmd += ["--start-offset", f"{start:g}"]
+        if duration is not None:
+            cmd += ["--playback-duration", f"{duration:g}"]
+        if self.clock.get():
+            cmd.append("--clock")
+        fp = self._fast_params()
+        if fp and fp[0] > 0:
+            cmd += ["--read-ahead-queue-size", str(fp[0])]
+        cmd.append("--disable-keyboard-controls")
+        only = shlex.split(self.play_only.get().strip())
+        if only:
+            cmd += ["--topics"] + only
+        return cmd
+
+    # ---- procesos --------------------------------------------------------- #
+
+    def _spawn(self, cmd: List[str], tag: str):
+        env = dict(os.environ, PYTHONUNBUFFERED="1")
+        self._log("$ " + " ".join(shlex.quote(c) for c in cmd))
+        try:
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                 text=True, bufsize=1, env=env, start_new_session=True)
+        except (FileNotFoundError, OSError) as exc:
+            self._log(f"[{tag}] no pude lanzar el proceso: {exc}")
+            return None
+        threading.Thread(target=self._reader, args=(p, tag), daemon=True).start()
+        return p
+
+    def _reader(self, p, tag: str) -> None:
+        try:
+            for line in p.stdout:
+                self.logq.put(f"[{tag}] {line.rstrip()}")
+        except Exception:  # noqa: BLE001
+            pass
+
+    @staticmethod
+    def _kill(p, timeout: float) -> None:
+        if p is None or p.poll() is not None:
+            return
+        for sig, wait in ((signal.SIGINT, timeout), (signal.SIGTERM, 3),
+                          (signal.SIGKILL, 3)):
+            try:
+                os.killpg(p.pid, sig)
+            except (ProcessLookupError, PermissionError):
+                return
+            try:
+                p.wait(wait)
+                return
+            except subprocess.TimeoutExpired:
+                continue
+
+    # ---- ciclo de vida ---------------------------------------------------- #
 
     def start(self) -> None:
         if self.running:
             return
-        if R is None:
-            messagebox.showerror("Falta bag_replay.py",
-                                 "No encuentro bag_replay.py junto a rosbag_gui.py.")
-            return
         bag = os.path.expanduser(self.bag.get().strip())
         if not bag or not os.path.exists(bag):
-            messagebox.showerror(
-                "Bag no válido",
-                "Elige la carpeta del bag o un fichero .mcap existente.")
+            messagebox.showerror("Bag no válido",
+                                 "Elige la carpeta del bag o un fichero .mcap existente.")
             return
         if os.path.isfile(bag) and not bag.lower().endswith((".mcap", ".db3")):
-            messagebox.showerror(
-                "Bag no válido",
-                "El fichero debe ser .mcap (o .db3). Para una carpeta usa "
-                "«Carpeta…».")
+            messagebox.showerror("Bag no válido", "El fichero debe ser .mcap o .db3.")
+            return
+        if shutil.which("ros2") is None:
+            messagebox.showerror("Falta ROS 2",
+                                 "No encuentro «ros2». Sourcea ROS 2 antes de abrir la GUI:\n\n"
+                                 "    source /opt/ros/jazzy/setup.bash")
             return
         try:
             rate = self._num(self.rate, "velocidad", 1.0)
-            delay = self._num(self.delay, "espera", 0.0) or 0.0
             start = self._num(self.start_s, "inicio")
-            duration = self._num(self.duration, "duración")
+            dur = self._num(self.duration, "duración")
+            wait = self._num(self.node_wait, "espera al nodo", 2.0)
+            tail = self._num(self.tail, "cola final", 2.0)
         except ValueError as exc:
             messagebox.showerror("Valor no válido", str(exc))
             return
-        if rate <= 0:
-            messagebox.showerror("Valor no válido", "La velocidad debe ser > 0.")
+        if rate <= 0 or wait < 0 or tail < 0:
+            messagebox.showerror("Valor no válido",
+                                 "La velocidad debe ser > 0 y las esperas ≥ 0.")
             return
-        if delay < 0:
-            messagebox.showerror("Valor no válido", "La espera no puede ser negativa.")
+        out_dir = os.path.expanduser(self.out_dir.get().strip())
+        notes: List[str] = []
+        if not out_dir:
+            messagebox.showerror("Carpeta no válida", "Indica una carpeta de salida.")
             return
-
-        try:
-            import rclpy
-        except ImportError:
-            messagebox.showerror(
-                "Falta rclpy",
-                "Sourcea ROS 2 antes de abrir la GUI:\n\n"
-                "    source /opt/ros/jazzy/setup.bash\n"
-                "    source ~/mirena_ws/install/setup.bash")
-            return
-
-        self.status.set("Arrancando nodo y suscripciones…")
-        self.update_idletasks()
-        try:
-            self._clear_plot()
-            self.store = R.Store()
-            self._owns_ctx = False
+        if not os.path.isdir(out_dir):
             try:
-                rclpy.init()
-                self._owns_ctx = True
-            except Exception:  # ya inicializado por otro componente
-                pass
-            raw_topic = self.raw.get().strip()
-            filt_topic = self.filt.get().strip()
-            self.live = R.LiveNode(self.store, raw_topic, filt_topic)
-            self.dash = R.Dashboard(raw_topic, filt_topic,
-                                    align=not self.no_align.get())
-            self._embed()
-            self.stop_evt = threading.Event()
-            self.spin = threading.Thread(target=self.live.spin,
-                                         args=(self.stop_evt,), daemon=True)
-            self.spin.start()
-        except Exception as exc:  # noqa: BLE001
-            traceback.print_exc()
-            self._teardown()
-            self._clear_plot()
-            self.status.set("Error al iniciar.")
-            messagebox.showerror("No pude iniciar la reproducción",
-                                 f"{type(exc).__name__}: {exc}")
+                os.makedirs(out_dir, exist_ok=True)
+            except OSError as exc:
+                messagebox.showerror("No pude crear la carpeta", f"{out_dir}\n\n{exc}")
+                return
+            notes.append(f"[gui] carpeta creada: {out_dir}")
+        name = self.out_name.get().strip()
+        if not name:
+            base = os.path.basename(bag.rstrip("/\\"))
+            if os.path.isfile(bag):
+                base = os.path.splitext(base)[0]
+            name = f"{base}_regrabado_{time.strftime('%Y%m%d_%H%M%S')}"
+        out = os.path.join(out_dir, name)
+        if os.path.exists(out):
+            k = 2
+            while os.path.exists(f"{out}_{k}"):
+                k += 1
+            notes.append(f"[gui] «{os.path.basename(out)}» ya existe; "
+                         f"se usará «{os.path.basename(out)}_{k}»")
+            out = f"{out}_{k}"
+        try:
+            rec = self._record_cmd(out)
+            node = None if self.no_node.get() else self._node_cmd()
+            play = self._play_cmd(bag, rate, start, dur)
+        except ValueError as exc:
+            messagebox.showerror("Configuración no válida", str(exc))
             return
 
+        need = self._path_size(bag)
+        try:
+            free = shutil.disk_usage(out_dir).free
+        except OSError:
+            free = None
+        if free is not None and need and free < need * 1.1:
+            if not messagebox.askyesno(
+                    "Poco espacio en disco",
+                    f"El bag de entrada ocupa {need / 1e6:.0f} MB y quedan "
+                    f"{free / 1e6:.0f} MB libres en la carpeta de salida.\n\n"
+                    "¿Continuar igualmente?"):
+                return
+        self._clear_log()
+        for n in notes:
+            self._log(n)
+        self._out, self._wait, self._tail_v = out, wait, tail
+        total = self._read_duration(bag)
+        span = None
+        if total:
+            span = max(0.0, total - (start or 0.0))
+            if dur:
+                span = min(span, dur)
+        self._span, self._rate = (span or None), rate
+        self._t_size, self._size = 0.0, 0
+        self.prog.stop()
+        self.prog.configure(mode="determinate")
+        self.prog["value"] = 0
+        self._set_progress(0, "preparando…")
+        self._node_cmd_v, self._play_cmd_v = node, play
+        self._final_msg, self._manual = None, False
+        self._stop_done, self._warned_node = False, False
+        self.procs = {}
+        p = self._spawn(rec, "rec")
+        if p is None:
+            self.status.set("No pude arrancar la grabación.")
+            return
+        self.procs["rec"] = p
         self.running = True
         self.btn_start.configure(state=tk.DISABLED)
         self.btn_stop.configure(state=tk.NORMAL)
-        self.btn_save.configure(state=tk.NORMAL)
+        self.btn_open.configure(state=tk.DISABLED)
+        self._stage, self._t_stage = "rec_wait", time.monotonic()
+        self.status.set("Iniciando la grabación…")
 
-        if not self.no_node.get():
-            try:
-                cmd = shlex.split(self.node_cmd.get().strip())
-            except ValueError as exc:
-                messagebox.showerror("Comando no válido", str(exc))
-                self.stop()
-                return
-            if not cmd:
-                messagebox.showerror("Comando no válido",
-                                     "Escribe el comando del nodo o marca "
-                                     "«No arrancar nodo».")
-                self.stop()
-                return
-            self.node_proc = R.spawn(cmd, "nodo")
-            if self.node_proc is None:
-                self.stop()
-                self.status.set("No pude arrancar el nodo.")
-                return
+    def stop(self) -> None:
+        if self.running:
+            self._begin_stop(manual=True)
 
-        play_cmd = None
-        if not self.no_play.get():
-            bag_uri, bag_storage = R.bag_target(bag)
-            play_cmd = ["ros2", "bag", "play", bag_uri, "--rate", f"{rate:g}"]
-            if bag_storage:
-                play_cmd += ["--storage", bag_storage]
-            if start is not None:
-                play_cmd += ["--start-offset", f"{start:g}"]
-            if duration is not None:
-                play_cmd += ["--playback-duration", f"{duration:g}"]
-            if self.loop.get():
-                play_cmd += ["--loop"]
-
-        def launch() -> None:
-            self._start_after = None
-            if not self.running:
-                return
-            if play_cmd is not None:
-                self.play_proc = R.spawn(play_cmd, "bag")
-                if self.play_proc is None:
-                    messagebox.showerror(
-                        "No pude reproducir",
-                        "No encontré `ros2 bag play`.\n\n"
-                        "Abre la GUI después de sourcear ROS 2 o marca "
-                        "«No reproducir».")
-                    self.stop()
-                    return
-            self.status.set("Reproduciendo: sensor solo vs EKF…")
-
-        if delay > 0 and not self.no_node.get():
-            self.status.set(f"Esperando {delay:g} s a que arranque el nodo…")
-            self._start_after = self.after(int(delay * 1000), launch)
-        else:
-            launch()
-        self._poll_after = self.after(120, self._poll)
-
-    def _teardown(self) -> None:
-        if self.stop_evt is not None:
-            self.stop_evt.set()
-        if R is not None:
-            R.stop_proc(self.play_proc, "bag")
-            R.stop_proc(self.node_proc, "nodo")
-        self.play_proc = None
-        self.node_proc = None
-        if self.spin is not None:
-            self.spin.join(timeout=2.5)
-            self.spin = None
-        self.stop_evt = None
-        if self._owns_ctx:
-            try:
-                import rclpy
-                rclpy.shutdown()
-            except Exception:  # noqa: BLE001
-                pass
-            self._owns_ctx = False
-        self.store = None
-        self.live = None
-
-    def stop(self, auto: bool = False) -> None:
-        if self._start_after is not None:
-            try:
-                self.after_cancel(self._start_after)
-            except Exception:  # noqa: BLE001
-                pass
-            self._start_after = None
-        if self._poll_after is not None:
-            try:
-                self.after_cancel(self._poll_after)
-            except Exception:  # noqa: BLE001
-                pass
-            self._poll_after = None
-        if not self.running:
+    def _begin_stop(self, msg: Optional[str] = None, manual: bool = False) -> None:
+        if self._stage == "stopping":
             return
-        raw = filt = None
-        if self.store is not None:
-            raw, filt = self.store.snapshot()[:2]
+        self._stage, self._final_msg, self._manual = "stopping", msg, manual
+        self.btn_stop.configure(state=tk.DISABLED)
+        self.status.set("Cerrando procesos y finalizando el bag…")
+
+        def work() -> None:
+            for tag, t in (("play", 6), ("node", 8), ("rec", 15)):
+                self._kill(self.procs.get(tag), t)
+            self._stop_done = True
+        threading.Thread(target=work, daemon=True).start()
+
+    def _finalize(self) -> None:
         self.running = False
+        self._stage = ""
+        self.procs = {}
         self.btn_start.configure(state=tk.NORMAL)
         self.btn_stop.configure(state=tk.DISABLED)
-        self.btn_save.configure(
-            state=tk.NORMAL if self.dash is not None else tk.DISABLED)
-        self._teardown()
-        nr = raw["t"].size if raw is not None else 0
-        nf = filt["t"].size if filt is not None else 0
-        prefix = "Reproducción terminada" if auto else "Detenido"
-        self.status.set(f"{prefix} · sensor {nr} · EKF {nf} muestras")
+        self.prog.stop()
+        self.prog.configure(mode="determinate")
+        info = self._bag_info(self._out)
+        ok = info is not None
+        size = self._path_size(self._out) / 1e6
+        failed = bool(self._final_msg)
+        if ok:
+            self._last_out = self._out
+            self.btn_open.configure(state=tk.NORMAL)
+            self._log(f"[gui] resumen · {info['msgs']} mensajes · {info['topics']} topics · "
+                      f"{info['dur']:.1f} s · {size:.1f} MB")
+        if failed:
+            self.status.set(self._final_msg)
+        elif ok:
+            self.status.set(("Detenido" if self._manual else "Listo")
+                            + f" · bag guardado en {self._out}")
+        else:
+            self.status.set("No se generó el bag nuevo (¿no llegó ningún mensaje?).")
+        if ok and not failed and not self._manual:
+            self.prog["value"] = 100
+            self.pct.set(f"Completada · {info['msgs']} msgs · {size:.1f} MB")
+        else:
+            self.pct.set("Interrumpida" + (f" · {size:.1f} MB" if ok else ""))
+        if self.progress_cb:
+            self.progress_cb(None)
+        self._log(f"[gui] fin · {'bag en ' + self._out if ok else 'sin bag de salida'}")
+        self.bell()
+        if ok and self.auto_open.get() and self.open_cb:
+            self.open_cb(self._out)
 
-    def _poll(self) -> None:
-        self._poll_after = None
-        if not self.running or self.store is None or self.dash is None:
+    def _open_result(self) -> None:
+        if self.open_cb and self._last_out:
+            self.open_cb(self._last_out)
+
+    def _start_play(self, now: float) -> None:
+        p = self._spawn(self._play_cmd_v, "play")
+        if p is None:
+            self._begin_stop("No pude lanzar «ros2 bag play».")
             return
-        raw, filt, t0, idle = self.store.snapshot()
+        self.procs["play"] = p
+        self._stage, self._t_play = "playing", now
+        if not self._span:
+            self.prog.configure(mode="indeterminate")
+            self.prog.start(15)
+        self.status.set("Reproduciendo y grabando…")
+
+    def _tick(self) -> None:
+        self._after = None
         try:
-            self.dash.update(raw, filt, t0, idle)
+            self._drain()
+            if self.running:
+                self._advance()
         except Exception:  # noqa: BLE001
             traceback.print_exc()
-        nr, nf = raw["t"].size, filt["t"].size
-        if idle >= 2.0:
-            estado = "en espera"
-        elif self.play_proc is not None:
-            estado = "reproduciendo"
-        else:
-            estado = "escuchando"
-        self.status.set(f"{estado} · sensor {nr} · EKF {nf} muestras")
-        if (self.play_proc is not None and self.play_proc.poll() is not None
-                and idle > 2.0 and not self.loop.get()):
-            self.stop(auto=True)
-            return
-        self._poll_after = self.after(120, self._poll)
+        self._after = self.after(150, self._tick)
 
-    def save_png(self) -> None:
-        if self.dash is None:
-            messagebox.showinfo("Sin gráfica", "Todavía no hay datos que guardar.")
+    def _advance(self) -> None:
+        now, st = time.monotonic(), self._stage
+        rec = self.procs.get("rec")
+        if st != "stopping" and rec is not None and rec.poll() is not None:
+            self._begin_stop("La grabación terminó de forma inesperada; revisa el registro.")
             return
-        p = filedialog.asksaveasfilename(
-            title="Guardar dashboard", defaultextension=".png",
-            filetypes=[("PNG", "*.png")])
-        if p:
-            R.save_dashboard(self.dash, p)
-            self.status.set(f"Guardado {p}")
+        if st == "rec_wait" and now - self._t_stage >= 1.5:
+            if self._node_cmd_v:
+                p = self._spawn(self._node_cmd_v, "nodo")
+                if p is None:
+                    self._begin_stop("No pude arrancar el nodo.")
+                    return
+                self.procs["node"] = p
+                self._stage, self._t_stage = "node_wait", now
+                self.status.set(f"Esperando {self._wait:g} s a que arranque el nodo…")
+            else:
+                self._start_play(now)
+        elif st == "node_wait" and now - self._t_stage >= self._wait:
+            self._start_play(now)
+        elif st == "playing":
+            node = self.procs.get("node")
+            if node is not None and node.poll() is not None and not self._warned_node:
+                self._warned_node = True
+                self._log(f"[gui] el nodo terminó antes de tiempo (código {node.returncode})")
+            self.status.set("Reproduciendo y grabando…")
+            self._update_progress(now - self._t_play, now)
+            rc = self.procs["play"].poll()
+            if rc is not None:
+                if rc != 0:
+                    self._begin_stop(f"«ros2 bag play» terminó con código {rc}; "
+                                     "revisa el registro.")
+                else:
+                    self._stage, self._t_stage = "tail", now
+                    self.prog.stop()
+                    self.prog.configure(mode="determinate")
+                    self._set_progress(100, f"100 %  ·  {self._size / 1e6:.1f} MB")
+                    if self._span:
+                        self._log(f"[gui] velocidad efectiva ≈ ×"
+                                  f"{self._span / max(now - self._t_play, 1e-3):.1f} "
+                                  f"(pedida ×{self._rate:g})")
+                    self.status.set("Reproducción terminada · vaciando cola final…")
+        elif st == "tail" and now - self._t_stage >= self._tail_v:
+            self._begin_stop()
+        elif st == "stopping" and self._stop_done:
+            self._finalize()
+
+    # ---- registro --------------------------------------------------------- #
+
+    def _log(self, line: str) -> None:
+        self.logq.put(line)
+
+    def _clear_log(self) -> None:
+        set_text(self.log, "")
+
+    def _drain(self) -> None:
+        lines: List[str] = []
+        try:
+            while True:
+                item = self.logq.get_nowait()
+                if isinstance(item, tuple):
+                    self._all_nodes = sorted(item[1])
+                    self.node_cb.configure(values=self._all_nodes)
+                    lines.append(f"[gui] {len(self._all_nodes)} ejecutables ROS 2 disponibles")
+                else:
+                    lines.append(item)
+        except queue.Empty:
+            pass
+        if not lines:
+            return
+        self.log.configure(state="normal")
+        for ln in lines:
+            low = ln.lower()
+            tag = ("gui" if ln.startswith("[gui]") else "cmd" if ln.startswith("$ ")
+                   else "err" if ("error" in low or "traceback" in low or "fatal" in low)
+                   else "warn" if "warn" in low else "")
+            self.log.insert(tk.END, ln + "\n", (tag,) if tag else ())
+        extra = int(self.log.index("end-1c").split(".")[0]) - 3000
+        if extra > 0:
+            self.log.delete("1.0", f"{extra + 1}.0")
+        self.log.see(tk.END)
+        self.log.configure(state="disabled")
 
     def shutdown(self) -> None:
-        self.stop()
-        self._clear_plot()
+        if self._after is not None:
+            try:
+                self.after_cancel(self._after)
+            except Exception:  # noqa: BLE001
+                pass
+            self._after = None
+        if self.running:
+            for tag, t in (("play", 3), ("node", 4), ("rec", 8)):
+                self._kill(self.procs.get(tag), t)
+            self.running = False
 
 
 def make_text(parent) -> tk.Text:
     frame = ttk.Frame(parent)
     frame.pack(fill=tk.BOTH, expand=True)
     txt = tk.Text(frame, wrap="none", font="TkFixedFont", state="disabled")
+    style_text(txt)
     sy = ttk.Scrollbar(frame, orient="vertical", command=txt.yview)
     sx = ttk.Scrollbar(frame, orient="horizontal", command=txt.xview)
     txt.configure(yscrollcommand=sy.set, xscrollcommand=sx.set)
@@ -826,10 +1501,14 @@ def set_text(txt: tk.Text, s: str) -> None:
 # --------------------------------------------------------------------------- #
 
 class App(tk.Tk):
+    HEADS = {"#0": "Topic", "type": "Tipo", "msgs": "Msgs", "hz": "Hz",
+             "gaps": "Huecos"}
+
     def __init__(self, path: Optional[str] = None):
         super().__init__()
         self.title("ROS 2 bag analyzer")
-        self.geometry("1320x800")
+        self.geometry("1360x820")
+        self.minsize(1040, 640)
         self.col: Dict[str, A.Base] = {}
         self.qos: Dict[str, str] = {}
         self.st: Dict[str, Dict] = {}
@@ -838,15 +1517,31 @@ class App(tk.Tk):
         self.q: "queue.Queue" = queue.Queue()
         self.loading = False
         self._poll_id: Optional[str] = None
+        self._sel_after: Optional[str] = None
+        self._sort: Tuple[str, bool] = ("#0", False)
+        self.last_dir = os.path.expanduser("~")
 
-        self.only_nav = tk.BooleanVar(value=False)
+        self.settings = load_settings()
+        self.mode = self.settings.get("mode", "light")
+        if self.mode not in PALETTES:
+            self.mode = "light"
+        ld = self.settings.get("last_dir")
+        if isinstance(ld, str) and os.path.isdir(ld):
+            self.last_dir = ld
+        self.pal = apply_theme(self, self.mode)
+
+        self.only_nav = tk.BooleanVar(value=bool(self.settings.get("only_nav", False)))
         self.sample = tk.StringVar(value="1000000")
         self.t_start = tk.StringVar()
         self.t_end = tk.StringVar()
-        self.status = tk.StringVar(value="Abre un bag para empezar.")
+        self.filter = tk.StringVar()
+        self.count = tk.StringVar(value="0 topics")
+        self.status = tk.StringVar(value="Abre un bag para empezar (Ctrl+O).")
 
         self._menu()
         self._ui()
+        self._bind_keys()
+        self.filter.trace_add("write", lambda *_: self._fill_tree())
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._poll_id = self.after(100, self._poll)
         if path:
@@ -857,88 +1552,135 @@ class App(tk.Tk):
     def _menu(self) -> None:
         m = tk.Menu(self)
         f = tk.Menu(m, tearoff=0)
-        f.add_command(label="Abrir carpeta de bag…", command=self.ask_folder)
-        f.add_command(label="Abrir fichero .mcap / .db3…", command=self.ask_file)
+        f.add_command(label="Abrir carpeta de bag…", accelerator="Ctrl+O",
+                      command=self.ask_folder)
+        f.add_command(label="Abrir fichero .mcap / .db3…",
+                      accelerator="Ctrl+Shift+O", command=self.ask_file)
         f.add_separator()
         f.add_command(label="Exportar CSV de la selección…", command=self.export_csv)
         f.add_separator()
-        f.add_command(label="Salir", command=self._on_close)
+        f.add_command(label="Salir", accelerator="Ctrl+Q", command=self._on_close)
         m.add_cascade(label="Archivo", menu=f)
+        v = tk.Menu(m, tearoff=0)
+        v.add_command(label="Cambiar tema claro / oscuro", accelerator="Ctrl+D",
+                      command=self.toggle_theme)
+        v.add_command(label="Filtrar topics", accelerator="Ctrl+F",
+                      command=self._focus_search)
+        m.add_cascade(label="Ver", menu=v)
         self.config(menu=m)
 
+        # menu contextual del arbol de topics
+        self.ctx = tk.Menu(self, tearoff=0)
+        self.ctx.add_command(label="Graficar", command=self.plot_selected)
+        self.ctx.add_command(label="Vista 3D", command=self.plot_3d_selected)
+        self.ctx.add_command(label="Temporización", command=self.plot_timing)
+        self.ctx.add_separator()
+        self.ctx.add_command(label="Exportar CSV…", command=self.export_csv)
+
+    def _btns(self, parent, items, cols: int = 3) -> None:
+        for i, (txt, cmd) in enumerate(items):
+            ttk.Button(parent, text=txt, command=cmd).grid(
+                row=i // cols, column=i % cols, sticky="we", padx=2, pady=2)
+        for c in range(cols):
+            parent.columnconfigure(c, weight=1, uniform="b")
+
     def _ui(self) -> None:
-        top = ttk.Frame(self, padding=6)
+        top = ttk.Frame(self, padding=(12, 10))
         top.pack(fill=tk.X)
-        ttk.Button(top, text="Abrir bag…", command=self.ask_folder).pack(side=tk.LEFT)
-        ttk.Button(top, text="Abrir fichero…", command=self.ask_file).pack(
-            side=tk.LEFT, padx=(4, 12))
+        ttk.Button(top, text="Abrir bag", style="Accent.TButton",
+                   command=self.ask_folder).pack(side=tk.LEFT)
+        ttk.Button(top, text="Fichero…", command=self.ask_file).pack(
+            side=tk.LEFT, padx=(6, 18))
         ttk.Checkbutton(top, text="Solo IMU + GPS (carga rápida)",
                         variable=self.only_nav).pack(side=tk.LEFT)
-        ttk.Label(top, text="   máx. msgs/topic").pack(side=tk.LEFT)
-        ttk.Entry(top, textvariable=self.sample, width=9).pack(side=tk.LEFT, padx=4)
-        self.prog = ttk.Progressbar(top, mode="indeterminate", length=160)
-        self.prog.pack(side=tk.RIGHT)
+        ttk.Label(top, text="Máx. msgs/topic", style="Muted.TLabel").pack(
+            side=tk.LEFT, padx=(18, 6))
+        ttk.Entry(top, textvariable=self.sample, width=9).pack(side=tk.LEFT)
+        ttk.Button(top, text="◐", width=3, command=self.toggle_theme).pack(
+            side=tk.RIGHT)
+        self.prog = ttk.Progressbar(top, mode="indeterminate", length=130)
+        self.prog.pack(side=tk.RIGHT, padx=12)
+        ttk.Separator(self).pack(fill=tk.X)
+
+        ttk.Label(self, textvariable=self.status, style="Status.TLabel",
+                  anchor="w").pack(fill=tk.X, side=tk.BOTTOM)
 
         pw = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
-        pw.pack(fill=tk.BOTH, expand=True, padx=6, pady=(0, 6))
+        pw.pack(fill=tk.BOTH, expand=True, padx=12, pady=10)
 
         # --- izquierda: topics + acciones
         left = ttk.Frame(pw)
         pw.add(left, weight=2)
+
+        head = ttk.Frame(left)
+        head.pack(fill=tk.X)
+        ttk.Label(head, text="Topics", style="Title.TLabel").pack(side=tk.LEFT)
+        ttk.Label(head, textvariable=self.count, style="Muted.TLabel").pack(
+            side=tk.RIGHT)
+        srow = ttk.Frame(left)
+        srow.pack(fill=tk.X, pady=(6, 6))
+        ttk.Label(srow, text="Filtrar", style="Muted.TLabel").pack(side=tk.LEFT)
+        self.search = ttk.Entry(srow, textvariable=self.filter)
+        self.search.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 0))
+
+        acts = ttk.Frame(left)
+        acts.pack(fill=tk.X, side=tk.BOTTOM, pady=(8, 0))
+
+        tree_box = ttk.Frame(left)
+        tree_box.pack(fill=tk.BOTH, expand=True)
         cols = ("type", "msgs", "hz", "gaps")
-        self.tree = ttk.Treeview(left, columns=cols, show="tree headings",
+        self.tree = ttk.Treeview(tree_box, columns=cols, show="tree headings",
                                  selectmode="extended", height=12)
-        self.tree.heading("#0", text="topic")
+        self.tree.heading("#0", text=self.HEADS["#0"], anchor="w",
+                          command=lambda: self._sort_by("#0"))
         self.tree.column("#0", width=230)
-        for k, txt, w in (("type", "tipo", 110), ("msgs", "msgs", 60),
-                          ("hz", "Hz", 55), ("gaps", "huecos", 55)):
-            self.tree.heading(k, text=txt)
+        for k, w in (("type", 110), ("msgs", 62), ("hz", 55), ("gaps", 62)):
+            self.tree.heading(k, text=self.HEADS[k], command=lambda k=k: self._sort_by(k))
             self.tree.column(k, width=w, anchor="e" if k != "type" else "w")
-        ys = ttk.Scrollbar(left, orient="vertical", command=self.tree.yview)
+        ys = ttk.Scrollbar(tree_box, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=ys.set)
         ys.pack(side=tk.RIGHT, fill=tk.Y)
         self.tree.pack(fill=tk.BOTH, expand=True)
+        self._tree_tags()
         self.tree.bind("<<TreeviewSelect>>", lambda _e: self.on_select())
-        self.tree.bind("<Double-Button-1>", lambda _e: self.plot_selected())
-
-        acts = ttk.Frame(self)
-        acts.pack(in_=left, fill=tk.X, pady=(6, 0))
+        self.tree.bind("<Double-Button-1>", self._on_double)
 
         imu = ttk.LabelFrame(acts, text="Solo IMU", padding=6)
-        imu.pack(fill=tk.X, pady=2)
-        ttk.Button(imu, text="Dashboard", command=self.imu_dashboard).pack(side=tk.LEFT, padx=2)
-        ttk.Button(imu, text="Canales…", command=self.imu_channels).pack(side=tk.LEFT, padx=2)
-        ttk.Button(imu, text="Gravedad 3D", command=self.imu_3d).pack(side=tk.LEFT, padx=2)
+        imu.pack(fill=tk.X, pady=3)
+        self._btns(imu, [("Dashboard", self.imu_dashboard),
+                         ("Canales…", self.imu_channels),
+                         ("Gravedad 3D", self.imu_3d)])
 
         gps = ttk.LabelFrame(acts, text="Solo GPS", padding=6)
-        gps.pack(fill=tk.X, pady=2)
-        ttk.Button(gps, text="Dashboard", command=self.gps_dashboard).pack(side=tk.LEFT, padx=2)
-        ttk.Button(gps, text="Canales…", command=self.gps_channels).pack(side=tk.LEFT, padx=2)
-        ttk.Button(gps, text="Traza 3D", command=self.gps_3d).pack(side=tk.LEFT, padx=2)
+        gps.pack(fill=tk.X, pady=3)
+        self._btns(gps, [("Dashboard", self.gps_dashboard),
+                         ("Canales…", self.gps_channels),
+                         ("Traza 3D", self.gps_3d)])
 
         sel = ttk.LabelFrame(acts, text="Topic seleccionado", padding=6)
-        sel.pack(fill=tk.X, pady=2)
-        ttk.Button(sel, text="Graficar", command=self.plot_selected).pack(side=tk.LEFT, padx=2)
-        ttk.Button(sel, text="3D", command=self.plot_3d_selected).pack(side=tk.LEFT, padx=2)
-        ttk.Button(sel, text="Temporización", command=self.plot_timing).pack(side=tk.LEFT, padx=2)
-        ttk.Button(sel, text="CSV…", command=self.export_csv).pack(side=tk.LEFT, padx=2)
+        sel.pack(fill=tk.X, pady=3)
+        self._btns(sel, [("Graficar", self.plot_selected),
+                         ("3D", self.plot_3d_selected),
+                         ("Temporización", self.plot_timing),
+                         ("CSV…", self.export_csv)], cols=4)
 
         glob = ttk.LabelFrame(acts, text="Global", padding=6)
-        glob.pack(fill=tk.X, pady=2)
-        ttk.Button(glob, text="Tasas y ancho de banda",
-                   command=self.plot_global).pack(side=tk.LEFT, padx=2)
-        ttk.Button(glob, text="Comparar IMU",
-                   command=self.compare_imus).pack(side=tk.LEFT, padx=2)
-        ttk.Button(glob, text="Reproducir + Kalman",
-                   command=self.replay).pack(side=tk.LEFT, padx=2)
+        glob.pack(fill=tk.X, pady=3)
+        self._btns(glob, [("Tasas y ancho de banda", self.plot_global),
+                          ("Comparar IMU", self.compare_imus),
+                          ("Regrabar con nodo", self.goto_record)], cols=3)
 
-        win = ttk.LabelFrame(acts, text="Ventana temporal [s desde el inicio]", padding=6)
-        win.pack(fill=tk.X, pady=2)
+        win = ttk.LabelFrame(acts, text="Ventana temporal [s desde el inicio]",
+                             padding=6)
+        win.pack(fill=tk.X, pady=3)
         ttk.Label(win, text="inicio").pack(side=tk.LEFT)
-        ttk.Entry(win, textvariable=self.t_start, width=8).pack(side=tk.LEFT, padx=4)
+        ttk.Entry(win, textvariable=self.t_start, width=8).pack(side=tk.LEFT, padx=6)
         ttk.Label(win, text="fin").pack(side=tk.LEFT)
-        ttk.Entry(win, textvariable=self.t_end, width=8).pack(side=tk.LEFT, padx=4)
-        ttk.Label(win, text="(vacío = todo)").pack(side=tk.LEFT)
+        ttk.Entry(win, textvariable=self.t_end, width=8).pack(side=tk.LEFT, padx=6)
+        ttk.Button(win, text="Limpiar", command=self._clear_window).pack(
+            side=tk.RIGHT)
+        ttk.Label(win, text="(vacío = todo)", style="Muted.TLabel").pack(
+            side=tk.RIGHT, padx=8)
 
         # --- derecha: informes
         right = ttk.Notebook(pw)
@@ -948,24 +1690,131 @@ class App(tk.Tk):
         right.add(f2, text="Resumen general")
         self.txt_topic = make_text(f1)
         self.txt_over = make_text(f2)
-        self.replay_panel = ReplayPanel(right)
-        right.add(self.replay_panel, text="Reproducción + Kalman")
+        self.rec_panel = RecordPanel(right)
+        self.rec_panel.pull_selection = lambda: list(self.tree.selection())
+        self.rec_panel.open_cb = self.open_bag
+        self.rec_panel.progress_cb = self._on_rec_progress
+        self.rec_panel.apply_settings(self.settings.get("record", {}))
+        right.add(self.rec_panel, text="Regrabar con nodo")
         self.nb = right
 
-        ttk.Label(self, textvariable=self.status, relief="sunken",
-                  anchor="w", padding=(6, 2)).pack(fill=tk.X, side=tk.BOTTOM)
+    def _bind_keys(self) -> None:
+        self.bind("<Control-o>", lambda _e: self.ask_folder())
+        self.bind("<Control-O>", lambda _e: self.ask_file())
+        self.bind("<Control-d>", lambda _e: self.toggle_theme())
+        self.bind("<Control-f>", lambda _e: self._focus_search())
+        self.bind("<Control-q>", lambda _e: self._on_close())
+        self.bind("<F5>", lambda _e: (self.nb.select(self.rec_panel),
+                                      self.rec_panel.start()))
+        self.bind("<F6>", lambda _e: self.rec_panel.stop())
+        self.search.bind("<Escape>", lambda _e: self.filter.set(""))
+        self.tree.bind("<Return>", lambda _e: self.plot_selected())
+        self.tree.bind("<Control-a>", self._select_all)
+        for seq in ("<Button-3>", "<Button-2>", "<Control-Button-1>"):
+            self.tree.bind(seq, self._popup)
+
+    def _focus_search(self) -> None:
+        self.search.focus_set()
+        self.search.select_range(0, tk.END)
+
+    def _select_all(self, _e=None):
+        self.tree.selection_set(self.tree.get_children())
+        return "break"
+
+    def _popup(self, e) -> None:
+        iid = self.tree.identify_row(e.y)
+        if iid and iid not in self.tree.selection():
+            self.tree.selection_set(iid)
+        if not self.tree.selection():
+            return
+        try:
+            self.ctx.tk_popup(e.x_root, e.y_root)
+        finally:
+            self.ctx.grab_release()
+
+    def _on_double(self, e) -> None:
+        if self.tree.identify_region(e.x, e.y) in ("cell", "tree"):
+            self.plot_selected()
+
+    # ---- tema ------------------------------------------------------------- #
+
+    def toggle_theme(self) -> None:
+        self.mode = "dark" if self.mode == "light" else "light"
+        self.pal = apply_theme(self, self.mode)
+        self._menu()
+        for t in (self.txt_topic, self.txt_over):
+            style_text(t)
+        self.rec_panel.restyle()
+        self._tree_tags()
+        self.status.set("Tema oscuro" if self.mode == "dark" else "Tema claro")
+
+    def _tree_tags(self) -> None:
+        self.tree.tag_configure("odd", background=PAL["stripe"])
+        self.tree.tag_configure("even", background=PAL["card"])
+
+    # ---- lista de topics (filtro / orden) --------------------------------- #
+
+    def _key(self, n: str):
+        c, b = self.col[n], self.st[n]
+        k = self._sort[0]
+        if k == "#0":
+            return n.lower()
+        if k == "type":
+            return c.type
+        v = b["n"] if k == "msgs" else b["hz"] if k == "hz" else b["gaps"]
+        try:
+            return -1.0 if not math.isfinite(float(v)) else float(v)
+        except (TypeError, ValueError):
+            return -1.0
+
+    def _sort_by(self, k: str) -> None:
+        rev = (not self._sort[1]) if self._sort[0] == k else False
+        self._sort = (k, rev)
+        for key, txt in self.HEADS.items():
+            arrow = (" ▼" if rev else " ▲") if key == k else ""
+            self.tree.heading(key, text=txt + arrow)
+        self._fill_tree()
+
+    def _fill_tree(self) -> None:
+        if not hasattr(self, "tree"):
+            return
+        q = self.filter.get().strip().lower()
+        keep = set(self.tree.selection())
+        self.tree.delete(*self.tree.get_children())
+        i = 0
+        for n in sorted(self.col, key=self._key, reverse=self._sort[1]):
+            c, b = self.col[n], self.st[n]
+            if q and q not in n.lower() and q not in c.type.lower():
+                continue
+            hz = f"{b['hz']:.1f}" if math.isfinite(b["hz"]) else "-"
+            self.tree.insert("", "end", iid=n, text=n,
+                             values=(c.type.split("/")[-1], b["n"], hz, b["gaps"]),
+                             tags=("odd" if i % 2 else "even",))
+            i += 1
+        kept = [n for n in keep if self.tree.exists(n)]
+        if kept:
+            self.tree.selection_set(kept)
+        self.count.set(f"{i} de {len(self.col)} topics" if q else f"{i} topics")
+
+    def _clear_window(self) -> None:
+        self.t_start.set("")
+        self.t_end.set("")
 
     # ---- carga ------------------------------------------------------------ #
 
     def ask_folder(self) -> None:
-        p = filedialog.askdirectory(title="Carpeta del bag (con metadata.yaml)")
+        p = filedialog.askdirectory(title="Carpeta del bag (con metadata.yaml)",
+                                    initialdir=self.last_dir)
         if p:
+            self.last_dir = os.path.dirname(p) or p
             self.open_bag(p)
 
     def ask_file(self) -> None:
         p = filedialog.askopenfilename(
-            title="Fichero de bag", filetypes=[("rosbag2", "*.mcap *.db3"), ("todos", "*.*")])
+            title="Fichero de bag", initialdir=self.last_dir,
+            filetypes=[("rosbag2", "*.mcap *.db3"), ("todos", "*.*")])
         if p:
+            self.last_dir = os.path.dirname(p)
             self.open_bag(p)
 
     def open_bag(self, path: str) -> None:
@@ -978,8 +1827,8 @@ class App(tk.Tk):
             return
         self.loading = True
         self.path = path
-        self.replay_panel.set_bag(path)
         self.status.set(f"Leyendo {path} …")
+        self.config(cursor="watch")
         self.prog.start(12)
         threading.Thread(target=self._load_worker,
                          args=(path, self.only_nav.get(), sample), daemon=True).start()
@@ -1017,6 +1866,7 @@ class App(tk.Tk):
             while True:
                 kind, payload = self.q.get_nowait()
                 self.prog.stop()
+                self.config(cursor="")
                 self.loading = False
                 if kind == "err":
                     self.status.set("Error al cargar.")
@@ -1025,19 +1875,15 @@ class App(tk.Tk):
                 self.col, self.qos, self.st, self.t0, over = payload
                 set_text(self.txt_over, over)
                 set_text(self.txt_topic, "Selecciona un topic de la lista.")
-                self.tree.delete(*self.tree.get_children())
-                for n in sorted(self.col):
-                    c, b = self.col[n], self.st[n]
-                    hz = f"{b['hz']:.1f}" if math.isfinite(b["hz"]) else "-"
-                    self.tree.insert("", "end", iid=n, text=n,
-                                     values=(c.type.split("/")[-1], b["n"], hz, b["gaps"]))
+                self.filter.set("")
+                self._fill_tree()
                 imus = sum(c.kind == "imu" for c in self.col.values())
                 gps = sum(c.kind == "fix" for c in self.col.values())
-                raw = next((n for n, c in self.col.items() if c.kind == "odom"), None)
-                car = next((n for n, c in self.col.items() if c.kind == "car"), None)
-                self.replay_panel.configure_bag(
-                    self.path, raw or self.replay_panel.raw.get(),
-                    car or self.replay_panel.filt.get())
+                self.rec_panel.set_bag(self.path)
+                self.rec_panel.set_topics(sorted(self.col))
+                hi = max((float(c.t_bag[-1]) for c in self.col.values() if c.t_bag.size),
+                         default=self.t0)
+                self.rec_panel.set_duration_hint(self.path, hi - self.t0)
                 self.status.set(f"{self.path}   ·   {len(self.col)} topics   ·   "
                                 f"{imus} IMU, {gps} GPS")
         except queue.Empty:
@@ -1079,8 +1925,7 @@ class App(tk.Tk):
         cands = [n for n, c in self.col.items() if c.kind == kind and has_data(c)]
         label = {"imu": "IMU", "fix": "GPS"}.get(kind, kind)
         if not cands:
-            hint = "" if not self.only_nav.get() else ""
-            messagebox.showinfo("Sin topics", f"Este bag no tiene topics {label} con datos.{hint}")
+            messagebox.showinfo("Sin topics", f"Este bag no tiene topics {label} con datos.")
             return []
         sel = [n for n in self.tree.selection() if n in cands]
         if sel:
@@ -1090,15 +1935,22 @@ class App(tk.Tk):
         return ListDialog(self, f"Elige topic {label}", cands, multi).result
 
     def show(self, builder, title: str) -> None:
+        self.config(cursor="watch")
+        self.status.set(f"Generando «{title}»…")
+        self.update_idletasks()
         try:
             fig = builder()
             if fig is None:
                 messagebox.showinfo("Sin gráfica", "No hay datos suficientes para esa gráfica.")
                 return
             PlotWindow(self, fig, title)
+            self.status.set(f"Listo · {title}")
         except Exception as exc:  # noqa: BLE001
             traceback.print_exc()
+            self.status.set("Error al graficar.")
             messagebox.showerror("Error al graficar", f"{type(exc).__name__}: {exc}")
+        finally:
+            self.config(cursor="")
 
     def captured(self, fn, *a, **kw):
         buf = io.StringIO()
@@ -1109,6 +1961,16 @@ class App(tk.Tk):
     # ---- informe ---------------------------------------------------------- #
 
     def on_select(self) -> None:
+        """Debounce: al recorrer la lista con las flechas solo se informa del ultimo."""
+        if self._sel_after is not None:
+            try:
+                self.after_cancel(self._sel_after)
+            except Exception:  # noqa: BLE001
+                pass
+        self._sel_after = self.after(80, self._on_select_now)
+
+    def _on_select_now(self) -> None:
+        self._sel_after = None
         sel = self.tree.selection()
         if not sel:
             return
@@ -1213,6 +2075,9 @@ class App(tk.Tk):
             self, "Elige dos o más IMU", cands, multi=True).result
         if len(names) < 2:
             return
+        self.config(cursor="watch")
+        self.status.set("Comparando IMU…")
+        self.update_idletasks()
         try:
             imus, stats = {}, {}
             for n in names:
@@ -1224,29 +2089,26 @@ class App(tk.Tk):
             self.nb.select(0)
             PlotWindow(self, A.fig_imu_compare(imus, self.t0, notes), "Comparación de IMU")
             PlotWindow(self, A.fig_imu3d(imus, stats, rot or None), "IMU — 3D")
+            self.status.set("Listo · comparación de IMU")
         except Exception as exc:  # noqa: BLE001
             traceback.print_exc()
             messagebox.showerror("Error", f"{type(exc).__name__}: {exc}")
+        finally:
+            self.config(cursor="")
 
-    # ---- reproduccion en vivo --------------------------------------------- #
+    # ---- regrabacion ------------------------------------------------------ #
 
-    def replay(self) -> None:
+    def goto_record(self) -> None:
         if not self._need_bag():
             return
-        bag = self.path
-        if not bag:
-            return
-        raw = next((n for n, c in self.col.items() if c.kind == "odom"),
-                   "/sensors/imu/odom")
-        filt = next((n for n, c in self.col.items() if c.kind == "car"),
-                    "/state/car")
-        self.replay_panel.configure_bag(bag, raw, filt)
-        self.nb.select(self.replay_panel)
-        if R is None:
-            messagebox.showerror("Falta bag_replay.py",
-                                 "No encuentro bag_replay.py junto a rosbag_gui.py.")
-            return
-        self.status.set("Reproducción integrada lista: pulsa Iniciar en la pestaña.")
+        self.rec_panel.set_bag(self.path)
+        self.rec_panel._from_tree()
+        self.nb.select(self.rec_panel)
+        self.status.set("Elige el nodo y pulsa «Reproducir y grabar».")
+
+    def _on_rec_progress(self, pct) -> None:
+        base = "ROS 2 bag analyzer"
+        self.title(base if pct is None else f"{base} — regrabando {pct:.0f} %")
 
     def _on_close(self) -> None:
         if self._poll_id is not None:
@@ -1256,7 +2118,11 @@ class App(tk.Tk):
                 pass
             self._poll_id = None
         try:
-            self.replay_panel.shutdown()
+            self.settings.update(mode=self.mode, last_dir=self.last_dir,
+                                 only_nav=bool(self.only_nav.get()),
+                                 record=self.rec_panel.get_settings())
+            save_settings(self.settings)
+            self.rec_panel.shutdown()
         finally:
             self.destroy()
 
@@ -1383,7 +2249,8 @@ class App(tk.Tk):
         if not sel:
             return
         prefix = filedialog.asksaveasfilename(
-            title="Prefijo del CSV (se añade _topic.csv)", initialfile="bag")
+            title="Prefijo del CSV (se añade _topic.csv)", initialfile="bag",
+            initialdir=self.last_dir)
         if not prefix:
             return
         try:
