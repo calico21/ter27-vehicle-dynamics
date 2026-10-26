@@ -304,7 +304,9 @@ func _physics_process(delta: float) -> void:
 	# 1. Kinematic acceleration of *this point* on the rigid body, in the world.
 	# Gravity is never added: the onboard filter removes it before the driver
 	# ever sees a sample, so the reading is already gravity-free (see the note at
-	# the top of this file).
+	# the top of this file).  This matches the real IMU, which publishes
+	# gravity-free linear acceleration (verified: real static |g| ~ 0.74 m/s^2
+	# bias only, not 9.81).
 	var arm_world := global_position - body.global_position
 	var imu_vel := body.linear_velocity + body.angular_velocity.cross(arm_world)
 	var inv_basis := global_basis.inverse()
