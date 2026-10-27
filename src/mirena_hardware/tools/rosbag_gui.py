@@ -608,6 +608,40 @@ class CheckDialog(tk.Toplevel):
         self.destroy()
 
 
+# Configuracion calibrada con la que se regraban los bags de estado.
+# Son los mismos parametros que usan las misiones (brake_test, trackdrive,
+# skidpad, autocross) para mirena_state; se aplican por defecto al abrir la
+# pestana "Regrabar con nodo". use_sim_time lo anade la casilla correspondiente.
+STATE_NODE_ARGS = (
+    "--ros-args "
+    "-p odom_timeout_sec:=0.5 "
+    "-p imu_timeout_sec:=0.2 "
+    "-p max_predict_dt_sec:=0.1 "
+    "-p process_noise_diag:='[0.01, 0.01, 0.005, 0.5, 0.5, 0.5]' "
+    "-p odom_meas_floor_diag:='[1e-9, 1e-9, 1e-9, 1e-9, 1e-9, 1e-9]' "
+    "-p init_cov_floor_diag:='[0.01, 0.01, 0.001, 0.01, 0.01, 0.001]' "
+    "-p gyro_meas_var:=1.0e-5 "
+    "-p ins_reanchor_m:=12.0 "
+    "-p use_bicycle_model:=true "
+    "-p steering_degrees:=true "
+    "-p steering_sign:=1.0 "
+    "-p steering_ratio:=1.35 "
+    "-p steering_offset_rad:=0.030 "
+    "-p wheel_radius:=0.191"
+)
+
+# Topics que consume mirena_state y que hay que reproducir (no hace falta
+# reproducir lidar, camaras, etc. para regrabar /state/car).
+STATE_PLAY_TOPICS = ("/sensors/imu /sensors/imu/odom /sensors/wheel_speeds "
+                     "/control/can")
+
+# Script de regrabacion calibrado. La GUI lo ejecuta tal cual para que el
+# orden (record -> nodo -> play pausado -> resume) y el reloj por mensaje sean
+# exactamente los del guion que genera bags correctos.
+RERECORD_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "rerecord_state.sh")
+
+
 class RecordPanel(ttk.Frame):
     """Reproduce un bag, ejecuta un nodo y graba un bag nuevo con el resultado.
 
@@ -646,28 +680,32 @@ class RecordPanel(ttk.Frame):
         self._t_size = 0.0
         self._size = 0
         self.progress_cb = None          # callable(pct | None)
+        self._term: Optional[tk.Toplevel] = None
+        self._term_text: Optional[tk.Text] = None
 
         self.bag = tk.StringVar()
         self.rate = tk.StringVar(value="1.0")
         self.start_s = tk.StringVar()
         self.duration = tk.StringVar()
-        self.play_only = tk.StringVar()
-        self.clock = tk.BooleanVar(value=False)
+        self.play_only = tk.StringVar(value=STATE_PLAY_TOPICS)
+        self.clock = tk.BooleanVar(value=True)
         self.fast = tk.BooleanVar(value=True)
         self.queue_sz = tk.StringVar(value="10000")
         self.cache_mb = tk.StringVar(value="256")
-        self.node_simtime = tk.BooleanVar(value=False)
+        self.node_simtime = tk.BooleanVar(value=True)
         self.speed_hint = tk.StringVar(value="")
         self.node = tk.StringVar(value="mirena_state mirena_state")
-        self.args = tk.StringVar()
+        self.args = tk.StringVar(value=STATE_NODE_ARGS)
         self.no_node = tk.BooleanVar(value=False)
-        self.node_wait = tk.StringVar(value="2.0")
-        self.tail = tk.StringVar(value="2.0")
-        self.out_dir = tk.StringVar(value=os.path.expanduser("~"))
+        self.node_wait = tk.StringVar(value="3.0")
+        self.tail = tk.StringVar(value="3.0")
+        self.out_dir = tk.StringVar(value=os.path.expanduser("~/mirena_ws/bags"))
         self.out_name = tk.StringVar()
         self.storage = tk.StringVar(value="mcap")
         self.all_topics = tk.BooleanVar(value=False)
-        self.extra = tk.StringVar()
+        self.extra = tk.StringVar(value="/state/car /tf /health")
+        self.use_script = tk.BooleanVar(value=True)
+        self.script = tk.StringVar(value=RERECORD_SCRIPT)
         self.auto_open = tk.BooleanVar(value=False)
         self.pct = tk.StringVar(value="")
         self.status = tk.StringVar(
@@ -702,7 +740,8 @@ class RecordPanel(ttk.Frame):
         ttk.Label(f1, text="Velocidad").grid(row=1, column=0, sticky="w", pady=3)
         ttk.Entry(f1, textvariable=self.rate, width=7).grid(row=1, column=1, sticky="w", padx=6)
         ttk.Label(f1, text="Inicio [s]").grid(row=1, column=2, sticky="w", padx=(8, 0))
-        ttk.Entry(f1, textvariable=self.start_s, width=7).grid(row=1, column=3, sticky="w", padx=6)
+        self.start_entry = ttk.Entry(f1, textvariable=self.start_s, width=7)
+        self.start_entry.grid(row=1, column=3, sticky="w", padx=6)
         ttk.Label(f1, text="Duración [s]").grid(row=1, column=4, sticky="w", padx=(8, 0))
         ttk.Entry(f1, textvariable=self.duration, width=7).grid(row=1, column=5, sticky="w", padx=6)
         ttk.Label(f1, text="Rápido").grid(row=2, column=0, sticky="w", pady=3)
@@ -713,10 +752,11 @@ class RecordPanel(ttk.Frame):
             ttk.Button(pre, text=txt, width=5,
                        command=lambda v=val: self.rate.set(v)).pack(side=tk.LEFT, padx=(0, 3))
         ttk.Label(f1, text="Solo topics").grid(row=3, column=0, sticky="w", pady=3)
-        ttk.Entry(f1, textvariable=self.play_only).grid(
-            row=3, column=1, columnspan=5, sticky="we", padx=6)
-        ttk.Checkbutton(f1, text="Reloj simulado (/clock)", variable=self.clock,
-                        command=self._on_clock).grid(row=3, column=6, sticky="e")
+        self.play_only_entry = ttk.Entry(f1, textvariable=self.play_only)
+        self.play_only_entry.grid(row=3, column=1, columnspan=5, sticky="we", padx=6)
+        self.clock_chk = ttk.Checkbutton(f1, text="Reloj simulado (/clock)",
+                                         variable=self.clock, command=self._on_clock)
+        self.clock_chk.grid(row=3, column=6, sticky="e")
         fast = ttk.Frame(f1)
         fast.grid(row=4, column=0, columnspan=7, sticky="w", pady=(4, 0))
         ttk.Checkbutton(fast, text="Optimizar para velocidad", variable=self.fast).pack(
@@ -735,27 +775,43 @@ class RecordPanel(ttk.Frame):
         # 2 · nodo
         f2 = ttk.LabelFrame(left, text="2 · Nodo a ejecutar", padding=10)
         f2.pack(fill=tk.X, pady=(8, 0))
-        ttk.Label(f2, text="Nodo").grid(row=0, column=0, sticky="w", pady=3)
+
+        srow = ttk.Frame(f2)
+        srow.grid(row=0, column=0, columnspan=5, sticky="we", pady=(0, 4))
+        self.script_chk = ttk.Checkbutton(
+            srow, text="Usar script calibrado (rerecord_state.sh)",
+            variable=self.use_script, command=self._toggle_script)
+        self.script_chk.pack(side=tk.LEFT)
+        self.script_entry = ttk.Entry(srow, textvariable=self.script)
+        self.script_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=6)
+        ttk.Button(srow, text="…", width=3, command=self._ask_script).pack(side=tk.LEFT)
+
+        ttk.Label(f2, text="Nodo").grid(row=1, column=0, sticky="w", pady=3)
         self.node_cb = ttk.Combobox(f2, textvariable=self.node, values=[])
-        self.node_cb.grid(row=0, column=1, columnspan=3, sticky="we", padx=6)
+        self.node_cb.grid(row=1, column=1, columnspan=3, sticky="we", padx=6)
         self.node_cb.bind("<KeyRelease>", self._filter_nodes)
         ttk.Button(f2, text="Buscar nodos", command=self._find_nodes).grid(
-            row=0, column=4, sticky="e")
-        ttk.Label(f2, text="Argumentos").grid(row=1, column=0, sticky="w", pady=3)
-        ttk.Entry(f2, textvariable=self.args).grid(
-            row=1, column=1, columnspan=4, sticky="we", padx=6)
+            row=1, column=4, sticky="e")
+        ttk.Label(f2, text="Argumentos").grid(row=2, column=0, sticky="w", pady=3)
+        self.args_entry = ttk.Entry(f2, textvariable=self.args)
+        self.args_entry.grid(row=2, column=1, columnspan=4, sticky="we", padx=6)
         opts = ttk.Frame(f2)
-        opts.grid(row=2, column=0, columnspan=5, sticky="w", pady=(4, 0))
-        ttk.Checkbutton(opts, text="Sin nodo (solo regrabar)", variable=self.no_node,
-                        command=self._toggle_node).pack(side=tk.LEFT)
-        ttk.Checkbutton(opts, text="use_sim_time", variable=self.node_simtime).pack(
-            side=tk.LEFT, padx=(12, 0))
+        opts.grid(row=3, column=0, columnspan=5, sticky="w", pady=(4, 0))
+        self.no_node_chk = ttk.Checkbutton(
+            opts, text="Sin nodo (solo regrabar)", variable=self.no_node,
+            command=self._toggle_node)
+        self.no_node_chk.pack(side=tk.LEFT)
+        self.simtime_chk = ttk.Checkbutton(
+            opts, text="use_sim_time", variable=self.node_simtime)
+        self.simtime_chk.pack(side=tk.LEFT, padx=(12, 0))
         ttk.Label(opts, text="Espera al nodo [s]", style="Muted.TLabel").pack(
             side=tk.LEFT, padx=(16, 4))
-        ttk.Entry(opts, textvariable=self.node_wait, width=6).pack(side=tk.LEFT)
+        self.wait_entry = ttk.Entry(opts, textvariable=self.node_wait, width=6)
+        self.wait_entry.pack(side=tk.LEFT)
         ttk.Label(opts, text="Cola final [s]", style="Muted.TLabel").pack(
             side=tk.LEFT, padx=(16, 4))
-        ttk.Entry(opts, textvariable=self.tail, width=6).pack(side=tk.LEFT)
+        self.tail_entry = ttk.Entry(opts, textvariable=self.tail, width=6)
+        self.tail_entry.pack(side=tk.LEFT)
         f2.columnconfigure(1, weight=1)
 
         # 3 · grabacion
@@ -771,12 +827,15 @@ class RecordPanel(ttk.Frame):
         ttk.Combobox(f3, textvariable=self.storage, values=["mcap", "sqlite3"],
                      width=8, state="readonly").grid(row=1, column=3, sticky="w", padx=6)
         ttk.Label(f3, text="Topics extra").grid(row=2, column=0, sticky="w", pady=3)
-        ttk.Entry(f3, textvariable=self.extra).grid(
-            row=2, column=1, columnspan=3, sticky="we", padx=6)
-        ttk.Checkbutton(f3, text="Grabar todos (-a)", variable=self.all_topics,
-                        command=self._toggle_all).grid(row=3, column=1, sticky="w", pady=(4, 0))
-        ttk.Label(f3, text="Nombre vacío = automático · «extra» = salidas del nodo "
-                           "(ej. /state/car)", style="Muted.TLabel").grid(
+        self.extra_entry = ttk.Entry(f3, textvariable=self.extra)
+        self.extra_entry.grid(row=2, column=1, columnspan=3, sticky="we", padx=6)
+        self.all_topics_chk = ttk.Checkbutton(
+            f3, text="Grabar todos (-a)", variable=self.all_topics,
+            command=self._toggle_all)
+        self.all_topics_chk.grid(row=3, column=1, sticky="w", pady=(4, 0))
+        ttk.Label(f3, text="Nombre vacío = automático · sin selección en la lista "
+                           "se graban solo los «Topics extra» (salidas del nodo, "
+                           "ej. /state/car)", style="Muted.TLabel").grid(
             row=4, column=0, columnspan=5, sticky="w", pady=(4, 0))
         f3.columnconfigure(1, weight=1)
 
@@ -830,6 +889,8 @@ class RecordPanel(ttk.Frame):
         tools = ttk.Frame(logbox)
         tools.pack(fill=tk.X, pady=(0, 4))
         ttk.Button(tools, text="Copiar comandos", command=self.copy_cmds).pack(side=tk.LEFT)
+        ttk.Button(tools, text="Terminal", command=self._open_terminal).pack(
+            side=tk.LEFT, padx=4)
         ttk.Button(tools, text="Guardar registro…", command=self.save_log).pack(
             side=tk.LEFT, padx=4)
         ttk.Button(tools, text="Limpiar", command=self._clear_log).pack(side=tk.LEFT)
@@ -849,11 +910,42 @@ class RecordPanel(ttk.Frame):
     # ---- entradas --------------------------------------------------------- #
 
     def _toggle_node(self) -> None:
-        st = tk.DISABLED if self.no_node.get() else tk.NORMAL
+        st = tk.DISABLED if (self.no_node.get() or self.use_script.get()) else tk.NORMAL
         self.node_cb.configure(state=st)
 
     def _toggle_all(self) -> None:
-        self.lb.configure(state=tk.DISABLED if self.all_topics.get() else tk.NORMAL)
+        disabled = self.all_topics.get() or self.use_script.get()
+        self.lb.configure(state=tk.DISABLED if disabled else tk.NORMAL)
+
+    def _toggle_script(self) -> None:
+        scripted = self.use_script.get()
+        st = tk.DISABLED if scripted else tk.NORMAL
+        if scripted:
+            self.start_s.set("")
+        for w in (self.args_entry, self.no_node_chk, self.simtime_chk,
+                  self.wait_entry, self.tail_entry, self.play_only_entry,
+                  self.clock_chk, self.start_entry, self.extra_entry,
+                  self.all_topics_chk):
+            w.configure(state=st)
+        self.script_entry.configure(state=tk.NORMAL if scripted else tk.DISABLED)
+        self.btn_start.configure(
+            text="▶  Reproducir y grabar (script)" if scripted
+            else "▶  Reproducir y grabar")
+        self._toggle_node()
+        self._toggle_all()
+        if scripted:
+            self.status.set("Modo script: rerecord_state.sh fija nodo, topics y reloj; "
+                            "la salida se ve en «Registro».")
+        else:
+            self.status.set("Modo manual: usa los campos Nodo / Topics.")
+
+    def _ask_script(self) -> None:
+        p = filedialog.askopenfilename(
+            title="Script de regrabación",
+            initialdir=os.path.dirname(os.path.expanduser(self.script.get())) or None,
+            filetypes=[("shell", "*.sh"), ("todos", "*.*")])
+        if p:
+            self.script.set(p)
 
     def _ask_folder(self) -> None:
         p = filedialog.askdirectory(title="Carpeta del bag (con metadata.yaml)")
@@ -891,8 +983,9 @@ class RecordPanel(ttk.Frame):
             self.out_dir.set(parent)
 
     _STR = ("rate", "play_only", "node", "args", "node_wait", "tail", "storage", "extra",
-            "queue_sz", "cache_mb")
-    _BOOL = ("clock", "no_node", "all_topics", "auto_open", "fast", "node_simtime")
+            "queue_sz", "cache_mb", "script")
+    _BOOL = ("clock", "no_node", "all_topics", "auto_open", "fast", "node_simtime",
+             "use_script")
 
     def get_settings(self) -> Dict:
         d = {k: getattr(self, k).get() for k in self._STR + self._BOOL}
@@ -910,8 +1003,7 @@ class RecordPanel(ttk.Frame):
         if d.get("out_dir"):
             self.out_dir.set(d["out_dir"])
             self._out_touched = True
-        self._toggle_node()
-        self._toggle_all()
+        self._toggle_script()
 
     def set_duration_hint(self, path: str, secs: float) -> None:
         self._hint = (path, secs)
@@ -989,18 +1081,26 @@ class RecordPanel(ttk.Frame):
             rate = self._num(self.rate, "velocidad", 1.0)
             out = os.path.join(os.path.expanduser(self.out_dir.get().strip()),
                                self.out_name.get().strip() or "<nombre>")
-            cmds = [self._record_cmd(out)]
-            if not self.no_node.get():
-                cmds.append(self._node_cmd())
-            cmds.append(self._play_cmd(bag, rate, self._num(self.start_s, "inicio"),
-                                       self._num(self.duration, "duración")))
+            if self.use_script.get():
+                cmds = [self._script_cmd(out, bag, rate,
+                                         self._num(self.start_s, "inicio"),
+                                         self._num(self.duration, "duración"))]
+            else:
+                cmds = [self._record_cmd(out)]
+                if not self.no_node.get():
+                    cmds.append(self._node_cmd())
+                cmds.append(self._play_cmd(bag, rate, self._num(self.start_s, "inicio"),
+                                           self._num(self.duration, "duración")))
         except ValueError as exc:
             messagebox.showerror("Configuración no válida", str(exc))
             return
         self.clipboard_clear()
         self.clipboard_append("\n".join(" ".join(shlex.quote(c) for c in cmd)
                                         for cmd in cmds))
-        self.status.set("Comandos copiados (orden: record, nodo, play; uno por terminal).")
+        if self.use_script.get():
+            self.status.set("Comando del script copiado; ejecútalo en una terminal.")
+        else:
+            self.status.set("Comandos copiados (orden: record, nodo, play; uno por terminal).")
 
     def save_log(self) -> None:
         p = filedialog.asksaveasfilename(
@@ -1020,7 +1120,10 @@ class RecordPanel(ttk.Frame):
         self.lb.delete(0, tk.END)
         for n in self._topics:
             self.lb.insert(tk.END, n)
-        self.lb.selection_set(0, tk.END)
+        # Sin seleccion por defecto: al regrabar con un nodo lo normal es
+        # grabar solo sus salidas ("Topics extra") y no duplicar el bag de
+        # entrada. «Todos» sigue estando a un clic.
+        self.lb.selection_clear(0, tk.END)
         self._toggle_all()
 
     @staticmethod
@@ -1075,6 +1178,18 @@ class RecordPanel(ttk.Frame):
         if self.node_simtime.get() and "use_sim_time" not in " ".join(parts):
             parts += ["--ros-args", "-p", "use_sim_time:=true"]
         return parts
+
+    def _script_cmd(self, out: str, bag: str, rate: float, start, duration) -> List[str]:
+        script = os.path.expanduser(self.script.get().strip())
+        if not script or not os.path.isfile(script):
+            raise ValueError("No encuentro el script «rerecord_state.sh».")
+        if start is not None:
+            raise ValueError("El modo script no admite «Inicio [s]»; déjalo vacío.")
+        # El script recibe: <out_bag> [rate] [duration_s] [in_bag]. Se pasa una
+        # cadena vacía para la duración cuando no se ha indicado, para que el
+        # bag de entrada no se confunda con el tercer argumento.
+        return ["bash", script, out, f"{rate:g}",
+                (f"{duration:g}" if duration is not None else ""), bag]
 
     def _on_clock(self) -> None:
         if self.clock.get():
@@ -1250,9 +1365,14 @@ class RecordPanel(ttk.Frame):
                          f"se usará «{os.path.basename(out)}_{k}»")
             out = f"{out}_{k}"
         try:
-            rec = self._record_cmd(out)
-            node = None if self.no_node.get() else self._node_cmd()
-            play = self._play_cmd(bag, rate, start, dur)
+            if self.use_script.get():
+                cmd = self._script_cmd(out, bag, rate, start, dur)
+                rec = node = play = None
+            else:
+                cmd = None
+                rec = self._record_cmd(out)
+                node = None if self.no_node.get() else self._node_cmd()
+                play = self._play_cmd(bag, rate, start, dur)
         except ValueError as exc:
             messagebox.showerror("Configuración no válida", str(exc))
             return
@@ -1289,6 +1409,20 @@ class RecordPanel(ttk.Frame):
         self._final_msg, self._manual = None, False
         self._stop_done, self._warned_node = False, False
         self.procs = {}
+        if cmd is not None:
+            self._open_terminal()
+            p = self._spawn(cmd, "script")
+            if p is None:
+                self.status.set("No pude arrancar el script.")
+                return
+            self.procs["script"] = p
+            self.running = True
+            self.btn_start.configure(state=tk.DISABLED)
+            self.btn_stop.configure(state=tk.NORMAL)
+            self.btn_open.configure(state=tk.DISABLED)
+            self._stage, self._t_stage = "script", time.monotonic()
+            self.status.set("Ejecutando rerecord_state.sh…")
+            return
         p = self._spawn(rec, "rec")
         if p is None:
             self.status.set("No pude arrancar la grabación.")
@@ -1313,7 +1447,7 @@ class RecordPanel(ttk.Frame):
         self.status.set("Cerrando procesos y finalizando el bag…")
 
         def work() -> None:
-            for tag, t in (("play", 6), ("node", 8), ("rec", 15)):
+            for tag, t in (("script", 15), ("play", 6), ("node", 8), ("rec", 15)):
                 self._kill(self.procs.get(tag), t)
             self._stop_done = True
         threading.Thread(target=work, daemon=True).start()
@@ -1386,6 +1520,18 @@ class RecordPanel(ttk.Frame):
         if st != "stopping" and rec is not None and rec.poll() is not None:
             self._begin_stop("La grabación terminó de forma inesperada; revisa el registro.")
             return
+        if st == "script":
+            p = self.procs.get("script")
+            if p is not None and p.poll() is not None:
+                if p.returncode != 0:
+                    self._begin_stop(f"El script terminó con código {p.returncode}; "
+                                     "revisa el registro.")
+                else:
+                    self._begin_stop()
+                return
+            self.status.set("Ejecutando rerecord_state.sh…")
+            self._update_progress(now - self._t_stage, now)
+            return
         if st == "rec_wait" and now - self._t_stage >= 1.5:
             if self._node_cmd_v:
                 p = self._spawn(self._node_cmd_v, "nodo")
@@ -1433,6 +1579,33 @@ class RecordPanel(ttk.Frame):
 
     def _clear_log(self) -> None:
         set_text(self.log, "")
+        if self._term_text is not None:
+            set_text(self._term_text, "")
+
+    def _open_terminal(self) -> None:
+        if self._term is not None and self._term.winfo_exists():
+            self._term.deiconify()
+            self._term.lift()
+            return
+        win = tk.Toplevel(self)
+        win.title("Terminal · salida del script")
+        win.geometry("1000x460")
+        self._term_text = make_text(win)
+        self._term_text.configure(state="normal")
+        self._term_text.insert("1.0", self.log.get("1.0", "end-1c"))
+        self._term_text.see(tk.END)
+        self._term_text.configure(state="disabled")
+        self._term = win
+        win.protocol("WM_DELETE_WINDOW", self._close_terminal)
+
+    def _close_terminal(self) -> None:
+        if self._term is not None:
+            try:
+                self._term.destroy()
+            except tk.TclError:
+                pass
+        self._term = None
+        self._term_text = None
 
     def _drain(self) -> None:
         lines: List[str] = []
@@ -1461,6 +1634,18 @@ class RecordPanel(ttk.Frame):
             self.log.delete("1.0", f"{extra + 1}.0")
         self.log.see(tk.END)
         self.log.configure(state="disabled")
+        if self._term_text is not None:
+            try:
+                self._term_text.configure(state="normal")
+                for ln in lines:
+                    self._term_text.insert(tk.END, ln + "\n")
+                extra = int(self._term_text.index("end-1c").split(".")[0]) - 3000
+                if extra > 0:
+                    self._term_text.delete("1.0", f"{extra + 1}.0")
+                self._term_text.see(tk.END)
+                self._term_text.configure(state="disabled")
+            except tk.TclError:
+                self._term_text = None
 
     def shutdown(self) -> None:
         if self._after is not None:
@@ -1470,9 +1655,10 @@ class RecordPanel(ttk.Frame):
                 pass
             self._after = None
         if self.running:
-            for tag, t in (("play", 3), ("node", 4), ("rec", 8)):
+            for tag, t in (("script", 15), ("play", 3), ("node", 4), ("rec", 8)):
                 self._kill(self.procs.get(tag), t)
             self.running = False
+        self._close_terminal()
 
 
 def make_text(parent) -> tk.Text:
