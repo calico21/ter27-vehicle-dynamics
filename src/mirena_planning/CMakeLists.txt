@@ -30,6 +30,7 @@ add_library(mirena_planning_core
   src/unknown/unknown_planner.cpp
   src/known/known_planner.cpp
   src/known/track_template.cpp
+  src/known/known_planner_acceleration.cpp
 )
 target_include_directories(mirena_planning_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -60,11 +61,15 @@ add_executable(mirena_planning src/unknown/unknown_planner_node.cpp)
 target_link_libraries(mirena_planning mirena_planning_core nlohmann_json::nlohmann_json)
 ament_target_dependencies(mirena_planning ${PLANNER_NODE_DEPS})
 
-add_executable(mirena_planning_known src/known/known_planner_node.cpp)
-target_link_libraries(mirena_planning_known mirena_planning_core nlohmann_json::nlohmann_json)
-ament_target_dependencies(mirena_planning_known ${PLANNER_NODE_DEPS})
+add_executable(mirena_planning_known_skidpad src/known/known_planner_node.cpp)
+target_link_libraries(mirena_planning_known_skidpad mirena_planning_core nlohmann_json::nlohmann_json)
+ament_target_dependencies(mirena_planning_known_skidpad ${PLANNER_NODE_DEPS})
 
-install(TARGETS mirena_planning mirena_planning_known DESTINATION lib/${PROJECT_NAME})
+add_executable(mirena_planning_known_acceleration src/known/known_planner_node_acceleration.cpp)
+target_link_libraries(mirena_planning_known_acceleration mirena_planning_core nlohmann_json::nlohmann_json)
+ament_target_dependencies(mirena_planning_known_acceleration ${PLANNER_NODE_DEPS})
+
+install(TARGETS mirena_planning mirena_planning_known_skidpad mirena_planning_known_acceleration DESTINATION lib/${PROJECT_NAME})
 install(TARGETS mirena_planning_core
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib

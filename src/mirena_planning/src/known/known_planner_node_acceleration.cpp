@@ -211,7 +211,7 @@ private:
     // launch arguments, so they are already in place by construction.
     const KnownPlannerParams k;
 
-    declare_parameter<std::string>("mission", "skidpad");
+    declare_parameter<std::string>("mission", "acceleration");
     declare_parameter<std::string>("fallback_frame", "map");
     declare_parameter<double>("plan_period", 0.1);
     declare_parameter<double>("heartbeat_period", 0.1);
