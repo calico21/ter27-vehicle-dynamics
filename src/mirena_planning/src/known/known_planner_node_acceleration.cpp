@@ -209,7 +209,7 @@ private:
   {
     // Declared and read in the same breath: the mission's values arrive as
     // launch arguments, so they are already in place by construction.
-    const KnownPlannerParams k;
+    const KnownPlannerAccelerationParams k;
 
     declare_parameter<std::string>("mission", "acceleration");
     declare_parameter<std::string>("fallback_frame", "map");
@@ -243,7 +243,7 @@ private:
 
   std::unique_ptr<Planner> makePlanner()
   {
-    KnownPlannerParams p;
+    KnownPlannerAccelerationParams p;
     p.inlier_distance = get_parameter("inlier_distance").as_double();
     p.min_score = get_parameter("min_score").as_double();
     p.min_inliers = static_cast<int>(get_parameter("min_inliers").as_int());
@@ -271,7 +271,7 @@ private:
       RCLCPP_INFO(
         get_logger(), "Loaded template '%s': %zu cones, %zu path points.",
         track.name.c_str(), track.cones.size(), track.path.size());
-      return std::make_unique<KnownPlanner>(std::move(track), p);
+      return std::make_unique<KnownPlannerAcceleration>(std::move(track), p);
     } catch (const std::exception & e) {
       RCLCPP_ERROR(get_logger(), "%s", e.what());
       return nullptr;

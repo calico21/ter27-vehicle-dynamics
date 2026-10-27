@@ -48,7 +48,7 @@ bool transverse(const GateCandidate & gate, Vec2 direction, double angle_toleran
 
 std::vector<GateCandidate> makeRawCandidates(
   const std::vector<Observation> & observations,
-  const KnownPlannerParams & params)
+  const KnownPlannerAccelerationParams & params)
 {
   std::vector<GateCandidate> out;
   const std::size_t n = observations.size();
@@ -76,7 +76,7 @@ std::vector<GateCandidate> makeRawCandidates(
 
 std::vector<GateCandidate> makeTemplateGates(
   const TrackTemplate & track,
-  const KnownPlannerParams & params)
+  const KnownPlannerAccelerationParams & params)
 {
   std::vector<GateCandidate> out;
   if (track.cones.size() < 2 || track.path.size() < 2) {return out;}
@@ -139,19 +139,20 @@ std::array<Vec2, 2> orderedTemplateEndpoints(
 
 }  // namespace
 
-KnownPlanner::KnownPlanner(TrackTemplate track, KnownPlannerParams params)
+KnownPlannerAcceleration::KnownPlannerAcceleration(
+  TrackTemplate track, KnownPlannerAccelerationParams params)
 : track_(std::move(track)), params_(params)
 {
   reset();
 }
 
-void KnownPlanner::reset()
+void KnownPlannerAcceleration::reset()
 {
   last_fit_ = track_.map_from_template;
   locked_ = false;
 }
 
-KnownPlanner::Fit KnownPlanner::evaluate(
+KnownPlannerAcceleration::Fit KnownPlannerAcceleration::evaluate(
   const std::vector<Observation> & observations, Transform2 guess) const
 {
   const Transform2 to_template = guess.inverse();
@@ -186,7 +187,7 @@ KnownPlanner::Fit KnownPlanner::evaluate(
   return fit;
 }
 
-KnownPlanner::Fit KnownPlanner::refine(
+KnownPlannerAcceleration::Fit KnownPlannerAcceleration::refine(
   const std::vector<Observation> & observations, Transform2 seed) const
 {
   Transform2 current = seed;
@@ -234,7 +235,7 @@ KnownPlanner::Fit KnownPlanner::refine(
   return fit;
 }
 
-KnownPlanner::Fit KnownPlanner::recover(
+KnownPlannerAcceleration::Fit KnownPlannerAcceleration::recover(
   const std::vector<Observation> & observations) const
 {
   Fit best;
@@ -376,7 +377,7 @@ KnownPlanner::Fit KnownPlanner::recover(
   return plausible(refined) ? refined : best;
 }
 
-bool KnownPlanner::plausible(const Fit & fit) const
+bool KnownPlannerAcceleration::plausible(const Fit & fit) const
 {
   if (fit.inliers < params_.min_inliers || fit.score < params_.min_score) {return false;}
   const Transform2 & nominal = track_.map_from_template;
@@ -386,7 +387,7 @@ bool KnownPlanner::plausible(const Fit & fit) const
          std::abs(wrapAngle(fit.map_from_template.psi - nominal.psi)) <= params_.max_heading_drift;
 }
 
-std::optional<Plan> KnownPlanner::plan(
+std::optional<Plan> KnownPlannerAcceleration::plan(
   const std::vector<Observation> & observations, PlanDebug * debug)
 {
   Fit fit = refine(observations, locked_ ? last_fit_ : track_.map_from_template);

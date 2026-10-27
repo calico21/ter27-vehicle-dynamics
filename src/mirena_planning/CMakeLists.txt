@@ -22,9 +22,9 @@ find_package(nlohmann_json REQUIRED)
 find_package(mirena_common REQUIRED)
 
 # ---------------------------------------------------------------------------
-# Planning core: no ROS, so the geometry can be unit tested without a node.
+# Planning core library
 # ---------------------------------------------------------------------------
-add_library(mirena_planning_core
+add_library(mirena_planning_core SHARED
   src/geometry.cpp
   src/planner.cpp
   src/unknown/unknown_planner.cpp
@@ -32,21 +32,25 @@ add_library(mirena_planning_core
   src/known/track_template.cpp
   src/known/known_planner_acceleration.cpp
 )
+
 target_include_directories(mirena_planning_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
+
+# Apply dependencies to the core library so all targets share matching build flags
+ament_target_dependencies(mirena_planning_core
+  mirena_common
+  geometry_msgs
+  std_msgs
+  visualization_msgs
+)
+
+# Plain signature (no PUBLIC) to match ament_target_dependencies
 target_link_libraries(mirena_planning_core nlohmann_json::nlohmann_json)
 
 # ---------------------------------------------------------------------------
 # ROS 2 nodes
-#
-# Two alternative occupants of the same slot in the stack: exactly one runs per
-# mission, under the node name the supervisor monitors. mirena_planning
-# discovers the track (trackdrive, autocross); mirena_planning_known registers a
-# surveyed template against it (skidpad, acceleration). Both publish the same
-# planning/track and health topics, and neither shares a line of node code with
-# the other -- each is one self-contained translation unit.
 # ---------------------------------------------------------------------------
 set(PLANNER_NODE_DEPS
   ament_index_cpp
@@ -69,11 +73,19 @@ add_executable(mirena_planning_known_acceleration src/known/known_planner_node_a
 target_link_libraries(mirena_planning_known_acceleration mirena_planning_core nlohmann_json::nlohmann_json)
 ament_target_dependencies(mirena_planning_known_acceleration ${PLANNER_NODE_DEPS})
 
-install(TARGETS mirena_planning mirena_planning_known_skidpad mirena_planning_known_acceleration DESTINATION lib/${PROJECT_NAME})
+# ---------------------------------------------------------------------------
+# Installation
+# ---------------------------------------------------------------------------
+install(TARGETS mirena_planning mirena_planning_known_skidpad mirena_planning_known_acceleration
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 install(TARGETS mirena_planning_core
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
 )
+
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY resource DESTINATION share/${PROJECT_NAME})
 
@@ -92,8 +104,8 @@ if(BUILD_TESTING)
   target_link_libraries(test_mirena_planning mirena_planning_core)
   target_compile_definitions(test_mirena_planning PRIVATE
     MIRENA_PLANNING_RESOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/resource"
-    # Layouts exported from the sim, with the centreline they were drawn around.
-    MIRENA_PLANNING_TRACK_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test/tracks")
+    MIRENA_PLANNING_TRACK_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test/tracks"
+  )
 endif()
 
 ament_package()

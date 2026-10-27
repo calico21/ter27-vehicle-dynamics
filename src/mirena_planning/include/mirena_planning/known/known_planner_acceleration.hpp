@@ -12,7 +12,7 @@
 namespace mirena::planning
 {
 
-struct KnownPlannerParams
+struct KnownPlannerAccelerationParams
 {
   double inlier_distance{0.6};
   double min_score{0.6};
@@ -45,10 +45,11 @@ struct KnownPlannerParams
   double max_heading_drift{0.6};
 };
 
-class KnownPlanner : public Planner
+class KnownPlannerAcceleration : public Planner
 {
 public:
-  explicit KnownPlanner(TrackTemplate track, KnownPlannerParams params = {});
+  explicit KnownPlannerAcceleration(
+    TrackTemplate track, KnownPlannerAccelerationParams params = {});
 
   std::optional<Plan> plan(
     const std::vector<Observation> & observations, PlanDebug * debug) override;
@@ -74,7 +75,7 @@ private:
   bool plausible(const Fit & fit) const;
 
   TrackTemplate track_;
-  KnownPlannerParams params_;
+  KnownPlannerAccelerationParams params_;
   Transform2 last_fit_{};
   bool locked_{false};
   mutable std::mt19937 rng_{2026u};
