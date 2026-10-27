@@ -82,7 +82,7 @@ def generate_launch_description():
                 # Effective rolling radius and steering gain measured from the
                 # bag; see utilities/calibrate_wheel_steering.py. Keep the
                 # simulator on the nominal 0.2 m / 1.0 values.
-                'use_bicycle_model': True,
+                'use_bicycle_model': False,
                 'steering_degrees': True,
                 'steering_sign': 1.0,
                 'steering_ratio': 1.35,                      # effective steering gain
