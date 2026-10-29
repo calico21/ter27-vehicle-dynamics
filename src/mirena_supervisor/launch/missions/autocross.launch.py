@@ -262,7 +262,7 @@ def generate_launch_description():
                 'steer_rate': radians(5.0 * 30.0),             # rad/s
                 'gas_rate': 5.0,                               # per second
                 # -- Speed profile, which the MPC gets from its cost function instead
-                'max_speed': 8.0,                             # m/s ceiling regardless of geometry
+                'max_speed': 3.0,                             # m/s ceiling regardless of geometry
                 'min_speed': 0.2,                              # m/s floor away from a stop, so the car keeps rolling
                 'max_lateral_accel': 2.0,                      # m/s^2 the tyres are trusted with in a corner
                 'max_decel': 2.0,                              # m/s^2 planned for a corner or the finish
