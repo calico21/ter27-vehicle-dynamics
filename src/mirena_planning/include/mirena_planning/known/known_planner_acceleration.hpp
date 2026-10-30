@@ -15,7 +15,7 @@ namespace mirena::planning
 struct KnownPlannerAccelerationParams
 {
   double inlier_distance{0.6};
-  double min_score{0.6};
+  double min_score{0.3};
   int min_inliers{5};
 
   int icp_iterations{25};
