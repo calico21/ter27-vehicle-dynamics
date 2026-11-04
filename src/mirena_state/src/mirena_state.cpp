@@ -22,6 +22,7 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include "mirena_common/msg/car.hpp"
 #include "mirena_common/msg/car_control.hpp"
+#include "mirena_common/msg/car_control.hpp"
 #include "mirena_common/msg/heartbeat.hpp"
 #include "mirena_common/msg/wheel_speeds.hpp"
 
@@ -131,6 +132,20 @@ class MirenaState : public rclcpp::Node
     /// period.
     bool _sensor_time_sync_predict = true;
 
+    /// Last IMU acceleration (raw, bias still included; predict() subtracts
+    /// b_ax). Used by the time-sync predicts so they integrate the real
+    /// acceleration instead of zero, which would otherwise feed -b_ax*dt into
+    /// u and leak the missing a_x into the bias estimate through P(6,3).
+    double _last_ax = 0.0;
+    double _last_ay = 0.0;
+
+    /// Suelo separado para las varianzas de velocidad del INS (u, v, omega).
+    /// Se aplica en ins_odom_callback antes de pasar la medida al EKF, para
+    /// que la velocidad lateral v no se sobre-confíe cuando el INS reporta
+    /// varianzas muy pequeñas. La parte de pose (x, y, yaw) sigue usando
+    /// odom_meas_floor_diag.
+    mirena::Ekf::Vec3 _odom_vel_floor_diag = mirena::Ekf::Vec3::Constant(1e-4);
+
     /// Metres by which the INS solution may disagree with the estimate before
     /// the update is absorbed by re-anchoring instead of applied to the state.
     /// <= 0 disables the gate. Measured: routine disagreement is 3-5 m (the
@@ -167,11 +182,13 @@ public:
         this->declare_parameter<std::vector<double>>(
             "process_noise_diag", {0.01, 0.01, 0.005, 0.5, 0.5, 0.5, 1e-6});
         this->declare_parameter<std::vector<double>>(
-            "odom_meas_floor_diag", {1e-2, 1e-2, 1e-2, 1e-2, 1e-2, 1e-2});
+            "odom_meas_floor_diag", {1e-9, 1e-9, 1e-9, 1e-9, 1e-9, 1e-9});
+        this->declare_parameter<std::vector<double>>(
+            "odom_meas_vel_floor_diag", {1e-4, 1e-4, 1e-4});
         this->declare_parameter<std::vector<double>>(
             "init_cov_floor_diag", {0.01, 0.01, 0.001, 0.01, 0.01, 0.001, 0.04});
         this->declare_parameter<double>("gyro_meas_var", 1.0e-5);
-        this->declare_parameter<double>("wheel_radius", 0.2);
+        this->declare_parameter<double>("wheel_radius", 0.191);
         this->declare_parameter<double>("track_width", 1.2);
         this->declare_parameter<double>("encoder_var", 0.01);
         this->declare_parameter<bool>("use_encoders", true);
@@ -183,8 +200,8 @@ public:
         this->declare_parameter<std::string>("steering_topic", "/control/can");
         this->declare_parameter<bool>("steering_degrees", true);
         this->declare_parameter<double>("steering_sign", 1.0);
-        this->declare_parameter<double>("steering_ratio", 1.0);
-        this->declare_parameter<double>("steering_offset_rad", 0.0);
+        this->declare_parameter<double>("steering_ratio", 1.35);
+        this->declare_parameter<double>("steering_offset_rad", 0.030);
         this->declare_parameter<double>("steering_timeout_sec", 0.2);
         this->declare_parameter<double>("max_steering_rad", 0.6);
         this->declare_parameter<double>("steering_noise_rad", 0.02);
@@ -253,7 +270,18 @@ public:
         mirena::Ekf::Config cfg;
         cfg.process_noise_diag = param_vec7("process_noise_diag", 1e-6);
         cfg.odom_meas_floor_diag = param_vec6("odom_meas_floor_diag");
+        // Las entradas de velocidad (u, v, omega) se dejan a cero aquí para
+        // que el EKF no aplique un suelo distinto; el suelo de velocidad se
+        // aplica por separado en ins_odom_callback mediante _odom_vel_floor_diag.
+        cfg.odom_meas_floor_diag(3) = 0.0;
+        cfg.odom_meas_floor_diag(4) = 0.0;
+        cfg.odom_meas_floor_diag(5) = 0.0;
         cfg.init_cov_floor_diag = param_vec7("init_cov_floor_diag", 0.04);
+
+        // Suelo separado para varianzas de velocidad del INS (u, v, omega).
+        auto vf = this->get_parameter("odom_meas_vel_floor_diag").as_double_array();
+        for (size_t i = 0; i < 3 && i < vf.size(); ++i)
+            _odom_vel_floor_diag(i) = std::max(vf[i], 0.0);
         _gyro_meas_var = this->get_parameter("gyro_meas_var").as_double();
         cfg.gyro_meas_var = _gyro_meas_var;
         cfg.max_dt = this->get_parameter("max_predict_dt_sec").as_double();
@@ -452,6 +480,11 @@ private:
     {
         std::lock_guard<std::mutex> lock(_filter_mutex);
         _last_imu_stamp = msg->header.stamp;
+        if (std::isfinite(msg->linear_acceleration.x) && std::isfinite(msg->linear_acceleration.y))
+        {
+            _last_ax = msg->linear_acceleration.x;
+            _last_ay = msg->linear_acceleration.y;
+        }
         if (!_ekf->is_initialized())
         {
             if (!_ins_anchored) init_at_origin(*msg);
@@ -502,14 +535,25 @@ private:
         const double v_right = (msg->rr * 2.0 * M_PI / 60.0) * _wheel_radius;
         const double u = 0.5 * (v_left + v_right);
         const double w = (v_right - v_left) / _track_width;
-
+        const double v = 0.5 * (v_left - v_right);
         if (std::abs(u) > 15.0)
         {
             RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
                                  "[Encoder] Rejecting outlier velocity u=%.2f m/s (|u| > 15.0 m/s).", u);
             return;
         }
-
+        if (std::abs(w) > 2.0)
+        {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                                 "[Encoder] Rejecting outlier angular velocity w=%.2f rad/s (|w| > 2.0 rad/s).", w);
+            return;
+        }
+        if (std::abs(v) > abs(u*0.2))
+        {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                                 "[Encoder] Rejecting outlier lateral velocity v=%.2f m/s (|v| > 0.2 * |u|).", v);
+            return;
+        }
         const double v_diff = std::abs(v_left - v_right);
         const double dynamic_var = std::min(_encoder_base_var + 0.10 * (v_diff * v_diff), 1.0);
 
@@ -530,7 +574,7 @@ private:
             }
             if (t > _ekf->stamp())
             {
-                predict_at(t, 0.0, 0.0, "encoder time sync predict");
+                predict_at(t, _last_ax, _last_ay, "encoder time sync predict");
             }
         }
 
@@ -542,14 +586,26 @@ private:
         // what keeps the cross-track position from random-walking whenever the
         // INS drops out (or simply reading noisy v while it is up). Setting
         // no_slip_var <= 0 disables it.
+        //
+        // IMPORTANT: la varianza se limita a 0.09 (desvío estándar ~0.3 m/s),
+        // no a 1.0. Con 1.0 la ganancia de Kalman de esta actualización se
+        // vuelve casi nula a velocidad alta y v queda desacoplada, derivada
+        // libremente acumulando ruido de proceso. 0.09 es lo bastante alto
+        // para curvas rápidas pero lo bastante apretado para evitar saltos
+        // laterales en y.
         if (_no_slip_var > 0.0)
         {
-            const double v_est = _ekf->state()(4);
+            const double v_est = _ekf->state()(4); // Velocidad lateral estimada
+    
+            // Tope máximo de varianza: 0.02 m²/s² (corresponde a σ ≈ 0.14 m/s de tolerancia lateral)
+            const double max_no_slip_var = 0.02; 
+    
             const double no_slip_var =
-                std::min(_no_slip_var + kNoSlipSpeedGain * (u * u + v_est * v_est), 1.0);
-            log_step(_ekf->update_nonholonomic(_cog_to_rear_axle_m, no_slip_var),
-                     "encoder no-slip update");
-        }
+            std::min(_no_slip_var + kNoSlipSpeedGain * (u * u + v_est * v_est), max_no_slip_var);
+
+        log_step(_ekf->update_nonholonomic(_cog_to_rear_axle_m, no_slip_var),
+             "encoder no-slip update");
+}
     }
 
     /// Recompute T_odom <- ins so the given INS solution lands exactly on the
@@ -683,7 +739,7 @@ private:
             // by the same parameter when the IMU is the only clock.
             if (_sensor_time_sync_predict && t > _ekf->stamp())
             {
-                predict_at(t, 0.0, 0.0, "INS time sync predict");
+                predict_at(t, _last_ax, _last_ay, "INS time sync predict");
             }
 
             if (_ekf->is_initialized())
@@ -714,6 +770,11 @@ private:
             msg->twist.covariance[0],   // u
             msg->twist.covariance[7],   // v
             msg->twist.covariance[35];  // omega
+
+        // Suelo separado para las varianzas de velocidad (u, v, omega). La
+        // velocidad lateral v es la que más se beneficia: evita que el filtro
+        // sobre-confíe en una medida de v demasiado precisa del INS.
+        r.tail<3>() = r.tail<3>().cwiseMax(_odom_vel_floor_diag);
 
         if (!_ekf->is_initialized())
         {
