@@ -49,6 +49,7 @@ from mirena_common.msg import Heartbeat, AsInfo, MissionInfo
 
 from mirena_supervisor.mission_launcher import MissionLauncher
 import datetime
+import datetime
 
 # The topic every pipeline node reports on. Publishing here is what makes a node
 # part of the mission as far as this supervisor is concerned.
