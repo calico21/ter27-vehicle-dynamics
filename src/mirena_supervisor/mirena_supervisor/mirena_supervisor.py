@@ -29,10 +29,14 @@ from the graph, so adding a node to a mission is one edit in its launch file.
 """
 
 import subprocess
+import subprocess
 import json
 import os
 import signal
+import signal
 import threading
+
+from scipy import signal
 
 from scipy import signal
 from typing import Any, Dict, List, Optional, Set
@@ -110,6 +114,7 @@ class MirenaSupervisor(Node):
         # A running mission with any node quiet for this long is dead.
         self.declare_parameter('heartbeat_timeout_sec', 3.0)
         self.declare_parameter('record_bag', False)
+        self.declare_parameter('record_bag', False)
 
         self._launch_dir = os.path.join(
             get_package_share_directory(
@@ -124,6 +129,7 @@ class MirenaSupervisor(Node):
         self._startup_timeout = self.get_parameter('startup_timeout_sec').value
         self._discovery_settle = self.get_parameter('discovery_settle_sec').value
         self._heartbeat_timeout = self.get_parameter('heartbeat_timeout_sec').value
+        self._record_bag = self.get_parameter('record_bag').value
         self._record_bag = self.get_parameter('record_bag').value
 
         self._as_status: int = AsInfo.AS_STATUS_OFF
@@ -150,6 +156,7 @@ class MirenaSupervisor(Node):
         self._monitor_timer: Timer = self.create_timer(0.1, self.monitor)
 
         self.get_logger().info(f"Mirena Supervisor ready. Missions: {self._launch_dir}")
+        self.bag_process = None
         self.bag_process = None
 
     # ------------------------------------------------------------- transitions
@@ -210,6 +217,16 @@ class MirenaSupervisor(Node):
             return
 
         self._launched_at = self.get_clock().now()
+
+        if self._record_bag:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            bag_dir = os.path.expanduser("~/rosbags")
+            os.makedirs(bag_dir, exist_ok=True)
+            bag_path = os.path.join(bag_dir, f"event_{timestamp}")
+            # Spawn ros2 bag record as a background process
+            cmd = ['ros2', 'bag', 'record', '-a', '-o', bag_path]
+            self.bag_process = subprocess.Popen(cmd)
+            self.get_logger().info(f"Started recording: {bag_path}")
 
         if self._record_bag:
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -389,6 +406,12 @@ class MirenaSupervisor(Node):
         self._pipeline = set()
         self._pipeline_changed_at = None
         threading.Thread(target=self._launcher.stop, daemon=True).start()
+        if self._record_bag and self.bag_process is not None:
+            # SIGINT allows ros2 bag record to flush and close metadata.yaml cleanly
+            self.bag_process.send_signal(signal.SIGINT)
+            self.bag_process.wait()
+            self.bag_process = None
+            self.get_logger().info("Stopped recording.")
         if self._record_bag and self.bag_process is not None:
             # SIGINT allows ros2 bag record to flush and close metadata.yaml cleanly
             self.bag_process.send_signal(signal.SIGINT)
