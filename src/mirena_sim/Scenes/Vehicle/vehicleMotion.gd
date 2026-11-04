@@ -25,7 +25,19 @@ const BRAKE_BIAS_F = 0.60
 ## Keep in step with `mass` on the MirenaCar node in mirena_car.tscn.
 const MASS_KG = 300.0
 const GRAVITY = 9.81
-const MAX_STEER = deg_to_rad(30)
+## Real-car max_steer_angle is 0.35 rad (20 deg).  The recorded CAN stream
+## occasionally asks for more, so clamp to the physical limit in ROS mode too.
+const MAX_STEER = 0.35
+## --- Aero (real-car spec) ---
+## Cl_ref = 4.14, Cd_ref = 2.50, A_ref = 1.10 m^2, rho = 1.225 kg/m^3.
+## Godot's VehicleBody3D models neither drag nor downforce, so without these the
+## car coasts forever and reaches 20-35 m/s instead of the real car's ~7 m/s.
+## That excess speed is what saturates the tyres and collapses the yaw response,
+## so this is the single most important term for matching the recorded IMU.
+const RHO_AIR = 1.225 # kg/m^3
+const CD_A = 2.50 * 1.10 # m^2, drag area
+const CL_A = 4.14 * 1.10 # m^2, lift (downforce) area
+const DRIVETRAIN_EFF = 0.92
 ## /control carries a [-1, 1] throttle where -1 is full braking, never reverse,
 ## so the car must not drive backwards on one. The friction brakes are what
 ## holds it at a standstill now, not a regen term.
@@ -392,7 +404,9 @@ func _process_manual_pilot(delta: float) -> void:
 
 func _process_ros_pilot() -> void:
 	self.gas = _ros_gas
-	self.steering = _ros_steer 
+	# The real steering actuator saturates at max_steer_angle; clamp the ROS
+	# command so the sim cannot steer beyond the real car's physical limit.
+	self.steering = clampf(_ros_steer, -MAX_STEER, MAX_STEER)
 	self.brake = 0.0
 
 func _process_track_rail(delta: float) -> void:
@@ -427,6 +441,15 @@ func _apply_vehicle_physics(_delta: float) -> void:
 	var u = -_body_velocity().z
 	var max_fx_motor = MOTOR_PEAK_TRQ * GEAR_RATIO / WHEEL_RADIUS
 
+	# Aerodynamic drag and downforce (real-car coefficients). Applied at the
+	# centre of mass, which keeps the total load and the speed limit right even
+	# though it loses the small aero pitch moment. q = 0.5 * rho * v^2.
+	var speed := linear_velocity.length()
+	if speed > 0.1:
+		var q := 0.5 * RHO_AIR * speed * speed
+		apply_central_force(-q * CD_A * linear_velocity / speed)
+		apply_central_force(-q * CL_A * global_basis.y)
+
 	var throttle = max(gas, 0.0)
 	var braking = max(-gas, 0.0)
 
@@ -441,7 +464,11 @@ func _apply_vehicle_physics(_delta: float) -> void:
 	# of only 1.9 m/s^2 including gradient. The tyre-limited friction brake
 	# carries the whole budget instead, and it also holds the car at rest,
 	# which is what bounding the braking at zero needed the regen for.
-	var fx = throttle * max_fx_motor
+	# Real drivetrain is power-limited (80 kW) as well as torque-limited. The
+	# constant was declared but never used, so the car pulled full torque at any
+	# speed. Keep the torque cap but also cap by P/v.
+	var fx = minf(throttle * max_fx_motor,
+		POWER_LIM * DRIVETRAIN_EFF / maxf(u, 1.0))
 
 	# Rear left and right. max_fx_motor is the total tractive force, so each
 	# driven wheel gets half of it -- otherwise the pair asks for twice the

@@ -73,28 +73,28 @@ namespace mirena
  {
  // -- Association --------------------------------------------------------
 
- /// Chi-square gate on the squared Mahalanobis distance. 5.99 is the 95th
- /// percentile for two degrees of freedom, 9.21 the 99th.
- ///
- /// One number, and it answers every "is this the thing I already have"
- /// question in the system: matching an observation to a landmark, matching
- /// it to a candidate, and deciding whether a candidate about to be promoted
- /// is really a cone the map already holds. They are the same question and
- /// they get the same answer.
- double mahalanobis_threshold = 9.21;
- /// Hard Euclidean backstop, metres, applied before the chi-square test.
- /// Sized so it does not bind in normal operation; it exists to stop a pose
- /// that has gone badly wrong from reaching across the track.
- double max_association_distance = 5.5;
- /// How far the car looks. Cones inside it are candidates for association
- /// and are expected to be seen; cones outside it are neither.
- double local_map_radius = 20.0;
- /// Half-angle of the sensor's field of view, radians. With
- /// local_map_radius this is the whole definition of "should have been
- /// seen" -- deliberately the same radius the associator uses, because a
- /// band where a cone can be matched but never judged is a band where
- /// nothing is ever counted against.
- double view_half_angle = 1.05;
+        /// Chi-square gate on the squared Mahalanobis distance. 5.99 is the 95th
+        /// percentile for two degrees of freedom, 9.21 the 99th.
+        ///
+        /// One number, and it answers every "is this the thing I already have"
+        /// question in the system: matching an observation to a landmark, matching
+        /// it to a candidate, and deciding whether a candidate about to be promoted
+        /// is really a cone the map already holds. They are the same question and
+        /// they get the same answer.
+        double mahalanobis_threshold = 9.21;
+        /// Hard Euclidean backstop, metres, applied before the chi-square test.
+        /// Sized so it does not bind in normal operation; it exists to stop a pose
+        /// that has gone badly wrong from reaching across the track.
+        double max_association_distance = 5.5;
+        /// How far the car looks. Cones inside it are candidates for association
+        /// and are expected to be seen; cones outside it are neither.
+        double local_map_radius = 20.0;
+        /// Half-angle of the sensor's field of view, radians. With
+        /// local_map_radius this is the whole definition of "should have been
+        /// seen" -- deliberately the same radius the associator uses, because a
+        /// band where a cone can be matched but never judged is a band where
+        /// nothing is ever counted against.
+        double view_half_angle = 1.05;
 
  // -- Measurements -------------------------------------------------------
 

@@ -22,6 +22,7 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include "mirena_common/msg/car.hpp"
 #include "mirena_common/msg/car_control.hpp"
+#include "mirena_common/msg/car_control.hpp"
 #include "mirena_common/msg/heartbeat.hpp"
 #include "mirena_common/msg/wheel_speeds.hpp"
 

@@ -116,6 +116,16 @@ Visualization Manager:
       Trail Length: 100
       Value: true
       Vel Scale: 0.5
+    - Class: mirena/Track
+      Enabled: true
+      Name: Track
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /planning/track
+      Value: true
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
