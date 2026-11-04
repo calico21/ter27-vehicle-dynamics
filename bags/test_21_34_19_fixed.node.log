@@ -1,0 +1,22 @@
+[INFO] [1793288829.511840832] [mirena_state]: Starting Mirena State
+[INFO] [1793288829.526055456] [mirena_state]: Subscribed to /sensors/wheel_speeds for wheel encoder speeds (radius=0.191 m, var=0.0100)
+[INFO] [1793288829.526838496] [mirena_state]: Prediction: kinematic bicycle (L=1.550 m, L_R=0.744 m, lag=20.0 1/s), steering from /control/can (degrees, sign 1.0, ratio 1.35). Falls back to Euler while steering is older than 0.20 s.
+[INFO] [1793288837.182886016] [mirena_state]: [Encoder] Callback activated: received first message on /sensors/wheel_speeds (rl=0.00 RPM, rr=0.00 RPM)
+[WARN] [1793288837.182977472] [mirena_state]: [Encoder] Callback active, but EKF is not initialized yet.
+[INFO] [1793288837.196689216] [mirena_state]: odom origin defined at the current pose; dead reckoning until the INS converges (stationary, zero-velocity update applied).
+[WARN] [1793288837.300848672] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793288840.282119296] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793288843.402347360] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793288844.209897952] [mirena_state]: [Encoder] Discarding out-of-order message: stamp 1793223268.227298 s < EKF stamp 1793223268.227465 s.
+[WARN] [1793288846.141939424] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793288849.621745312] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793288849.890977152] [mirena_state]: [Encoder] Rejecting outlier lateral velocity v=0.02 m/s (|v| > 0.2 * |u|).
+[WARN] [1793288851.865221408] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793288852.060874400] [mirena_state]: [Encoder] Rejecting outlier lateral velocity v=-0.03 m/s (|v| > 0.2 * |u|).
+[WARN] [1793288854.191317728] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793288856.221407104] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793288858.753370976] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793288860.783574240] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793288863.501359104] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793288866.283228128] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[INFO] [1793288870.414477824] [rclcpp]: signal_handler(SIGINT/SIGTERM)

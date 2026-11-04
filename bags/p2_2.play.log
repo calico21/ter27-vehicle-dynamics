@@ -1,0 +1,3 @@
+[INFO] [1793110188.759809536] [rosbag2_player]: Set rate to 1
+[INFO] [1793110188.789365152] [rosbag2_player]: Playback until timestamp: -1
+[INFO] [1793110264.190660320] [rosbag2_player]: Stopping playback.

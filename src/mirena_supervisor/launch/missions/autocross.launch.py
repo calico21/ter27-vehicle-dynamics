@@ -211,7 +211,7 @@ def generate_launch_description():
                 'publish_debug': True,                         # publish the Delaunay/track debug markers
                 'republish_tolerance': 0.25,                   # m a gate must move before the track is republished
                 # -- Track geometry the search is allowed to believe in
-                'min_track_width': 2.0,                        # m; a rail against unmerged duplicate landmarks
+                'min_track_width': 1.5,                        # m; a rail against unmerged duplicate landmarks
                 'max_track_width': 5.0,                        # m; top of the range that works, not the middle
                 'cone_spacing': 5.0,                           # m, ceiling set by the rules
                 'max_gate_gap': 8.5,                           # m between consecutive gates
@@ -282,7 +282,7 @@ def generate_launch_description():
                 'steer_rate': radians(5.0 * 30.0),             # rad/s
                 'gas_rate': 5.0,                               # per second
                 # -- Speed profile, which the MPC gets from its cost function instead
-                'max_speed': 3.0,                             # m/s ceiling regardless of geometry
+                'max_speed': 4.67,                             # m/s ceiling regardless of geometry
                 'min_speed': 0.2,                              # m/s floor away from a stop, so the car keeps rolling
                 'max_lateral_accel': 2.0,                      # m/s^2 the tyres are trusted with in a corner
                 'max_decel': 2.0,                              # m/s^2 planned for a corner or the finish

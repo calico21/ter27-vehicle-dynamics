@@ -220,6 +220,7 @@ def generate_launch_description():
                 # and the mission fails. Nodes beat at 10 Hz, so this is 30
                 # missed heartbeats.
                 'heartbeat_timeout_sec': 3.0,
+                'record_bag': True,
             }],
         ),
     ])
