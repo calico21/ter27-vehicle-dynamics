@@ -1,0 +1,3 @@
+[ERROR] [1793286924.557478816] [rosbag2_storage]: No storage id specified, and no plugin found that could open URI: '/home/mirena/mirena_ws/rosbag2_2026_10_28-21_34_19_hostclock'
+[INFO] [1793286924.557620096] [rosbag2_storage]: Available storage plugins: 'sqlite3', 'mcap', 
+No storage could be initialized for the input URI: /home/mirena/mirena_ws/rosbag2_2026_10_28-21_34_19_hostclock

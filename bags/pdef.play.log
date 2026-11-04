@@ -1,0 +1,16 @@
+[WARN] [ros2bag]: --storage option is deprecated, use -i,--input to provide an input bag with a specific storage ID
+[INFO] [1793114475.195457472] [rosbag2_player]: Set rate to 1
+[INFO] [1793114475.219907136] [rosbag2_player]: Playback until timestamp: -1
+[WARN] [1793114584.647146720] [rosbag2_player]: Message queue starved. Messages will be delayed. Consider increasing the --read-ahead-queue-size option.
+[WARN] [1793114585.647166208] [rosbag2_player]: Message queue starved. Messages will be delayed. Consider increasing the --read-ahead-queue-size option.
+[WARN] [1793114586.647168832] [rosbag2_player]: Message queue starved. Messages will be delayed. Consider increasing the --read-ahead-queue-size option.
+[WARN] [1793114587.647310144] [rosbag2_player]: Message queue starved. Messages will be delayed. Consider increasing the --read-ahead-queue-size option.
+[WARN] [1793114588.647344672] [rosbag2_player]: Message queue starved. Messages will be delayed. Consider increasing the --read-ahead-queue-size option.
+[WARN] [1793114589.647451072] [rosbag2_player]: Message queue starved. Messages will be delayed. Consider increasing the --read-ahead-queue-size option.
+[WARN] [1793114590.647509952] [rosbag2_player]: Message queue starved. Messages will be delayed. Consider increasing the --read-ahead-queue-size option.
+[WARN] [1793114591.647561600] [rosbag2_player]: Message queue starved. Messages will be delayed. Consider increasing the --read-ahead-queue-size option.
+[WARN] [1793114592.647646048] [rosbag2_player]: Message queue starved. Messages will be delayed. Consider increasing the --read-ahead-queue-size option.
+[WARN] [1793114593.647785824] [rosbag2_player]: Message queue starved. Messages will be delayed. Consider increasing the --read-ahead-queue-size option.
+[WARN] [1793114594.647837600] [rosbag2_player]: Message queue starved. Messages will be delayed. Consider increasing the --read-ahead-queue-size option.
+[WARN] [1793114595.647903488] [rosbag2_player]: Message queue starved. Messages will be delayed. Consider increasing the --read-ahead-queue-size option.
+[WARN] [1793114596.648035488] [rosbag2_player]: Message queue starved. Messages will be delayed. Consider increasing the --read-ahead-queue-size option.

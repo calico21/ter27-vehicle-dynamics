@@ -1,0 +1,3 @@
+[INFO] [1793104450.151684800] [rosbag2_player]: Set rate to 1
+[INFO] [1793104450.171733824] [rosbag2_player]: Playback until timestamp: -1
+[INFO] [1793104454.130886976] [rosbag2_player]: Resuming play.
