@@ -124,7 +124,7 @@ def generate_launch_description():
                         "stand_height": 0.1,  # m that counts as standing rather than ground
                         "max_footprint": 0.55,  # m, widest the standing part may be
                         "min_points": 2,  # fewest points a detection may be built from
-                        "max_roughness": 0.045,  # m, sd of the plane fit residual; separates cones from vegetation
+                        "max_roughness": 0.08,  # m, sd of the plane fit residual; separates cones from vegetation
                         "max_ring_ratio": 1.2,  # how much of the ring may also be standing up
                         "max_range": 30.0,  # m, furthest a cone is claimed
                         "big_cone_min_height": 0.4,  # m, tall enough to be a start-line cone

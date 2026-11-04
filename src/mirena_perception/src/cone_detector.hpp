@@ -93,7 +93,7 @@ namespace mirena
         /// 3.3-8.9 cm under the rough ground and vegetation that a detector
         /// working from cluster size alone reports as cones. One number, and it
         /// separates the two populations almost on its own.
-        double max_roughness = 0.045;
+        double max_roughness = 0.08;
 
         /// How much of the ring around a candidate may also be standing up,
         /// counted relative to the candidate's own standing points.
