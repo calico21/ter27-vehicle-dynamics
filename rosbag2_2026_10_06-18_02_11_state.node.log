@@ -1,0 +1,130 @@
+[INFO] [1793104446.514507328] [mirena_state]: Starting Mirena State
+[INFO] [1793104446.523337536] [mirena_state]: Subscribed to /sensors/wheel_speeds for wheel encoder speeds (radius=0.191 m, var=0.0100)
+[INFO] [1793104446.523979712] [mirena_state]: Prediction: kinematic bicycle (L=1.550 m, L_R=0.744 m, lag=20.0 1/s), steering from /control/can (degrees, sign 1.0, ratio 1.35). Falls back to Euler while steering is older than 0.20 s.
+[INFO] [1793104454.148410208] [mirena_state]: [Encoder] Callback activated: received first message on /sensors/wheel_speeds (rl=0.00 RPM, rr=0.00 RPM)
+[WARN] [1793104454.148531296] [mirena_state]: [Encoder] Callback active, but EKF is not initialized yet.
+[INFO] [1793104454.154749312] [mirena_state]: odom origin defined at the current pose; dead reckoning until the INS converges (stationary, zero-velocity update applied).
+[WARN] [1793104456.876966240] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104462.716932448] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104465.273262816] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104467.671590656] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104469.971378336] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104472.741337792] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104475.613428160] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104477.746309984] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104480.652008000] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104482.756530752] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104487.757392768] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104492.245343520] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104494.333637792] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104497.758979168] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104502.759263296] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104507.761090272] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104510.916775040] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104517.768474880] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104522.764663200] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104527.765354720] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104529.811540992] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104532.767154272] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104537.768184224] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104542.770715040] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104545.566742560] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104547.126894112] [mirena_state]: [Encoder] Discarding out-of-order message: stamp 1791309827.969540 s < EKF stamp 1791309827.971151 s.
+[WARN] [1793104547.772151392] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104552.774274240] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104557.774517728] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104562.501867136] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104567.778407264] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104572.779854240] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104577.788199648] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104582.796162240] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104586.092546944] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104590.371605728] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104594.571743424] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104602.834592864] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104607.839053280] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104612.852578784] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104617.848358304] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104622.857929728] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104627.857339392] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104632.867219744] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104637.867144256] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104642.881317536] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104647.877133984] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104652.887559360] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104657.892837472] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104662.888012672] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104667.888199808] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104672.117618464] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104677.889953728] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104680.226367744] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104682.246509248] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104684.664510624] [mirena_state]: EKF ignored gyro update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104687.041251296] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104692.891502304] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104695.991424672] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104698.561415264] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104700.576847168] [mirena_state]: EKF ignored gyro update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104702.893299840] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104705.071287136] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104707.904344832] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104710.268275104] [mirena_state]: EKF ignored gyro update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104712.351583776] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104714.651670816] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104721.466561184] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[INFO] [1793104725.881917408] [mirena_state]: INS anchored into odom: offset (75.25, -12.50) m, 45.91 deg. Dead reckoning had carried the pose to (75.26, -12.59); absolute corrections start now.
+[WARN] [1793104726.826681696] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104728.832172864] [mirena_state]: EKF ignored gyro update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104731.876389856] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104734.693641504] [mirena_state]: EKF ignored gyro update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104736.723774336] [mirena_state]: EKF ignored gyro update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104738.794372128] [mirena_state]: EKF ignored gyro update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104740.891189312] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104743.225002624] [mirena_state]: EKF ignored gyro update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104746.381418592] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104748.692232736] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104750.871290240] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104753.702869536] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104758.826155392] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104760.869050272] [mirena_state]: EKF ignored gyro update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104762.946374368] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104764.991488256] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104767.361478080] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104769.572034400] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104770.051433376] [mirena_state]: [Encoder] Discarding out-of-order message: stamp 1791310050.896848 s < EKF stamp 1791310050.896878 s.
+[WARN] [1793104771.761855616] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104772.081810240] [mirena_state]: [Encoder] Discarding out-of-order message: stamp 1791310052.927125 s < EKF stamp 1791310052.927178 s.
+[WARN] [1793104774.211534240] [mirena_state]: [Encoder] Discarding out-of-order message: stamp 1791310055.057042 s < EKF stamp 1791310055.057676 s.
+[WARN] [1793104776.651972864] [mirena_state]: [Encoder] Discarding out-of-order message: stamp 1791310057.497535 s < EKF stamp 1791310057.498398 s.
+[WARN] [1793104777.301582656] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104779.411186272] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104781.454076096] [mirena_state]: EKF ignored gyro update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104785.401473536] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104788.696441440] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104790.841709024] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104792.871400000] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104794.881247936] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104797.831495520] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104799.861558976] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104801.911542688] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104804.109509088] [mirena_state]: EKF ignored gyro update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104806.119980960] [mirena_state]: EKF ignored gyro update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104809.146323872] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104811.280602560] [mirena_state]: EKF ignored gyro update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104813.286716480] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104815.381697472] [mirena_state]: EKF ignored gyro update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104817.506228992] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104821.861160640] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104826.841363456] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104829.105055232] [mirena_state]: EKF ignored gyro update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104831.145938784] [mirena_state]: EKF ignored gyro update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104833.961879872] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104836.051629664] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104838.061395296] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104840.238006304] [mirena_state]: EKF ignored gyro update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104842.286424000] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104846.846267040] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104849.056623840] [mirena_state]: EKF ignored encoder yaw-rate update: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104852.127216128] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[WARN] [1793104857.129368896] [mirena_state]: EKF ignored IMU predict: non-finite values or a stamp that did not advance. Check the sensor layer.
+[INFO] [1793104861.733654048] [rclcpp]: signal_handler(SIGINT/SIGTERM)

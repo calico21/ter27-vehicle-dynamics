@@ -1,0 +1,18 @@
+[WARN] [ros2bag]: Positional "topics" argument deprecated. Please use optional "--topics" argument instead.
+[INFO] [1793114470.049177408] [rosbag2_recorder]: Press SPACE for pausing/resuming
+[INFO] [1793114470.049190112] [rosbag2_recorder]: Event publisher thread: Started
+[INFO] [1793114470.055977248] [rosbag2_recorder]: Starting recording to '/home/mirena/mirena_ws/bags/pdef'
+[INFO] [1793114470.059464960] [rosbag2_recorder]: Listening for topics...
+[INFO] [1793114470.059556192] [rosbag2_recorder]: Recording...
+[INFO] [1793114470.059502208] [rosbag2_recorder]: Topics discovery started.
+[INFO] [1793114470.059689632] [rosbag2_recorder]: use_sim_time set, waiting for /clock before starting recording...
+[INFO] [1793114478.438110912] [rosbag2_recorder]: Sim time /clock found, starting recording.
+[INFO] [1793114478.443091488] [rosbag2_recorder]: Subscribed to topic '/health'
+[INFO] [1793114478.445274208] [rosbag2_recorder]: Subscribed to topic '/state/car'
+[INFO] [1793114478.449504128] [rosbag2_recorder]: Subscribed to topic '/tf'
+[INFO] [1793114478.449559744] [rosbag2_recorder]: All requested topics are subscribed. Stopping discovery...
+[INFO] [1793114478.449572448] [rosbag2_recorder]: Topics discovery stopped.
+[INFO] [1793114886.473177280] [rosbag2_recorder]: Pausing recording.
+[INFO] [1793114886.473355328] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[INFO] [1793114886.482593440] [rosbag2_recorder]: Recording stopped
+[INFO] [1793114886.487136224] [rosbag2_recorder]: Event publisher thread: Exited

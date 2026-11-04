@@ -99,7 +99,7 @@ public:
     }
 
     control_sub_ = create_subscription<mirena_common::msg::CarControl>(
-      "/control", 10, std::bind(&MirenaCan::control_callback, this, _1));
+      "/control", 1, std::bind(&MirenaCan::control_callback, this, _1));
 
     mission_info_sub_ = create_subscription<mirena_common::msg::MissionInfo>(
       "/system/mission_status", 10, std::bind(&MirenaCan::mission_info_callback, this, _1));
@@ -137,7 +137,7 @@ private:
   // --- CAN socket ---
   bool open_can(const std::string & iface)
   {
-    can_fd_ = socket(PF_CAN, SOCK_RAW, CAN_RAW);
+    can_fd_ = socket(PF_CAN, SOCK_RAW | SOCK_NONBLOCK, CAN_RAW);
     if (can_fd_ < 0) {
       RCLCPP_ERROR(get_logger(), "Failed to create CAN socket: %s", std::strerror(errno));
       return false;
@@ -248,6 +248,9 @@ private:
     if (write(can_fd_, &frame, sizeof(frame)) != static_cast<ssize_t>(sizeof(frame))) {
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
         "Failed to write DV_Dynamic_Req_1 to CAN: %s", std::strerror(errno));
+    }
+    else {
+      RCLCPP_DEBUG(get_logger(), "Sent DV_Dynamic_Req_1: gas %.3f steer %.3f", msg->gas, msg->steer_angle);
     }
   }
 

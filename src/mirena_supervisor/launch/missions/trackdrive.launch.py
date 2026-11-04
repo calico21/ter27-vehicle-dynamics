@@ -51,50 +51,30 @@ def generate_launch_description():
                         # -- Timeouts and prediction
                         "odom_timeout_sec": 0.5,  # s without INS odometry before it is not trusted
                         "imu_timeout_sec": 0.2,  # s without IMU before it is not trusted
-                        "encoder_timeout_sec": 0.2,  # s without encoder before it is not trusted
                         "max_predict_dt_sec": 0.1,  # s, longest gap the EKF will predict across
-                        # -- Noise model. Continuous-time process noise over [x, y, psi, u, v, omega, b_ax]
-                        "process_noise_diag": [0.01, 0.01, 0.005, 0.5, 0.5, 0.5, 1e-6],
-                        # -- Floor on INS measurement variances (pose: x, y, yaw). Velocity floors are separate.
+                        # -- Noise model. Continuous-time process noise over [x, y, psi, u, v, omega]
+                        "process_noise_diag": [0.01, 0.01, 0.005, 0.5, 0.5, 0.5],
+                        # -- Floor on INS measurement variances, which guards against zero covariances
                         "odom_meas_floor_diag": [1e-9, 1e-9, 1e-9, 1e-9, 1e-9, 1e-9],
-                        # -- Floor on INS velocity variances (u, v, omega). Guards against over-trusting v.
-                        "odom_meas_vel_floor_diag": [1e-4, 1e-4, 1e-4],
                         # Seeds P at init; the odom frame's own pose has
                         # zero reported variance by construction.
-                        "init_cov_floor_diag": [0.01, 0.01, 0.001, 0.01, 0.01, 0.001, 0.04],
+                        "init_cov_floor_diag": [0.01, 0.01, 0.001, 0.01, 0.01, 0.001],
                         "gyro_meas_var": 1.0e-5,  # rad^2/s^2
                         # -- INS disagreement gate. An INS solution this far from the estimate -- the
                         # innovation the update is about to apply -- is absorbed by re-anchoring
                         # T_odom <- ins rather than applied to the pose, so /state/car never
                         # teleports when the solution returns from a dropout. <= 0 disables it.
                         "ins_reanchor_m": 12.0,  # m of disagreement that triggers a re-anchor
-                        # -- Wheel encoders
-                        "wheel_radius": 0.191,  # m, effective rolling radius
-                        "track_width": 1.2,  # m
-                        "encoder_var": 0.01,  # (m/s)^2 base variance
-                        "use_encoders": True,
-                        # -- Rear-axle no-slip constraint
-                        "encoder_yaw_var_max": 0.5,
-                        "cog_to_rear_axle_m": 0.744,  # m
-                        "no_slip_var": 0.01,  # (m/s)^2 at standstill
                         # -- Vehicle model calibration (bags/bici_bias, 2026-10-23)
                         # Effective rolling radius and steering gain measured
                         # from the bag; see utilities/calibrate_wheel_steering.py.
-                        "use_bicycle_model": True,
-                        "steering_topic": "/control/can",
+                        # Keep the simulator on 0.2 m / 1.0.
+                        "use_bicycle_model": False,
                         "steering_degrees": True,
                         "steering_sign": 1.0,
                         "steering_ratio": 1.35,  # effective steering gain
                         "steering_offset_rad": 0.030,  # rad
-                        "steering_timeout_sec": 0.2,
-                        "max_steering_rad": 0.6,
-                        "steering_noise_rad": 0.02,
-                        # -- Bicycle model geometry and relaxation
-                        "cog_to_front_axle_m": 0.806,  # m
-                        "bicycle_relaxation": 20.0,  # 1/s
-                        "bicycle_min_speed": 0.5,  # m/s
-                        # -- Sensor clock handling
-                        "sensor_time_sync_predict": True,
+                        "wheel_radius": 0.191,  # m, effective rolling radius
                     }
                 ],
             ),
