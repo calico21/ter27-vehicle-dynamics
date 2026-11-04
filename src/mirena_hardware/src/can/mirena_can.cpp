@@ -81,6 +81,7 @@ public:
     // no log, because it is believed to exist.
     const bool log_enabled = declare_parameter<bool>("log", true);
     const std::string log_path = declare_parameter<std::string>("log_path", "/home/mirena/mirena_ws/src/mirena_hardware/src/can/log");
+    const bool record_control = declare_parameter<bool>("record_control", false);
     if (log_enabled && log_path.empty()) {
       RCLCPP_ERROR(get_logger(), "log is set but log_path is empty; not recording.");
     } else if (log_enabled) {
@@ -97,9 +98,12 @@ public:
     } else {
       RCLCPP_INFO(get_logger(), "CAN bus opened on interface '%s'", iface_.c_str());
     }
-
-    control_sub_ = create_subscription<mirena_common::msg::CarControl>(
-      "/control", 1, std::bind(&MirenaCan::control_callback, this, _1));
+    if (record_control) {
+      RCLCPP_INFO(get_logger(), "CarControl messages will be recorded to the log");
+      control_sub_ = create_subscription<mirena_common::msg::CarControl>(
+      "/control", 10, std::bind(&MirenaCan::control_callback, this, _1));
+    }
+    
 
     mission_info_sub_ = create_subscription<mirena_common::msg::MissionInfo>(
       "/system/mission_status", 10, std::bind(&MirenaCan::mission_info_callback, this, _1));

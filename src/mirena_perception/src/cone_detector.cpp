@@ -193,6 +193,7 @@ namespace mirena
         car_.noalias() = cloud_lidar.leftCols<3>() * car_from_lidar.linear().transpose();
         car_.rowwise() += car_from_lidar.translation().transpose();
         stage_.level_ms = elapsed_ms(started);
+
         auto mark = std::chrono::steady_clock::now();
 
         const float ego_x = static_cast<float>(params_.ego_half_length);
@@ -200,11 +201,14 @@ namespace mirena
         const float far = static_cast<float>(params_.max_range) + 8.0f;
         keep_.clear();
         keep_.reserve(static_cast<size_t>(car_.rows()));
+
         for (Eigen::Index r = 0; r < car_.rows(); ++r)
         {
             const float x = car_(r, 0), y = car_(r, 1);
             if (std::abs(y) > far || x < -8.0f || x > far) continue;
             if (std::abs(x) <= ego_x && std::abs(y) <= ego_y) continue;
+            const float z = car_(r, 2);
+            if ((z < -0.25f) || (z > 3.0f)) continue; // corte por altura
             keep_.push_back(static_cast<int>(r));
         }
         if (keep_.size() < 200)
