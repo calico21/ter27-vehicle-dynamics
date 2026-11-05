@@ -132,6 +132,13 @@ public:
 
     mission_ = get_parameter("mission").as_string();
     RCLCPP_INFO(get_logger(), "Planning mission '%s'", mission_.c_str());
+    RCLCPP_INFO(
+      get_logger(),
+      "params: plan_period=%.3f heartbeat_period=%.3f republish_tolerance=%.2f publish_debug=%d",
+      get_parameter("plan_period").as_double(),
+      get_parameter("heartbeat_period").as_double(),
+      get_parameter("republish_tolerance").as_double(),
+      get_parameter("publish_debug").as_bool() ? 1 : 0);
 
     // The mission launch file picks the planner, so the two should never
     // disagree -- but a hand-rolled `ros2 run` can still get it wrong.
@@ -208,7 +215,10 @@ private:
   void declareParameters()
   {
     // Declared and read in the same breath: the mission's values arrive as
-    // launch arguments, so they are already in place by construction.
+    // launch arguments, so they are already in place by construction. Each
+    // value below is echoed into the heartbeat indirectly via the planner's
+    // score/inliers, so a mismatch between launch file and node shows up as a
+    // low score rather than a silent failure.
     const KnownPlannerAccelerationParams k;
 
     declare_parameter<std::string>("mission", "acceleration");
@@ -221,13 +231,20 @@ private:
     // its lap counter rides on.
     declare_parameter<double>("republish_tolerance", 0.25);
 
+    // Registration quality thresholds. inlier_distance is the max radius (m)
+    // within which a SLAM cone counts as matched to a template cone;
+    // min_score/min_inliers gate whether a fit is plausible at all.
     declare_parameter<double>("inlier_distance", k.inlier_distance);
     declare_parameter<double>("min_score", k.min_score);
     declare_parameter<int>("min_inliers", k.min_inliers);
     declare_parameter<int>("icp_iterations", k.icp_iterations);
     declare_parameter<int>("ransac_iterations", k.ransac_iterations);
 
-    // Acceleration gate-sequence recovery parameters.
+    // Gate-sequence recovery (used when seeded ICP fails). gate_min/max_width
+    // bracket the rule gate width (3 m rule, 5 m cap); the angle tolerance
+    // decides if a candidate pair looks like a transverse gate; the sequence
+    // tolerances check that three observed gates line up like three template
+    // gates; spacing tolerance compares observed vs template gate spacing.
     declare_parameter<double>("gate_min_width", k.gate_min_width);
     declare_parameter<double>("gate_max_width", k.gate_max_width);
     declare_parameter<double>(
@@ -237,6 +254,9 @@ private:
     declare_parameter<double>("gate_centerline_tolerance", k.gate_centerline_tolerance);
     declare_parameter<double>("gate_spacing_tolerance", k.gate_spacing_tolerance);
 
+    // Plausibility drift limits vs the nominal template pose: if the fitted
+    // start point or heading strays beyond these, the registration is rejected
+    // even if the score looks fine.
     declare_parameter<double>("max_position_drift", k.max_position_drift);
     declare_parameter<double>("max_heading_drift", k.max_heading_drift);
   }
@@ -263,7 +283,10 @@ private:
     p.max_position_drift = get_parameter("max_position_drift").as_double();
     p.max_heading_drift = get_parameter("max_heading_drift").as_double();
 
-    // One template per mission, installed with the package.
+    // One template per mission, installed with the package. The JSON names the
+    // mission and lists the surveyed cones plus the nominal centreline; the
+    // planner registers live cones against it, so a missing or malformed file
+    // means this node cannot plan at all.
     const std::string path = ament_index_cpp::get_package_share_directory("mirena_planning") +
       "/resource/" + mission_ + ".json";
     try {
@@ -271,6 +294,8 @@ private:
       RCLCPP_INFO(
         get_logger(), "Loaded template '%s': %zu cones, %zu path points.",
         track.name.c_str(), track.cones.size(), track.path.size());
+      // Watch this line: cones/path counts of 0 mean the JSON loaded but is
+      // empty, and the planner will return no plan until it is fixed.
       return std::make_unique<KnownPlannerAcceleration>(std::move(track), p);
     } catch (const std::exception & e) {
       RCLCPP_ERROR(get_logger(), "%s", e.what());
@@ -282,26 +307,39 @@ private:
   {
     // Park it and return: planning runs on its own timer, so a fast map
     // publisher cannot build a backlog of expensive callbacks.
+    const std::size_t entity_count = msg->entities.size();
     std::lock_guard<std::mutex> lock(map_mutex_);
     pending_map_ = std::move(msg);
+    if (!map_seen_) {
+      map_seen_ = true;
+      RCLCPP_INFO(
+        get_logger(), "mapCallback: first map received with %zu entities on topic '%s'",
+        entity_count, kMapTopic);
+    }
   }
 
   void planIteration()
   {
+    // Guard: the constructor may not have finished building the planner yet
+    // (a rejected mission leaves planner_ null), or the track publisher may
+    // not exist. Nothing to do until both are ready.
     if (!planner_ || !track_pub_) {return;}
 
+    // Consume the parked map. exchange() leaves pending_map_ null so a burst
+    // of map updates can never queue up more than one planning cycle.
     mirena_common::msg::EntityList::SharedPtr map;
     {
       std::lock_guard<std::mutex> lock(map_mutex_);
       map = std::exchange(pending_map_, nullptr);
     }
+    // No new map since the last cycle: normal early-run state, not an error.
     if (!map) {return;}
 
+    // Turn every SLAM cone into an observation. The pipeline never reports a
+    // cone colour, so discarding colourless cones would discard all of them.
     std::vector<Observation> observations;
     observations.reserve(map->entities.size());
     for (const auto & entity : map->entities) {
-      // Every cone counts. A colourless pipeline never reports a colour, so
-      // discarding cones that fail to name one would discard all of them.
       const ConeSize size = coneSizeFromString(entity.type);
       observations.push_back(
         Observation{{entity.position.x, entity.position.y}, size});
@@ -310,15 +348,31 @@ private:
     std_msgs::msg::Header header = map->header;
     if (header.frame_id.empty()) {header.frame_id = fallback_frame_;}
 
+    RCLCPP_INFO(
+      get_logger(), "planIteration: %zu observations frame='%s'",
+      observations.size(), header.frame_id.c_str());
+
+    // Only collect the full debug geometry (correspondences, fitted template,
+    // rejected points) when someone is actually listening on the debug topic.
     PlanDebug debug;
     debug.verbose = debugWanted();
+
+    // Time the plan so the heartbeat can report plan_ms; this is also the
+    // number to watch if the planner starts missing its plan_period.
     const auto started = std::chrono::steady_clock::now();
     const std::optional<Plan> plan = planner_->plan(observations, &debug);
     const double elapsed_ms = std::chrono::duration<double, std::milli>(
       std::chrono::steady_clock::now() - started).count();
 
+    RCLCPP_INFO(
+      get_logger(),
+      "planIteration: planner result planned=%d score=%.2f inliers-via-debug n/a plan_ms=%.1f",
+      plan.has_value() ? 1 : 0, debug.score, elapsed_ms);
+
     if (debug.verbose) {publishDebug(header, debug);}
 
+    // Record timing/score under lock so the heartbeat can read a consistent
+    // snapshot without blocking the planning loop for long.
     {
       std::lock_guard<std::mutex> lock(report_mutex_);
       report_.plan_ms = elapsed_ms;
@@ -333,7 +387,37 @@ private:
       }
     }
 
-    if (!plan || plan->gates.size() < 2 || !trackChanged(*plan)) {return;}
+    // Bail out on the normal not-ready states: no registration yet, fewer
+    // than two gates (not a track), or a centreline that has not moved by more
+    // than republish_tolerance (millimetre jitter from re-registration must
+    // not make the controller re-fit its spline).
+    if (!plan) {
+      RCLCPP_WARN(
+        get_logger(), "planIteration: planner returned no plan (score=%.2f)", debug.score);
+      return;
+    }
+    if (plan->gates.size() < 2) {
+      RCLCPP_WARN(
+        get_logger(),
+        "planIteration: plan has %zu gates (< 2), not a track yet, not publishing",
+        plan->gates.size());
+      return;
+    }
+    const bool changed = trackChanged(*plan);
+    if (!changed) {
+      RCLCPP_INFO(
+        get_logger(),
+        "planIteration: centreline within republish tolerance %.2f m, skipping publish",
+        republish_tolerance_);
+      return;
+    }
+
+    // Build and publish the track. Latched QoS means a late-joining controller
+    // gets the last good track immediately.
+    RCLCPP_INFO(
+      get_logger(),
+      "planIteration: publishing track %zu gates closed=%d score=%.2f plan_ms=%.1f",
+      plan->gates.size(), plan->closed ? 1 : 0, debug.score, elapsed_ms);
 
     mirena_common::msg::Track track;
     track.header = header;
@@ -347,21 +431,31 @@ private:
       track.gates.push_back(out);
     }
     track_pub_->publish(std::move(track));
+    RCLCPP_INFO(get_logger(), "planIteration: track published on topic '%s'", kTrackTopic);
 
+    // Remember what went out so trackChanged() can tell a real move from jitter.
     published_.gates = plan->gates;
     published_.closed = plan->closed;
     published_.valid = true;
   }
 
   /// True when the new centreline differs from the published one by more than
-  /// the planner's own noise.
+  /// the planner's own noise. A change here triggers a republish on
+  /// planning/track; otherwise the old track stands so the controller's spline
+  /// fit (and the lap counter riding on its arc length) is not disturbed.
   bool trackChanged(const Plan & plan) const
   {
+    // Never published anything yet, or the track topology changed (open vs
+    // closed): always republish.
     if (!published_.valid || published_.closed != plan.closed) {return true;}
+    // Different gate count means a different registration: republish.
     if (published_.gates.size() != plan.gates.size()) {return true;}
+    // Same number of gates: any gate that moved by more than the tolerance
+    // counts as a real change.
     for (std::size_t i = 0; i < plan.gates.size(); ++i) {
       if (distance(plan.gates[i].p, published_.gates[i].p) > republish_tolerance_) {return true;}
     }
+    // Everything within noise: do not republish.
     return false;
   }
 
@@ -372,6 +466,17 @@ private:
 
   void publishDebug(const std_msgs::msg::Header & header, const PlanDebug & debug)
   {
+    // Visualisation on planning/debug/registration, only when a subscriber is
+    // actually listening (see debugWanted()). Each marker answers one question:
+    //
+    //   template        -- where the planner thinks the surveyed cones are, in map frame
+    //   template_path   -- the surveyed centreline path, transformed the same way
+    //   correspondences -- observation -> matched template cone (green lines)
+    //   rejected        -- observations with no template match (red points)
+    //   status          -- one-line text: REGISTERED vs SEARCHING, score, ICP
+    //                    iterations, whether the seed came from RANSAC, and the
+    //                    fitted translation/heading
+
     Marker clear;
     clear.header = header;
     clear.action = Marker::DELETEALL;
@@ -412,6 +517,10 @@ private:
     array.markers.push_back(std::move(status));
 
     registration_pub_->publish(std::move(array));
+    RCLCPP_INFO(
+      get_logger(),
+      "publishDebug: sent registration marker array (registered=%d score=%.2f iterations=%d from_ransac=%d)",
+      debug.registered ? 1 : 0, debug.score, debug.iterations, debug.from_ransac ? 1 : 0);
   }
 
   void publishHeartbeat()
@@ -440,10 +549,19 @@ private:
     json["plan_age_s"] = report.has_plan ?
       (now() - report.stamp).seconds() : std::numeric_limits<double>::quiet_NaN();
 
+    // The heartbeat JSON is the diagnosis channel on a car with no screen: the
+    // supervisor reads planned/score/plan_ms/plan_age_s from it. Numbers are
+    // plain so any consumer can read the gate straight out of the JSON.
     mirena_common::msg::Heartbeat msg;
     msg.node_name = get_name();
     msg.timestamp = now();
     msg.report = json.dump();
+    const double plan_age_s = report.has_plan ? (now() - report.stamp).seconds() : -1.0;
+    RCLCPP_INFO(
+      get_logger(),
+      "heartbeat: planned=%d gates=%zu score=%.2f plan_ms=%.1f plan_age_s=%.2f mission=%s",
+      report.planned ? 1 : 0, report.gates, report.score, report.plan_ms, plan_age_s,
+      mission_.c_str());
     report_pub_->publish(msg);
   }
 
@@ -468,6 +586,7 @@ private:
 
   std::mutex map_mutex_;
   mirena_common::msg::EntityList::SharedPtr pending_map_;
+  bool map_seen_{false};
 
   // Only the planning loop touches this one.
   Published published_;

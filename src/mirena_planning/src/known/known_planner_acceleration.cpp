@@ -155,6 +155,14 @@ void KnownPlannerAcceleration::reset()
 KnownPlannerAcceleration::Fit KnownPlannerAcceleration::evaluate(
   const std::vector<Observation> & observations, Transform2 guess) const
 {
+  // Score a candidate map_from_template transform: transform each observation
+  // into template frame and match it to the nearest unmatched template cone
+  // within inlier_distance. A cone is consumed at most once, so repeated SLAM
+  // detections of the same cone cannot inflate the score.
+  //
+  // Debug watch-points: score = inliers / matchable (matchable caps at the
+  // smaller of observation and template cone counts); inliers below min_inliers
+  // or score below min_score makes plausible() reject the fit.
   const Transform2 to_template = guess.inverse();
   int inliers = 0;
   std::vector<bool> used(track_.cones.size(), false);
@@ -190,6 +198,14 @@ KnownPlannerAcceleration::Fit KnownPlannerAcceleration::evaluate(
 KnownPlannerAcceleration::Fit KnownPlannerAcceleration::refine(
   const std::vector<Observation> & observations, Transform2 seed) const
 {
+  // ICP refinement: repeatedly match observations to the nearest unmatched
+  // template cone in template frame, fit a rigid transform between matched
+  // pairs, and apply it. Stops after icp_iterations or when the step falls
+  // below icp_tolerance (both translation and rotation).
+  //
+  // Debug watch-points: iterations == icp_iterations means it did not
+  // converge (watch the score/evaluate below); fit.score after refine tells
+  // whether the seed was close enough for ICP to land on the right mode.
   Transform2 current = seed;
   std::vector<Vec2> from, to;
   int iteration = 0;
@@ -238,6 +254,22 @@ KnownPlannerAcceleration::Fit KnownPlannerAcceleration::refine(
 KnownPlannerAcceleration::Fit KnownPlannerAcceleration::recover(
   const std::vector<Observation> & observations) const
 {
+  // Gate-sequence recovery: used when seeded ICP did not land on a plausible
+  // registration. Instead of sampling arbitrary cone pairs, RANSAC samples
+  // pairs of observed gate candidates whose centres define a track axis, then
+  // validates a third gate on the same line, and matches the observed spacing
+  // against consecutive template gate spacings in either sequence direction.
+  // A successful hypothesis gives a map_from_template seed that refine()
+  // polishes; the whole thing only counts if plausible() still accepts it.
+  //
+  // Debug watch-points:
+  //   - returns a zero-score Fit when fewer than 6 observations or template
+  //     cones exist, or fewer than 3 candidate/template gates.
+  //   - each ransac_iteration costs O(raw * template triples), so a large map
+  //     makes recovery slow; watch plan_ms in the heartbeat.
+  //   - if recovery keeps failing, check gate_min_width/gate_max_width
+  //     (observed gates must fall inside), gate_spacing_tolerance (observed vs
+  //     template gate spacing), and max_position_drift/max_heading_drift.
   Fit best;
   if (observations.size() < 6 || track_.cones.size() < 6 ||
     params_.ransac_iterations <= 0 || track_.path.size() < 2)
@@ -379,6 +411,11 @@ KnownPlannerAcceleration::Fit KnownPlannerAcceleration::recover(
 
 bool KnownPlannerAcceleration::plausible(const Fit & fit) const
 {
+  // Accept a registration only if it has enough unique inliers and a good
+  // enough normalised score, and if the fitted start point and heading stay
+  // within max_position_drift / max_heading_drift of the nominal template pose.
+  // The drift check is what stops a high-scoring but wrong registration
+  // (mirrored track, wrong end of the straight) from being accepted.
   if (fit.inliers < params_.min_inliers || fit.score < params_.min_score) {return false;}
   const Transform2 & nominal = track_.map_from_template;
   const Vec2 fitted_start = fit.map_from_template.inverse() * Vec2{0.0, 0.0};
@@ -390,9 +427,16 @@ bool KnownPlannerAcceleration::plausible(const Fit & fit) const
 std::optional<Plan> KnownPlannerAcceleration::plan(
   const std::vector<Observation> & observations, PlanDebug * debug)
 {
+  // Entry point. Start from the last accepted fit while locked (keeps the
+  // registration stable across map jitter), otherwise from the nominal
+  // template pose, then refine with ICP.
   Fit fit = refine(observations, locked_ ? last_fit_ : track_.map_from_template);
   bool recovered_by_gate_search = false;
 
+  // If seeded ICP is not plausible, try RANSAC gate-sequence recovery. The
+  // recovered fit wins when seeded ICP is implausible, or when recovery scores
+  // higher -- so a numerically higher but invalid seed cannot block a good
+  // recovery.
   if (!plausible(fit)) {
     const Fit recovered = recover(observations);
     // A valid recovered registration must not be rejected merely because an
@@ -404,6 +448,8 @@ std::optional<Plan> KnownPlannerAcceleration::plan(
   }
 
   if (debug) {
+    // Everything below ends up on the debug topic (registration_pub_) when
+    // verbose; only score/iterations/registered always go into the heartbeat.
     debug->fit = fit.map_from_template;
     debug->score = fit.score;
     debug->iterations = fit.iterations;
@@ -413,6 +459,9 @@ std::optional<Plan> KnownPlannerAcceleration::plan(
   }
 
   if (debug && debug->verbose) {
+    // Full geometry: observation -> template correspondences (green lines in
+    // RViz), rejected observations (red points), and the fitted template +
+    // path (white). Expensive, so only done when a subscriber is listening.
     const Transform2 to_template = fit.map_from_template.inverse();
     std::vector<bool> used_template(track_.cones.size(), false);
     for (const Observation & o : observations) {
@@ -441,6 +490,10 @@ std::optional<Plan> KnownPlannerAcceleration::plan(
     for (const Vec2 & p : track_.path) {debug->fitted_path.push_back(fit.map_from_template * p);}
   }
 
+  // The final gate: even a good score is not enough if the fitted start or
+  // heading drifted beyond max_position_drift / max_heading_drift from the
+  // nominal template pose. On failure the planner unlocks so the next cycle
+  // re-seeds from the nominal pose instead of drifting further off.
   if (!plausible(fit)) {
     locked_ = false;
     return std::nullopt;
@@ -455,8 +508,8 @@ std::optional<Plan> KnownPlannerAcceleration::plan(
   Plan result;
   result.gates = buildGates(path, track_.closed);
   result.closed = track_.closed;
-  result.start = path.front();
-  result.finish = track_.closed ? path.front() : path.back();
+  result.start = path.front();   // start/finish gate
+  result.finish = track_.closed ? path.front() : path.back();  // end of run
   return result;
 }
 

@@ -129,7 +129,7 @@ struct UnknownPlannerParams
   /// Odd on purpose. A zigzag between the centreline and a boundary repeats
   /// every two steps, so an even horizon ends where it started and the detour
   /// looks free; an odd one always ends mid-zigzag and has to pay for it.
-  int lookahead{5};
+  int lookahead{3};
 
   /// Radius around the map origin searched for the big cones of the start line.
   /// The map frame is anchored at the car's start pose, so the line is just

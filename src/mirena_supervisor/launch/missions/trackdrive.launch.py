@@ -204,7 +204,7 @@ def generate_launch_description():
                         "max_gate_gap": 8.5,  # m between consecutive gates
                         # -- The search itself
                         "curvature_weight": 1.0,  # what bending the centreline costs against the gate it earns
-                        "lookahead": 5,  # gates ahead before committing; odd on purpose
+                        "lookahead": 3,  # gates ahead before committing; odd on purpose
                         "max_path_points": 400,
                         # -- Closing the loop
                         "start_gate_radius": 10.0,  # m around the map origin searched for the start line
