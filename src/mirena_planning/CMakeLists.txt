@@ -69,7 +69,7 @@ add_executable(mirena_planning_known_skidpad src/known/known_planner_node.cpp)
 target_link_libraries(mirena_planning_known_skidpad mirena_planning_core nlohmann_json::nlohmann_json)
 ament_target_dependencies(mirena_planning_known_skidpad ${PLANNER_NODE_DEPS})
 
-add_executable(mirena_planning_known_acceleration src/known/known_planner_node_accelerati                                                                                                                                                                                                                                                                                                                                   on.cpp)
+add_executable(mirena_planning_known_acceleration src/known/known_planner_node_acceleration.cpp)
 target_link_libraries(mirena_planning_known_acceleration mirena_planning_core nlohmann_json::nlohmann_json)
 ament_target_dependencies(mirena_planning_known_acceleration ${PLANNER_NODE_DEPS})
 
