@@ -110,7 +110,12 @@ def process_cornering_data(df, file_path, compound, round_num, run_num, min_fz=1
         "f_x": sub["FX"].values,
         "m_z": sub["MZ"].values,
         "m_x": sub["MX"].values,
-        "r_l": sub["RL"].values * 0.01
+        "r_l": sub["RL"].values * 0.01,
+        "t_inside": sub["TSTI"].values,
+        "t_center": sub["TSTC"].values,
+        "t_outside": sub["TSTO"].values,
+        "t_road": sub["RST"].values,
+        "t_ambient": sub["AmbTmp"].values
     })
     
     return res

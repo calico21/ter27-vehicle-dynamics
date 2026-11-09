@@ -13,6 +13,7 @@ const DEFAULT_PARAM_PATH: String = "res://Scenes/Vehicle/Dynamics/Tires/MF62/hoo
 
 var params: Dictionary = {}
 var is_loaded: bool = false
+var active_compound: String = "UNKNOWN"
 
 # Reference quantities
 var fnomin: float = 800.0
@@ -141,32 +142,75 @@ var RVY4: float = 0.0
 func _init(custom_param_path: String = "") -> void:
 	load_parameters(custom_param_path)
 
-## Loads parameters from JSON file or falls back to calibrated embedded constants.
-func load_parameters(param_path: String = "") -> void:
-	var paths = [
-		param_path,
-		DEFAULT_PARAM_PATH,
-		"src/mirena_sim/Scenes/Vehicle/Dynamics/Tires/MF62/hoosier_16x7.5_10_mf62.json",
-		"Scenes/Vehicle/Dynamics/Tires/MF62/hoosier_16x7.5_10_mf62.json"
+## Returns the active tire compound identifier (e.g., "R25B" or "R20").
+func get_compound() -> String:
+	return active_compound
+
+## Safely loads a specific compound ("R25B" or "R20"). Fails explicitly if file is missing or mismatch.
+func load_compound(compound_name: String) -> bool:
+	var c_lower = compound_name.to_lower().strip_edges()
+	var filename = "hoosier_16x7.5_10_" + c_lower + "_mf62.json"
+	var possible_paths = [
+		"res://Scenes/Vehicle/Dynamics/Tires/MF62/" + filename,
+		"src/mirena_sim/Scenes/Vehicle/Dynamics/Tires/MF62/" + filename,
+		"Scenes/Vehicle/Dynamics/Tires/MF62/" + filename
 	]
-	
-	var text = ""
-	for p in paths:
-		if p != "" and FileAccess.file_exists(p):
-			var f = FileAccess.open(p, FileAccess.READ)
-			if f:
-				text = f.get_as_text()
+	var found_path = ""
+	for p in possible_paths:
+		if FileAccess.file_exists(p):
+			found_path = p
+			break
+	if found_path == "":
+		push_error("Pacejka62: Target parameter file for compound '" + compound_name + "' not found!")
+		is_loaded = false
+		return false
+	return load_parameters(found_path, compound_name)
+
+## Loads parameters from JSON file with strict validation (no silent fallback).
+func load_parameters(param_path: String = "", expected_compound: String = "") -> bool:
+	var path_to_load = param_path
+	if path_to_load == "":
+		var defaults = [
+			DEFAULT_PARAM_PATH,
+			"src/mirena_sim/Scenes/Vehicle/Dynamics/Tires/MF62/hoosier_16x7.5_10_mf62.json",
+			"Scenes/Vehicle/Dynamics/Tires/MF62/hoosier_16x7.5_10_mf62.json"
+		]
+		for p in defaults:
+			if FileAccess.file_exists(p):
+				path_to_load = p
 				break
 	
-	if text != "":
-		var parsed = JSON.parse_string(text)
-		if parsed is Dictionary:
-			params = parsed
-			_apply_params_dict(parsed)
-			is_loaded = true
-			return
+	if path_to_load == "" or not FileAccess.file_exists(path_to_load):
+		push_error("Pacejka62: Parameter file not found at: " + param_path)
+		is_loaded = false
+		return false
 	
-	is_loaded = false
+	var f = FileAccess.open(path_to_load, FileAccess.READ)
+	if not f:
+		push_error("Pacejka62: Failed to read parameter file at: " + path_to_load)
+		is_loaded = false
+		return false
+		
+	var text = f.get_as_text()
+	var parsed = JSON.parse_string(text)
+	if not (parsed is Dictionary):
+		push_error("Pacejka62: Invalid JSON format in parameter file: " + path_to_load)
+		is_loaded = false
+		return false
+		
+	var comp = str(parsed.get("COMPOUND", "UNKNOWN")).strip_edges().to_upper()
+	if expected_compound != "":
+		var exp_clean = expected_compound.strip_edges().to_upper()
+		if comp != exp_clean:
+			push_error("Pacejka62: Compound mismatch! Requested '" + exp_clean + "', but file contains '" + comp + "' at " + path_to_load)
+			is_loaded = false
+			return false
+			
+	active_compound = comp
+	params = parsed
+	_apply_params_dict(parsed)
+	is_loaded = true
+	return true
 
 func _apply_params_dict(d: Dictionary) -> void:
 	fnomin = float(d.get("FNOMIN", fnomin))
@@ -289,7 +333,8 @@ func _apply_params_dict(d: Dictionary) -> void:
 	RVY4 = float(d.get("RVY4", RVY4))
 
 ## Computes pure lateral force Fy0 (N) and intermediate shift Svy.
-func compute_fy0_with_shift(alpha: float, f_z: float, gamma: float = 0.0, p_kpa: float = 83.0) -> Dictionary:
+## is_right_side: whether wheel is mounted on right side of vehicle (mirrors conicity/ply-steer offsets).
+func compute_fy0_with_shift(alpha: float, f_z: float, gamma: float = 0.0, p_kpa: float = 83.0, is_right_side: bool = false) -> Dictionary:
 	var normal_load = maxf(0.0, f_z)
 	if normal_load <= 1e-3:
 		return {"Fy0": 0.0, "Svy": 0.0}
@@ -301,8 +346,11 @@ func compute_fy0_with_shift(alpha: float, f_z: float, gamma: float = 0.0, p_kpa:
 	var mu_y = (PDY1 + PDY2 * dfz) * (1.0 + PPY3 * dpi + PPY4 * dpi * dpi) * (1.0 - PDY3 * gamma * gamma)
 	var Dy = mu_y * normal_load
 	
-	var Shy = PHY1 + PHY2 * dfz + PHY3 * gamma
-	var Svy = normal_load * ((PVY1 + PVY2 * dfz) + (PVY3 + PVY4 * dfz) * gamma)
+	var shy_conicity = PHY1 + PHY2 * dfz
+	var Shy = (-shy_conicity if is_right_side else shy_conicity) + PHY3 * gamma
+	var svy_conicity = normal_load * (PVY1 + PVY2 * dfz)
+	var svy_camber = normal_load * (PVY3 + PVY4 * dfz) * gamma
+	var Svy = (-svy_conicity if is_right_side else svy_conicity) + svy_camber
 	
 	var alpha_y = alpha + Shy
 	var kya_arg = 2.0 * atan(normal_load / (PKY2 * fnomin * (1.0 + PPY2 * dpi) + 1e-4))
@@ -320,8 +368,8 @@ func compute_fy0_with_shift(alpha: float, f_z: float, gamma: float = 0.0, p_kpa:
 	return {"Fy0": Fy0, "Svy": Svy}
 
 ## Convenience method for pure lateral force Fy0.
-func compute_fy0(alpha: float, f_z: float, gamma: float = 0.0, p_kpa: float = 83.0) -> float:
-	return compute_fy0_with_shift(alpha, f_z, gamma, p_kpa)["Fy0"]
+func compute_fy0(alpha: float, f_z: float, gamma: float = 0.0, p_kpa: float = 83.0, is_right_side: bool = false) -> float:
+	return compute_fy0_with_shift(alpha, f_z, gamma, p_kpa, is_right_side)["Fy0"]
 
 ## Computes pure longitudinal force Fx0 (N).
 func compute_fx0(kappa: float, f_z: float, gamma: float = 0.0, p_kpa: float = 83.0) -> float:
@@ -356,14 +404,15 @@ func compute_combined_forces(
 	alpha: float,
 	f_z: float,
 	gamma: float = 0.0,
-	p_kpa: float = 83.0
+	p_kpa: float = 83.0,
+	is_right_side: bool = false
 ) -> Dictionary:
 	var normal_load = maxf(0.0, f_z)
 	if normal_load <= 1e-3:
 		return {"Fx": 0.0, "Fy": 0.0, "Svy": 0.0}
 	
 	var Fx0 = compute_fx0(kappa, normal_load, gamma, p_kpa)
-	var fy0_res = compute_fy0_with_shift(alpha, normal_load, gamma, p_kpa)
+	var fy0_res = compute_fy0_with_shift(alpha, normal_load, gamma, p_kpa, is_right_side)
 	var Fy0: float = fy0_res["Fy0"]
 	var Svy: float = fy0_res["Svy"]
 	
@@ -403,7 +452,16 @@ func compute_combined_forces(
 
 ## Computes self-aligning torque Mz (Nm) according to full MF 6.2 formulation:
 ## Mz = M'_z + Mzr + s * Fx
-func compute_mz(alpha: float, f_z: float, Fy: float, gamma: float = 0.0, p_kpa: float = 83.0, Fx: float = 0.0, Svy: float = 0.0) -> float:
+func compute_mz(
+	alpha: float,
+	f_z: float,
+	Fy: float,
+	gamma: float = 0.0,
+	p_kpa: float = 83.0,
+	Fx: float = 0.0,
+	Svy: float = 0.0,
+	is_right_side: bool = false
+) -> float:
 	var normal_load = maxf(0.0, f_z)
 	if normal_load <= 1e-3:
 		return 0.0
@@ -427,7 +485,9 @@ func compute_mz(alpha: float, f_z: float, Fy: float, gamma: float = 0.0, p_kpa: 
 	var Mz_prime = trail * Fy_prime
 	
 	# Residual torque Mzr
-	var Dr = normal_load * r0 * ((QDZ6 + QDZ7 * dfz) + (QDZ8 + QDZ9 * dfz) * (1.0 + PPZ2 * dpi) * gamma)
+	var dr_conicity = normal_load * r0 * (QDZ6 + QDZ7 * dfz)
+	var dr_camber = normal_load * r0 * (QDZ8 + QDZ9 * dfz) * (1.0 + PPZ2 * dpi) * gamma
+	var Dr = (-dr_conicity if is_right_side else dr_conicity) + dr_camber
 	var Br = QBZ9
 	var Cr = 1.0
 	var Shr = Sht
@@ -441,10 +501,11 @@ func compute_mz(alpha: float, f_z: float, Fy: float, gamma: float = 0.0, p_kpa: 
 	return Mz_prime + Mzr + Mz_fx
 
 ## Computes overturning moment Mx (Nm) with load, camber, and pressure dependencies.
-func compute_mx(f_z: float, gamma: float, Fy: float, p_kpa: float = 83.0) -> float:
+func compute_mx(f_z: float, gamma: float, Fy: float, p_kpa: float = 83.0, is_right_side: bool = false) -> float:
 	var normal_load = maxf(0.0, f_z)
 	var dpi = (p_kpa - pinom) / pinom
-	return normal_load * r0 * (QSX1 - QSX2 * gamma + QSX3 * (Fy / fnomin) + PPMX1 * dpi)
+	var qsx1 = -QSX1 if is_right_side else QSX1
+	return normal_load * r0 * (qsx1 - QSX2 * gamma + QSX3 * (Fy / fnomin) + PPMX1 * dpi)
 
 ## Computes rolling resistance moment My (Nm) according to MF 6.2 Eq. 4.E65.
 func compute_my(f_z: float, Fx: float, v_x: float) -> float:

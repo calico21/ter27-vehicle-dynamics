@@ -31,6 +31,14 @@ static func get_neural() -> RefCounted:
 		_neural = NeuralCorrectionScript.new()
 	return _neural
 
+## Safely configures tire compound ("R25B" or "R20"). Fails explicitly if file is missing or mismatch.
+static func set_compound(compound_name: String) -> bool:
+	return get_mf62().load_compound(compound_name)
+
+## Returns current active tire compound identifier.
+static func get_compound() -> String:
+	return get_mf62().get_compound()
+
 ## Primary tire force evaluation interface.
 ## Parameters:
 ##   kappa: longitudinal slip ratio
@@ -41,6 +49,7 @@ static func get_neural() -> RefCounted:
 ##   p_kpa: inflation pressure (kPa) (default 83.0 kPa ~ 12 psi)
 ##   v_x: longitudinal contact speed (m/s) (default 10.0)
 ##   use_neural: toggle neural residual addition
+##   is_right_side: whether wheel is mounted on right vehicle track (mirrors conicity/ply-steer)
 ## Returns Dictionary with Fx, Fy, Mz, Mx, My, and residual diagnostics.
 static func compute_forces(
 	kappa: float,
@@ -50,7 +59,8 @@ static func compute_forces(
 	gamma: float = 0.0,
 	p_kpa: float = 83.0,
 	v_x: float = 10.0,
-	use_neural: bool = true
+	use_neural: bool = true,
+	is_right_side: bool = false
 ) -> Dictionary:
 	var normal_load = maxf(0.0, F_z)
 	if normal_load <= 1e-3:
@@ -63,12 +73,12 @@ static func compute_forces(
 	var mf = get_mf62()
 	
 	# 1. Canonical MF 6.2 Evaluation
-	var combined = mf.compute_combined_forces(kappa, alpha, normal_load, gamma, p_kpa)
+	var combined = mf.compute_combined_forces(kappa, alpha, normal_load, gamma, p_kpa, is_right_side)
 	var Fx_mf: float = combined["Fx"]
 	var Fy_mf: float = combined["Fy"]
 	var Svy: float = combined.get("Svy", 0.0)
-	var Mz_mf: float = mf.compute_mz(alpha, normal_load, Fy_mf, gamma, p_kpa, Fx_mf, Svy)
-	var Mx: float = mf.compute_mx(normal_load, gamma, Fy_mf, p_kpa)
+	var Mz_mf: float = mf.compute_mz(alpha, normal_load, Fy_mf, gamma, p_kpa, Fx_mf, Svy, is_right_side)
+	var Mx: float = mf.compute_mx(normal_load, gamma, Fy_mf, p_kpa, is_right_side)
 	var My: float = mf.compute_my(normal_load, Fx_mf, v_x)
 	
 	# 2. Physics-Informed Residual PINN Correction

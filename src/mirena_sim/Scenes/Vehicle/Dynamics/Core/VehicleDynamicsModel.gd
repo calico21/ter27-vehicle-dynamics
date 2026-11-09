@@ -42,10 +42,10 @@ func _init(cfg: VehicleConfig = null) -> void:
 
 func _init_wheels() -> void:
 	wheels.clear()
-	wheels.append(WheelDynamics.new(VehicleConfig.WheelIndex.FL, "FL"))
-	wheels.append(WheelDynamics.new(VehicleConfig.WheelIndex.FR, "FR"))
-	wheels.append(WheelDynamics.new(VehicleConfig.WheelIndex.RL, "RL"))
-	wheels.append(WheelDynamics.new(VehicleConfig.WheelIndex.RR, "RR"))
+	wheels.append(WheelDynamics.new(VehicleConfig.WheelIndex.FL, "FL", false))
+	wheels.append(WheelDynamics.new(VehicleConfig.WheelIndex.FR, "FR", true))
+	wheels.append(WheelDynamics.new(VehicleConfig.WheelIndex.RL, "RL", false))
+	wheels.append(WheelDynamics.new(VehicleConfig.WheelIndex.RR, "RR", true))
 
 ## Returns wheel position relative to CoG in ISO/ROS frame:
 func get_wheel_pos_ros(index: int) -> Vector3:

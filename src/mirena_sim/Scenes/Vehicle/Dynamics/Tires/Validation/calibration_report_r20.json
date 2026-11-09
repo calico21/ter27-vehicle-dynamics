@@ -1,156 +1,449 @@
 {
-  "dataset": "R20",
-  "identifiability": {
-    "condition_number": 154422.73984073318,
-    "correlated_pairs": [
-      [
-        "PCY1",
-        "PEY1",
-        0.9954183832820043
+  "compound": "R20",
+  "identifiability_stages": {
+    "stage1_zero_camber_fy": {
+      "stage": "Stage 1: Pure Fy0",
+      "jacobian_rank": 11,
+      "num_params": 11,
+      "condition_number": 7725.175925006301,
+      "singular_values": [
+        1875232.355396307,
+        85816.22753902114,
+        82609.94515541474,
+        26185.141593243967,
+        24880.278720158964,
+        20202.085806427407,
+        9179.65682775218,
+        8396.203178814723,
+        3141.5314164527667,
+        835.2553879363534,
+        242.7429968715926
       ],
-      [
-        "PKY1",
-        "PKY2",
-        0.9658603050394665
-      ]
-    ]
+      "high_correlations": [
+        {
+          "param_i": "PCY1",
+          "param_j": "PEY1",
+          "correlation": 0.9943594117026987
+        },
+        {
+          "param_i": "PKY1",
+          "param_j": "PKY2",
+          "correlation": 0.9557397697875161
+        }
+      ],
+      "parameters": {
+        "PCY1": {
+          "optimal_value": 1.5973291909499294,
+          "std_error": 0.04140111230917435,
+          "relative_uncertainty_pct": 2.591896056476196
+        },
+        "PDY1": {
+          "optimal_value": 2.4171924519288415,
+          "std_error": 0.0009650659747794336,
+          "relative_uncertainty_pct": 0.03992507812149347
+        },
+        "PDY2": {
+          "optimal_value": -0.16036715407087343,
+          "std_error": 0.0028183556090052185,
+          "relative_uncertainty_pct": 1.757439436606614
+        },
+        "PEY1": {
+          "optimal_value": 0.45071026280266147,
+          "std_error": 0.06619057851611714,
+          "relative_uncertainty_pct": 14.6858378827504
+        },
+        "PEY2": {
+          "optimal_value": -0.5935354203350596,
+          "std_error": 0.024394635956596637,
+          "relative_uncertainty_pct": 4.110055629506576
+        },
+        "PKY1": {
+          "optimal_value": 49.66559805620664,
+          "std_error": 0.176795819519981,
+          "relative_uncertainty_pct": 0.3559723962649174
+        },
+        "PKY2": {
+          "optimal_value": 1.9805308788714242,
+          "std_error": 0.014512705238919925,
+          "relative_uncertainty_pct": 0.7327684407117031
+        },
+        "PPY1": {
+          "optimal_value": -0.451613224049429,
+          "std_error": 0.005331356635171209,
+          "relative_uncertainty_pct": 1.1805138448708694
+        },
+        "PPY3": {
+          "optimal_value": -0.18019913771687157,
+          "std_error": 0.0020175891244883642,
+          "relative_uncertainty_pct": 1.1196441614822792
+        },
+        "PHY1": {
+          "optimal_value": 0.000767287786114565,
+          "std_error": 3.2333424746952024e-05,
+          "relative_uncertainty_pct": 4.213989240032587
+        },
+        "PVY1": {
+          "optimal_value": 0.005166175053637331,
+          "std_error": 0.000532275620692183,
+          "relative_uncertainty_pct": 10.303089135886434
+        }
+      }
+    },
+    "stage2_camber_fy": {
+      "stage": "Stage 2: Camber Fy",
+      "jacobian_rank": 6,
+      "num_params": 6,
+      "condition_number": 526.2596406447935,
+      "singular_values": [
+        120458.6322625113,
+        9021.767238515673,
+        5134.091898589345,
+        2285.3778150320286,
+        771.5798528983406,
+        228.89582054006792
+      ],
+      "high_correlations": [],
+      "parameters": {
+        "PDY3": {
+          "optimal_value": 1.1999999999999997,
+          "std_error": 0.09743829793579947,
+          "relative_uncertainty_pct": 8.119858161316625
+        },
+        "PEY3": {
+          "optimal_value": 0.6628158599887995,
+          "std_error": 0.01240678207100578,
+          "relative_uncertainty_pct": 1.871829390325004
+        },
+        "PEY4": {
+          "optimal_value": 1.4999999999999998,
+          "std_error": 0.3087805458453312,
+          "relative_uncertainty_pct": 20.585369723022083
+        },
+        "PHY3": {
+          "optimal_value": -0.1146767829586512,
+          "std_error": 0.000776570962875263,
+          "relative_uncertainty_pct": 0.67718237540311
+        },
+        "PVY3": {
+          "optimal_value": -0.218007267347884,
+          "std_error": 0.014937608835080302,
+          "relative_uncertainty_pct": 6.8518857269302345
+        },
+        "PVY4": {
+          "optimal_value": 0.11938797715418378,
+          "std_error": 0.030990056095806916,
+          "relative_uncertainty_pct": 25.957434604813486
+        }
+      }
+    },
+    "stage3_aligning_torque_mz": {
+      "stage": "Stage 3: Aligning Torque Mz",
+      "jacobian_rank": 11,
+      "num_params": 11,
+      "condition_number": 1767.4081854624742,
+      "singular_values": [
+        55330.070216882974,
+        37618.39164522816,
+        13268.462191522733,
+        7751.293978773706,
+        4897.174151341096,
+        789.0746404671861,
+        659.6544590184075,
+        288.43994451976863,
+        123.40493668733207,
+        73.63047331577263,
+        31.305767774525084
+      ],
+      "high_correlations": [
+        {
+          "param_i": "QBZ1",
+          "param_j": "QCZ1",
+          "correlation": -0.9858514757315864
+        },
+        {
+          "param_i": "QBZ1",
+          "param_j": "QEZ1",
+          "correlation": -0.9119665112024061
+        },
+        {
+          "param_i": "QBZ2",
+          "param_j": "QEZ2",
+          "correlation": 0.9078742548110851
+        },
+        {
+          "param_i": "QCZ1",
+          "param_j": "QEZ1",
+          "correlation": 0.9664397693202423
+        }
+      ],
+      "parameters": {
+        "QDZ1": {
+          "optimal_value": 0.13645912107410493,
+          "std_error": 0.0013427236886971903,
+          "relative_uncertainty_pct": 0.98397503818599
+        },
+        "QDZ2": {
+          "optimal_value": -0.08097076940545771,
+          "std_error": 0.00283716046347945,
+          "relative_uncertainty_pct": 3.5039317080865184
+        },
+        "QDZ3": {
+          "optimal_value": -0.3999999999999995,
+          "std_error": 0.12271030346961678,
+          "relative_uncertainty_pct": 30.677575867404233
+        },
+        "QBZ1": {
+          "optimal_value": 6.158748846688896,
+          "std_error": 0.44579124385528957,
+          "relative_uncertainty_pct": 7.238341016210762
+        },
+        "QBZ2": {
+          "optimal_value": -0.46083947682936566,
+          "std_error": 0.1909055502548718,
+          "relative_uncertainty_pct": 41.42560693114364
+        },
+        "QCZ1": {
+          "optimal_value": 1.9448019211749517,
+          "std_error": 0.12047657009421643,
+          "relative_uncertainty_pct": 6.194799006647965
+        },
+        "QEZ1": {
+          "optimal_value": 0.5652889273661044,
+          "std_error": 0.14084252394588298,
+          "relative_uncertainty_pct": 24.915139343365833
+        },
+        "QEZ2": {
+          "optimal_value": 0.9430215967827411,
+          "std_error": 0.09854137434353527,
+          "relative_uncertainty_pct": 10.449535268303915
+        },
+        "QHZ1": {
+          "optimal_value": -0.024518007265388157,
+          "std_error": 0.0006537364364153214,
+          "relative_uncertainty_pct": 2.666352242003758
+        },
+        "QDZ6": {
+          "optimal_value": 0.049999999999999996,
+          "std_error": 0.0012859005364522077,
+          "relative_uncertainty_pct": 2.5718010729044156
+        },
+        "QDZ8": {
+          "optimal_value": 0.049999999999999996,
+          "std_error": 0.019863290882652623,
+          "relative_uncertainty_pct": 39.726581765305255
+        }
+      }
+    },
+    "stage4_overturning_mx": {
+      "stage": "Stage 4: Overturning Moment Mx",
+      "jacobian_rank": 3,
+      "num_params": 3,
+      "condition_number": 83.12132970644869,
+      "singular_values": [
+        93882.19791026878,
+        38934.89506999431,
+        1129.4597697344734
+      ],
+      "high_correlations": [],
+      "parameters": {
+        "QSX1": {
+          "optimal_value": -0.02348584557715134,
+          "std_error": 0.00016556416058507417,
+          "relative_uncertainty_pct": 0.7049529472600573
+        },
+        "QSX2": {
+          "optimal_value": 1.965116176563398,
+          "std_error": 0.004008057599999616,
+          "relative_uncertainty_pct": 0.20396033821312898
+        },
+        "QSX3": {
+          "optimal_value": 0.05431693085872595,
+          "std_error": 4.8269214592263225e-05,
+          "relative_uncertainty_pct": 0.08886587262783245
+        }
+      }
+    }
   },
   "evaluation": {
     "Train": {
       "num_samples": 61020,
       "fy": {
-        "rmse_n": 76.02683925226223,
-        "mae_n": 56.6344759174255,
-        "max_err_n": 396.7778207882511,
-        "r2": 0.9975250417989204
+        "rmse_n": 76.78525749591674,
+        "mae_n": 57.010494331700144,
+        "max_err_n": 394.28313013844445,
+        "nrmse_pct": 1.3837974058894182,
+        "r2": 0.9974754168007407
       },
       "mz": {
-        "rmse_nm": 16.356409028007317,
-        "mae_nm": 13.386116108368032,
-        "max_err_nm": 63.87711083968376,
-        "r2": 0.5789181100409839
+        "rmse_nm": 15.35048906595126,
+        "mae_nm": 12.799956765653562,
+        "max_err_nm": 57.425132038034754,
+        "nrmse_pct": 9.49436483544734,
+        "r2": 0.6291185845152759
+      },
+      "sliced_by_slip_region": {
+        "Linear region (|alpha| <= 3 deg)": {
+          "count": 14619,
+          "rmse_fy_n": 63.68597310968967,
+          "mae_fy_n": 49.05121763174999,
+          "rmse_mz_nm": 18.39014170662533
+        },
+        "Transitional region (3 deg < |alpha| <= 8 deg)": {
+          "count": 24489,
+          "rmse_fy_n": 84.09717434011247,
+          "mae_fy_n": 66.21072849285086,
+          "rmse_mz_nm": 13.80554330726712
+        },
+        "Saturation / post-peak (|alpha| > 8 deg)": {
+          "count": 21912,
+          "rmse_fy_n": 76.21619118896213,
+          "mae_fy_n": 52.03843024371873,
+          "rmse_mz_nm": 14.74974090399975
+        }
       },
       "sliced_by_load": {
         "Low Fz (~250 N)": {
           "count": 11228,
-          "rmse_fy_n": 31.742806223144783,
-          "mae_fy_n": 25.378582298624725,
-          "rmse_mz_nm": 14.334729712135008
+          "rmse_fy_n": 31.615932463089862,
+          "mae_fy_n": 25.450033264515337,
+          "rmse_mz_nm": 13.360549293739853
         },
         "Med Fz (~600 N)": {
           "count": 22387,
-          "rmse_fy_n": 71.1777677710946,
-          "mae_fy_n": 56.26280542565756,
-          "rmse_mz_nm": 15.602486198213805
+          "rmse_fy_n": 72.78928498074431,
+          "mae_fy_n": 57.287320376738116,
+          "rmse_mz_nm": 13.95129503952421
         },
         "High Fz (~1000 N)": {
           "count": 27405,
-          "rmse_fy_n": 91.20579506315511,
-          "mae_fy_n": 69.74382679686734,
-          "rmse_mz_nm": 17.681519338537118
+          "rmse_fy_n": 91.59868733941805,
+          "mae_fy_n": 69.71487499917272,
+          "rmse_mz_nm": 17.103716827049155
         }
       },
       "sliced_by_camber": {
         "Camber 0.0 deg": {
           "count": 23665,
-          "rmse_fy_n": 52.6177489665661,
-          "mae_fy_n": 42.45141760172474,
-          "rmse_mz_nm": 11.63468424997407
+          "rmse_fy_n": 52.743514526686226,
+          "mae_fy_n": 42.14331559378986,
+          "rmse_mz_nm": 14.746252431795734
         },
         "Camber 2.0 deg": {
           "count": 18676,
-          "rmse_fy_n": 57.72244068667853,
-          "mae_fy_n": 44.05096415618039,
-          "rmse_mz_nm": 12.201394750188953
+          "rmse_fy_n": 58.45744257809324,
+          "mae_fy_n": 44.551100456330516,
+          "rmse_mz_nm": 9.673990498856025
         },
         "Camber 4.0 deg": {
           "count": 18679,
-          "rmse_fy_n": 109.74146630696863,
-          "mae_fy_n": 87.18491976849204,
-          "rmse_mz_nm": 23.529058988294217
+          "rmse_fy_n": 110.99381398035557,
+          "mae_fy_n": 88.30357344991042,
+          "rmse_mz_nm": 20.0176412230718
         }
       },
       "sliced_by_speed": {
         "Med speed (~40 km/h)": {
           "count": 61020,
-          "rmse_fy_n": 76.02683925226223,
-          "mae_fy_n": 56.6344759174255,
-          "rmse_mz_nm": 16.356409028007317
+          "rmse_fy_n": 76.78525749591674,
+          "mae_fy_n": 57.010494331700144,
+          "rmse_mz_nm": 15.35048906595126
         }
       }
     },
     "Validation": {
       "num_samples": 52322,
       "fy": {
-        "rmse_n": 107.99722597934154,
-        "mae_n": 74.08887632610944,
-        "max_err_n": 700.7658255488936,
-        "r2": 0.9949292383565971
+        "rmse_n": 108.52202782212731,
+        "mae_n": 73.97566922098338,
+        "max_err_n": 709.0278381046815,
+        "nrmse_pct": 1.93250305081411,
+        "r2": 0.9948798368869529
       },
       "mz": {
-        "rmse_nm": 16.68071858900537,
-        "mae_nm": 13.0393917986968,
-        "max_err_nm": 67.34699020392718,
-        "r2": 0.6661413783244579
+        "rmse_nm": 16.318116030957214,
+        "mae_nm": 13.168632500244382,
+        "max_err_nm": 61.39364626426318,
+        "nrmse_pct": 8.200470390952919,
+        "r2": 0.6804983403274827
+      },
+      "sliced_by_slip_region": {
+        "Linear region (|alpha| <= 3 deg)": {
+          "count": 12535,
+          "rmse_fy_n": 89.71415694925795,
+          "mae_fy_n": 61.508249530734886,
+          "rmse_mz_nm": 18.808101365333535
+        },
+        "Transitional region (3 deg < |alpha| <= 8 deg)": {
+          "count": 20993,
+          "rmse_fy_n": 120.68662700040865,
+          "mae_fy_n": 80.65568107287801,
+          "rmse_mz_nm": 15.8690684187174
+        },
+        "Saturation / post-peak (|alpha| > 8 deg)": {
+          "count": 18794,
+          "rmse_fy_n": 105.59017683981547,
+          "mae_fy_n": 74.82943196496768,
+          "rmse_mz_nm": 14.96963884582236
+        }
       },
       "sliced_by_load": {
         "Low Fz (~250 N)": {
           "count": 9983,
-          "rmse_fy_n": 34.162949867518655,
-          "mae_fy_n": 27.20670595079671,
-          "rmse_mz_nm": 13.912376331192856
+          "rmse_fy_n": 33.47405351876907,
+          "mae_fy_n": 26.604419564322406,
+          "rmse_mz_nm": 13.121810496353234
         },
         "Med Fz (~600 N)": {
           "count": 19912,
-          "rmse_fy_n": 72.8307597202842,
-          "mae_fy_n": 56.89949931993058,
-          "rmse_mz_nm": 14.912251122747731
+          "rmse_fy_n": 74.80844796207569,
+          "mae_fy_n": 58.18012155609829,
+          "rmse_mz_nm": 13.836304672393227
         },
         "High Fz (~1000 N)": {
           "count": 22427,
-          "rmse_fy_n": 148.26197139288416,
-          "mae_fy_n": 110.21941459711223,
-          "rmse_mz_nm": 19.119396288658116
+          "rmse_fy_n": 148.35164133130465,
+          "mae_fy_n": 109.08638980000148,
+          "rmse_mz_nm": 19.354913241305496
         }
       },
       "sliced_by_camber": {
         "Camber 0.0 deg": {
           "count": 27410,
-          "rmse_fy_n": 82.0745188635401,
-          "mae_fy_n": 57.6755249934312,
-          "rmse_mz_nm": 12.121140051914509
+          "rmse_fy_n": 80.55319286633514,
+          "mae_fy_n": 56.194330113390585,
+          "rmse_mz_nm": 14.698623840707652
         },
         "Camber 2.0 deg": {
           "count": 12456,
-          "rmse_fy_n": 97.52004250859808,
-          "mae_fy_n": 63.90542027512596,
-          "rmse_mz_nm": 13.338281110229605
+          "rmse_fy_n": 98.82607620413164,
+          "mae_fy_n": 64.7244955407264,
+          "rmse_mz_nm": 11.56443141643431
         },
         "Camber 4.0 deg": {
           "count": 12456,
-          "rmse_fy_n": 157.03221318642113,
-          "mae_fy_n": 120.39066571273118,
-          "rmse_mz_nm": 25.83734187926047
+          "rmse_fy_n": 159.45038309549048,
+          "mae_fy_n": 122.35549615582599,
+          "rmse_mz_nm": 22.56905358186991
         }
       },
       "sliced_by_speed": {
         "Low speed (~25 km/h)": {
           "count": 6230,
-          "rmse_fy_n": 58.95504606575237,
-          "mae_fy_n": 46.848200191030585,
-          "rmse_mz_nm": 10.089478270457903
+          "rmse_fy_n": 57.45338954027256,
+          "mae_fy_n": 45.31095068816407,
+          "rmse_mz_nm": 12.6375011846284
         },
         "Med speed (~40 km/h)": {
           "count": 39863,
-          "rmse_fy_n": 116.38607522869516,
-          "mae_fy_n": 80.70861488927999,
-          "rmse_mz_nm": 18.28048031766346
+          "rmse_fy_n": 117.29553541340715,
+          "mae_fy_n": 81.0421799476341,
+          "rmse_mz_nm": 17.34297659122303
         },
         "High speed (~70 km/h)": {
           "count": 6229,
-          "rmse_fy_n": 88.35367062206703,
-          "mae_fy_n": 58.97036195427989,
-          "rmse_mz_nm": 9.838571159642548
+          "rmse_fy_n": 87.03791885641871,
+          "mae_fy_n": 57.42227049935657,
+          "rmse_mz_nm": 12.3328896196384
         }
       }
     }

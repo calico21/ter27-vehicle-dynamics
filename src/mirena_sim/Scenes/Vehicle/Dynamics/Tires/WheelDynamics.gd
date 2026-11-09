@@ -11,6 +11,7 @@ const TransientRelaxation = preload("Transient/TransientRelaxation.gd")
 
 var wheel_id: int = 0
 var name: String = "Wheel"
+var is_right_side: bool = false
 
 # --- Wheel Kinematics State ---
 ## Rotational speed around wheel spindle axis (rad/s).
@@ -77,9 +78,10 @@ var is_grounded: bool = true
 var suspension_compression: float = 0.0 # m
 var suspension_velocity: float = 0.0    # m/s
 
-func _init(id: int = 0, wheel_name: String = "Wheel") -> void:
+func _init(id: int = 0, wheel_name: String = "Wheel", right_side: bool = false) -> void:
 	wheel_id = id
 	name = wheel_name
+	is_right_side = right_side
 
 ## Computes slip kinematics and transient carcass relaxation.
 func compute_slip(
@@ -141,7 +143,8 @@ func compute_forces(normal_force: float, config: VehicleConfig) -> void:
 		camber_angle,
 		inflation_pressure_kpa,
 		v_longitudinal,
-		TireModel.enable_neural_correction
+		TireModel.enable_neural_correction,
+		is_right_side
 	)
 	
 	F_x = tire_res["Fx"]
