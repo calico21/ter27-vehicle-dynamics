@@ -1,0 +1,82 @@
+{
+  "title": "Mirena Dynamics Experimental Tire Validation",
+  "date": "2026-11-09",
+  "tire": "Hoosier 16.0x7.5-10 R25B",
+  "datasets": {
+    "train": {
+      "file": "B1965run6.dat",
+      "points": 59842,
+      "type": "Multi-load multi-camber cornering at 40 km/h"
+    },
+    "validation": {
+      "file": "B1965run7.dat",
+      "points": 52288,
+      "type": "Multi-speed multi-pressure cornering (24-72 km/h)"
+    }
+  },
+  "dynamic_characteristics_nominal": {
+    "load_n": 800.0,
+    "camber_rad": 0.0,
+    "pressure_kpa": 83.0,
+    "experimental": {
+      "stiffness_n_rad": 33602.46922521524,
+      "fy_max_n": 2115.018181818182,
+      "alpha_peak_deg": 9.48513636363636,
+      "post_peak_drop_pct": 0.3000205655459057
+    },
+    "pure_mf62": {
+      "stiffness_n_rad": 31892.5201357489,
+      "fy_max_n": 2017.860057898064,
+      "alpha_peak_deg": 8.989262650423441,
+      "post_peak_drop_pct": 1.2734734273498314
+    },
+    "hybrid_pinn": {
+      "stiffness_n_rad": 32823.500578809304,
+      "fy_max_n": 2048.6346416921483,
+      "alpha_peak_deg": 9.908292697751078,
+      "post_peak_drop_pct": 0.7369683352822972
+    }
+  },
+  "overall_performance": {
+    "train": {
+      "pure_mf62": {
+        "fy_rmse_n": 76.25126431190405,
+        "fy_mae_n": 60.02021139958804,
+        "fy_max_err_n": 319.17067644749795,
+        "mz_rmse_nm": 8.473276191804555
+      },
+      "hybrid_pinn": {
+        "fy_rmse_n": 53.21998606441492,
+        "fy_mae_n": 40.891971906741034,
+        "fy_max_err_n": 232.70618260128958,
+        "mz_rmse_nm": 6.042519993616416,
+        "fy_rmse_reduction_pct": 30.204454254397962,
+        "mz_rmse_reduction_pct": 28.687324042844164
+      }
+    },
+    "validation": {
+      "pure_mf62": {
+        "fy_rmse_n": 136.42867442517058,
+        "fy_mae_n": 104.1343798223742,
+        "fy_max_err_n": 494.3550776070351,
+        "mz_rmse_nm": 8.824525819080398
+      },
+      "hybrid_pinn": {
+        "fy_rmse_n": 110.50877727803767,
+        "fy_mae_n": 82.9774725083687,
+        "fy_max_err_n": 471.6141543823164,
+        "mz_rmse_nm": 6.867646375755222,
+        "fy_rmse_reduction_pct": 18.998863146874346,
+        "mz_rmse_reduction_pct": 22.175462834433656
+      }
+    }
+  },
+  "plots_generated": [
+    "fig1_fy_vs_alpha_loads.png",
+    "fig2_mz_vs_alpha_loads.png",
+    "fig3_camber_sensitivity.png",
+    "fig4_pressure_sensitivity.png",
+    "fig5_error_distributions.png",
+    "fig6_transient_step_response.png"
+  ]
+}

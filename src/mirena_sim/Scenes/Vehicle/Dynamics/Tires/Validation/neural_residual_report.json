@@ -1,0 +1,37 @@
+{
+  "model_type": "MF 6.2 + Physics-Informed Residual PINN",
+  "training_checkpoint": {
+    "best_epoch": 10,
+    "best_val_loss": 6129.6767578125
+  },
+  "metrics": {
+    "train": {
+      "base_mf62": {
+        "fy_rmse_n": 76.25126431190405,
+        "mz_rmse_nm": 8.473276191804555
+      },
+      "hybrid_pinn": {
+        "fy_rmse_n": 53.21998606441492,
+        "fy_mae_n": 40.891971906741034,
+        "fy_r2": 0.9988101678866207,
+        "mz_rmse_nm": 6.042519993616416,
+        "mz_mae_nm": 4.121534892187599,
+        "mz_r2": 0.9448561101351804
+      }
+    },
+    "validation": {
+      "base_mf62": {
+        "fy_rmse_n": 136.42867442517058,
+        "mz_rmse_nm": 8.824525819080398
+      },
+      "hybrid_pinn": {
+        "fy_rmse_n": 110.50877727803767,
+        "fy_mae_n": 82.9774725083687,
+        "fy_r2": 0.9946412272399262,
+        "mz_rmse_nm": 6.867646375755222,
+        "mz_mae_nm": 4.793397281149637,
+        "mz_r2": 0.9395128962213888
+      }
+    }
+  }
+}

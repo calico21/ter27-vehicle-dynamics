@@ -1,0 +1,127 @@
+{
+  "tire_model": "Hoosier 16.0x7.5-10",
+  "datasets": {
+    "R25B_train": {
+      "file": "R25B_train.csv",
+      "compound": "R25B",
+      "type": "cornering_train",
+      "rows": 59842,
+      "fz_range_n": [
+        150.09,
+        1194.77
+      ],
+      "alpha_range_deg": [
+        -12.174,
+        12.212
+      ],
+      "gamma_range_deg": [
+        -0.035,
+        4.029
+      ],
+      "pressure_range_kpa": [
+        67.84,
+        99.2
+      ],
+      "velocity_range_mps": [
+        11.130555555555555,
+        11.213888888888889
+      ],
+      "description": "Round 8 R25B Cornering test at 40 kph, multi-load, multi-camber, multi-pressure"
+    },
+    "R25B_val": {
+      "file": "R25B_val.csv",
+      "compound": "R25B",
+      "type": "cornering_val",
+      "rows": 52288,
+      "fz_range_n": [
+        150.0,
+        1200.96
+      ],
+      "alpha_range_deg": [
+        -12.208,
+        12.245
+      ],
+      "gamma_range_deg": [
+        -0.032,
+        4.027
+      ],
+      "pressure_range_kpa": [
+        53.63,
+        85.49
+      ],
+      "velocity_range_mps": [
+        6.675,
+        20.150000000000002
+      ],
+      "description": "Round 8 R25B Cornering test with speed sweeps (24-72 kph) & pressure sweeps"
+    },
+    "R20_train": {
+      "file": "R20_train.csv",
+      "compound": "R20",
+      "type": "cornering_train",
+      "rows": 61020,
+      "fz_range_n": [
+        189.63,
+        1188.52
+      ],
+      "alpha_range_deg": [
+        -12.249,
+        12.282
+      ],
+      "gamma_range_deg": [
+        -0.015,
+        4.02
+      ],
+      "pressure_range_kpa": [
+        66.02,
+        97.43
+      ],
+      "velocity_range_mps": [
+        11.119444444444445,
+        11.225
+      ],
+      "description": "Round 9 R20 Cornering test at 40 kph, multi-load, multi-camber, multi-pressure"
+    },
+    "R20_val": {
+      "file": "R20_val.csv",
+      "compound": "R20",
+      "type": "cornering_val",
+      "rows": 52322,
+      "fz_range_n": [
+        187.32,
+        1207.14
+      ],
+      "alpha_range_deg": [
+        -12.306,
+        12.385
+      ],
+      "gamma_range_deg": [
+        -0.016,
+        4.019
+      ],
+      "pressure_range_kpa": [
+        51.1,
+        84.53
+      ],
+      "velocity_range_mps": [
+        6.663888888888888,
+        20.172222222222224
+      ],
+      "description": "Round 9 R20 Cornering test with speed sweeps (24-72 kph) & low pressure"
+    },
+    "R25B_spring": {
+      "file": "R25B_spring.csv",
+      "compound": "R25B",
+      "type": "spring_rate",
+      "rows": 58687,
+      "description": "Round 8 R25B Vertical deflection and spring rate characterization"
+    },
+    "R20_spring": {
+      "file": "R20_spring.csv",
+      "compound": "R20",
+      "type": "spring_rate",
+      "rows": 58707,
+      "description": "Round 9 R20 Vertical deflection and spring rate characterization"
+    }
+  }
+}

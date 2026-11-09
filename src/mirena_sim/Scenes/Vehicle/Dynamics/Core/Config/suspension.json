@@ -1,0 +1,12 @@
+{
+  "spring_stiffness_front": 45000.0,
+  "spring_stiffness_rear": 40000.0,
+  "damping_compression_front": 6700.0,
+  "damping_relaxation_front": 2700.0,
+  "damping_compression_rear": 6700.0,
+  "damping_relaxation_rear": 2700.0,
+  "arb_stiffness_front": 2000.0,
+  "arb_stiffness_rear": 1000.0,
+  "ray_rest_length": 0.32,
+  "ray_cast_length": 0.45
+}

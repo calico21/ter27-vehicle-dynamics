@@ -64,6 +64,9 @@ func get_static_transforms() -> Array:
 func _ready() -> void:
 	# 1. Setup hardware rendering
 	_rd = RenderingServer.get_rendering_device()
+	if not _rd:
+		push_warning("RosLidar: No RenderingDevice available (headless mode). Skipping GPU pipeline.")
+		return
 	_params_float_array.resize(300)
 	
 	_actual_face_resolution = face_resolution

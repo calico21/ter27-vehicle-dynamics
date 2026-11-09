@@ -1,0 +1,9 @@
+{
+  "drive_mode": "FOUR_WD",
+  "power_limit_watts": 80000.0,
+  "motor_peak_torque": 100.0,
+  "gear_ratio": 5.0,
+  "drivetrain_efficiency": 0.92,
+  "front_drive_torque_ratio": 0.50,
+  "max_steer_angle": 0.35
+}

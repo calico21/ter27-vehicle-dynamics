@@ -1,6 +1,6 @@
 [gd_scene format=4 uid="uid://lnlv7w6dktqx"]
 
-[ext_resource type="Script" uid="uid://bytxt20k5w1u5" path="res://Scenes/Vehicle/vehicleMotion.gd" id="1_nuhka"]
+[ext_resource type="Script" path="res://Scenes/Vehicle/Dynamics/Core/MirenaCarDynamics.gd" id="1_nuhka"]
 [ext_resource type="ArrayMesh" uid="uid://ba1hm840bhu06" path="res://Assets/Models/Car/TeR.res" id="2_pdc0f"]
 [ext_resource type="Script" uid="uid://cxrb8iam8llhk" path="res://addons/rclgd-sensors/ros_lidar/ros_lidar.gd" id="3_pdc0f"]
 [ext_resource type="Script" uid="uid://ds4q43s0n1ft7" path="res://addons/rclgd-sensors/ros_camera/ros_camera.gd" id="4_dflui"]
@@ -149,7 +149,7 @@ _surfaces = [{
 blend_shape_mode = 0
 shadow_mesh = SubResource("ArrayMesh_hnasb")
 
-[node name="MirenaCar" type="VehicleBody3D" unique_id=1131682099]
+[node name="MirenaCar" type="RigidBody3D" unique_id=1131682099]
 mass = 300.0
 center_of_mass_mode = 1
 center_of_mass = Vector3(0, 0.33, -0.117)
@@ -164,15 +164,24 @@ skeleton = NodePath("")
 transform = Transform3D(1, 0, 0, 0, -3.57628e-07, -1, 0, 1, -3.57628e-07, -0.011427581, 0.63162, -0.38776404)
 shape = SubResource("BoxShape3D_iwp33")
 
-[node name="FR_WHEEL" type="VehicleWheel3D" parent="." unique_id=360427877]
+[node name="FL_RAY" type="RayCast3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.587, 0.28, -0.993)
+target_position = Vector3(0, -0.45, 0)
+
+[node name="FR_RAY" type="RayCast3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.587, 0.28, -0.993)
+target_position = Vector3(0, -0.45, 0)
+
+[node name="RL_RAY" type="RayCast3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.587, 0.28, 0.6)
+target_position = Vector3(0, -0.45, 0)
+
+[node name="RR_RAY" type="RayCast3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.587, 0.28, 0.6)
+target_position = Vector3(0, -0.45, 0)
+
+[node name="FR_WHEEL" type="Node3D" parent="." unique_id=360427877]
 transform = Transform3D(-0.999999, 0, -8.742269e-08, 0, 0.999999, 0, 8.742269e-08, 0, -0.999999, 0.587, 0.208, -0.993)
-use_as_steering = true
-wheel_radius = 0.2
-wheel_rest_length = 0.05
-wheel_friction_slip = 1.0
-suspension_stiffness = 35.03
-damping_compression = 6.7
-damping_relaxation = 2.7
 
 [node name="FR_WHEEL" type="MeshInstance3D" parent="FR_WHEEL" unique_id=959173712]
 transform = Transform3D(4.37114e-08, 1, 8.74228e-08, 1, -4.37114e-08, 0, 3.82137e-15, 8.74228e-08, -1, 0, 0, 0)
@@ -180,15 +189,8 @@ mesh = SubResource("ArrayMesh_4bux5")
 skeleton = NodePath("")
 surface_material_override/0 = SubResource("StandardMaterial3D_iifm0")
 
-[node name="FL_WHEEL" type="VehicleWheel3D" parent="." unique_id=2101877658]
+[node name="FL_WHEEL" type="Node3D" parent="." unique_id=2101877658]
 transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, -0.587, 0.208, -0.993)
-use_as_steering = true
-wheel_radius = 0.2
-wheel_rest_length = 0.05
-wheel_friction_slip = 1.0
-suspension_stiffness = 35.03
-damping_compression = 6.7
-damping_relaxation = 2.7
 
 [node name="FL_WHEEL" type="MeshInstance3D" parent="FL_WHEEL" unique_id=2110257946]
 transform = Transform3D(-4.37114e-08, -1, 0, 1, -4.37114e-08, 0, 0, 0, 1, 0, 0, 0)
@@ -196,15 +198,8 @@ mesh = SubResource("ArrayMesh_6qa02")
 skeleton = NodePath("")
 surface_material_override/0 = SubResource("StandardMaterial3D_iifm0")
 
-[node name="RL_WHEEL" type="VehicleWheel3D" parent="." unique_id=2127290588]
+[node name="RL_WHEEL" type="Node3D" parent="." unique_id=2127290588]
 transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, -0.587, 0.208, 0.6)
-use_as_traction = true
-wheel_radius = 0.2
-wheel_rest_length = 0.05
-wheel_friction_slip = 1.2
-suspension_stiffness = 52.54
-damping_compression = 6.7
-damping_relaxation = 2.7
 
 [node name="RL_WHEEL" type="MeshInstance3D" parent="RL_WHEEL" unique_id=762842282]
 transform = Transform3D(-4.37114e-08, -1, 0, 1, -4.37114e-08, 0, 0, 0, 1, 0, 0, 0)
@@ -212,15 +207,8 @@ mesh = SubResource("ArrayMesh_v1u7f")
 skeleton = NodePath("")
 surface_material_override/0 = SubResource("StandardMaterial3D_iifm0")
 
-[node name="RR_WHEEL" type="VehicleWheel3D" parent="." unique_id=1195679221]
+[node name="RR_WHEEL" type="Node3D" parent="." unique_id=1195679221]
 transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, 0.587, 0.208, 0.6)
-use_as_traction = true
-wheel_radius = 0.2
-wheel_rest_length = 0.05
-wheel_friction_slip = 1.2
-suspension_stiffness = 52.54
-damping_compression = 6.7
-damping_relaxation = 2.7
 
 [node name="RR_WHEEL" type="MeshInstance3D" parent="RR_WHEEL" unique_id=1721285107]
 transform = Transform3D(4.37114e-08, 1, 8.74228e-08, 1, -4.37114e-08, 0, 3.82137e-15, 8.74228e-08, -1, 0, 0, 0)

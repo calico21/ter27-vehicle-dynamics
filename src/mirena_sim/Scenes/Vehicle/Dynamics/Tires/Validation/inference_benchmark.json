@@ -1,0 +1,19 @@
+{
+  "full_model": {
+    "evals_per_sec": 39057.404229292,
+    "four_tires_pct_200hz_tick": 2.0482672,
+    "us_per_call": 25.60334
+  },
+  "hybrid_pinn": {
+    "evals_per_sec": 41032.5429097817,
+    "four_tires_pct_200hz_tick": 1.949672,
+    "us_per_call": 24.3709
+  },
+  "iterations": 50000,
+  "pure_mf62": {
+    "evals_per_sec": 105954.42688191,
+    "four_tires_pct_200hz_tick": 0.7550416,
+    "us_per_call": 9.43802
+  },
+  "target_evals_per_sec": 800
+}
