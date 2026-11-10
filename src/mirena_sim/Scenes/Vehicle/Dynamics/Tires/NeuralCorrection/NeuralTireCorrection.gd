@@ -1,184 +1,238 @@
 class_name NeuralTireCorrection
 extends RefCounted
 
-## Physics-Informed Neural Network (PINN) Residual Corrector for Mirena Dynamics
-## Zero-dependency, ultra-fast deterministic CPU feedforward inference:
-##   Delta F = [Delta Fy, Delta Mz] = F_experimental - F_MF62
-## Features:
-## - Fixed normalization and denormalization.
-## - Physics-informed zero-slip passivity gate (no spurious forces at zero slip).
-## - Vertical load suppression gate (prevents instability when airborne).
-## - Sigmoidal domain falloff (smoothly decays influence outside training envelope).
-## - Preallocated flat buffers (zero heap allocations in physics cycle).
-## - Hard saturation clipping guards.
+## Gated residual MLP (4-16-16-2, tanh) for Mirena Dynamics: [dFy, dMz] = F_exp - F_MF62.
+## Must be loaded against the exact MF62 calibration it was trained on: load_for(mf) checks compound and
+## CALIBRATION_ID and refuses to arm otherwise (is_ready=false => zero correction).
+##
+## Formulas are identical to train_residual_mlp.py (float64 there, GDScript float is double):
+##   gate = (1-exp(-(a^2+g^2)/(2 s^2))) * smoothstep(fz/load_trans) * sigmoid(-(sqrt(a^2+eps)-a_lim)/a_slope) * sigmoid(-(fz-fz_lim)/fz_slope)
+##   out  = clip * tanh(gate * denorm(MLP(norm(x))) / clip)
+## Right wheel: dF_R(alpha, gamma) = -dF_L(-alpha, -gamma) (training data are left-as-tested).
+## Hot path predict_residual() performs no heap allocation (flat PackedFloat64Array buffers, Vector2 return).
 
-const WEIGHTS_PATH_RES: String = "res://Scenes/Vehicle/Dynamics/Tires/NeuralCorrection/neural_residual_weights.json"
+const NEURAL_DIR: String = "res://Scenes/Vehicle/Dynamics/Tires/NeuralCorrection/"
+const EDITOR_FALLBACK_DIR: String = "src/mirena_sim/Scenes/Vehicle/Dynamics/Tires/NeuralCorrection/"
+const N_IN: int = 4
+const N_H: int = 16
+const N_OUT: int = 2
+const GATE_KEYS: PackedStringArray = [
+	"slip_scale_rad", "load_trans_n", "alpha_limit_rad", "alpha_slope_rad", "fz_limit_n", "fz_slope_n",
+	"clip_fy_n", "clip_mz_nm"]
 
 var is_ready: bool = false
+var compound: String = "UNKNOWN"
+var bound_calibration_id: String = ""
 
-# Normalization constants (4 inputs: alpha, fz, gamma, p_kpa)
-var x_mean: Array[float] = [0.0004, 686.2, 0.0327, 83.44]
-var x_std: Array[float] = [0.1253, 322.3, 0.0288, 11.25]
+var _x_mean: PackedFloat64Array = PackedFloat64Array()
+var _x_std: PackedFloat64Array = PackedFloat64Array()
+var _y_mean: PackedFloat64Array = PackedFloat64Array()
+var _y_std: PackedFloat64Array = PackedFloat64Array()
+var _w1: PackedFloat64Array = PackedFloat64Array()  # N_H x N_IN, row-major
+var _b1: PackedFloat64Array = PackedFloat64Array()
+var _w2: PackedFloat64Array = PackedFloat64Array()  # N_H x N_H
+var _b2: PackedFloat64Array = PackedFloat64Array()
+var _w3: PackedFloat64Array = PackedFloat64Array()  # N_OUT x N_H
+var _b3: PackedFloat64Array = PackedFloat64Array()
 
-# Denormalization constants (2 outputs: delta_Fy, delta_Mz)
-var y_mean: Array[float] = [7.409, 1.563]
-var y_std: Array[float] = [75.89, 8.328]
+var _slip_scale: float = 0.006
+var _load_trans: float = 100.0
+var _alpha_limit: float = 0.22
+var _alpha_slope: float = 0.02
+var _fz_limit: float = 1300.0
+var _fz_slope: float = 100.0
+var _clip_fy: float = 200.0
+var _clip_mz: float = 10.0
 
-# Network weights (16x4, 16x16, 2x16)
-var w1: Array = [] # 16 rows, 4 cols
-var b1: Array[float] = [] # 16 elements
-var w2: Array = [] # 16 rows, 16 cols
-var b2: Array[float] = [] # 16 elements
-var w3: Array = [] # 2 rows, 16 cols
-var b3: Array[float] = [] # 2 elements
+var _h1: PackedFloat64Array = PackedFloat64Array()
+var _h2: PackedFloat64Array = PackedFloat64Array()
 
-# Physics Gating & Limits
-var slip_trans_rad: float = 0.02
-var load_trans_n: float = 100.0
-var alpha_limit_rad: float = 0.22
-var alpha_slope_rad: float = 0.02
-var fz_limit_n: float = 1300.0
-var fz_slope_n: float = 100.0
-var clip_fy_n: float = 200.0
-var clip_mz_nm: float = 10.0
 
-# Preallocated inference buffers to guarantee ZERO dynamic allocations at 200 Hz
-var _buf_in_norm: Array[float] = [0.0, 0.0, 0.0, 0.0]
-var _buf_h1: Array[float] = []
-var _buf_h2: Array[float] = []
+func _init(mf: Pacejka62 = null, weights_path: String = "") -> void:
+	_h1.resize(N_H)
+	_h2.resize(N_H)
+	if mf != null:
+		load_for(mf, weights_path)
+	else:
+		# Auto-bind to default MF62 model if none provided
+		var default_mf: Pacejka62 = Pacejka62.new()
+		if default_mf.is_loaded:
+			load_for(default_mf, weights_path)
 
-func _init(custom_weights_path: String = "") -> void:
-	_buf_h1.resize(16)
-	_buf_h2.resize(16)
-	load_weights(custom_weights_path)
 
-## Loads exported weights from JSON.
-func load_weights(weights_path: String = "") -> void:
-	var paths = [
-		weights_path,
-		WEIGHTS_PATH_RES,
-		"src/mirena_sim/Scenes/Vehicle/Dynamics/Tires/NeuralCorrection/neural_residual_weights.json",
-		"Scenes/Vehicle/Dynamics/Tires/NeuralCorrection/neural_residual_weights.json"
-	]
-	
-	var text = ""
-	for p in paths:
-		if p != "" and FileAccess.file_exists(p):
-			var f = FileAccess.open(p, FileAccess.READ)
-			if f:
-				text = f.get_as_text()
+## Loads neural_residual_weights_<compound>.json (or `weights_path`) and binds it to `mf`.
+func load_for(mf: Pacejka62, weights_path: String = "") -> bool:
+	is_ready = false
+	if mf == null or not mf.is_loaded:
+		push_error("NeuralTireCorrection: MF62 model not loaded; residual disabled.")
+		return false
+	var path: String = weights_path
+	if path.is_empty():
+		var fname: String = "neural_residual_weights_%s.json" % mf.active_compound.to_lower()
+		for p in [NEURAL_DIR + fname, EDITOR_FALLBACK_DIR + fname]:
+			if FileAccess.file_exists(p):
+				path = p
 				break
-	
-	if text == "":
-		is_ready = false
-		return
-	
-	var data = JSON.parse_string(text)
-	if not (data is Dictionary):
-		is_ready = false
-		return
-	
-	var norm = data.get("normalization", {})
-	if norm is Dictionary:
-		x_mean = _to_float_array(norm.get("x_mean", x_mean))
-		x_std = _to_float_array(norm.get("x_std", x_std))
-		y_mean = _to_float_array(norm.get("y_mean", y_mean))
-		y_std = _to_float_array(norm.get("y_std", y_std))
-	
-	var w_dict = data.get("weights", {})
-	if w_dict is Dictionary:
-		w1 = w_dict.get("w1", [])
-		b1 = _to_float_array(w_dict.get("b1", []))
-		w2 = w_dict.get("w2", [])
-		b2 = _to_float_array(w_dict.get("b2", []))
-		w3 = w_dict.get("w3", [])
-		b3 = _to_float_array(w_dict.get("b3", []))
-	
-	var gates = data.get("physics_gates", {})
-	if gates is Dictionary:
-		slip_trans_rad = float(gates.get("slip_trans_rad", slip_trans_rad))
-		load_trans_n = float(gates.get("load_trans_n", load_trans_n))
-		alpha_limit_rad = float(gates.get("alpha_limit_rad", alpha_limit_rad))
-		alpha_slope_rad = float(gates.get("alpha_slope_rad", alpha_slope_rad))
-		fz_limit_n = float(gates.get("fz_limit_n", fz_limit_n))
-		fz_slope_n = float(gates.get("fz_slope_n", fz_slope_n))
-		clip_fy_n = float(gates.get("clip_fy_n", clip_fy_n))
-		clip_mz_nm = float(gates.get("clip_mz_nm", clip_mz_nm))
-	
-	is_ready = (w1.size() == 16 and w2.size() == 16 and w3.size() == 2)
+	if path.is_empty() or not FileAccess.file_exists(path):
+		push_error("NeuralTireCorrection: weights for compound '%s' not found; residual disabled." % mf.active_compound)
+		return false
+	var err: String = _load_file(path, mf.active_compound, mf.calibration_id)
+	if not err.is_empty():
+		push_error("NeuralTireCorrection: %s [%s]; residual disabled." % [err, path])
+		_clear()
+		return false
+	is_ready = true
+	return true
 
-func _to_float_array(arr: Array) -> Array[float]:
-	var res: Array[float] = []
-	for v in arr:
-		res.append(float(v))
-	return res
 
-## Evaluates residual corrections [delta_Fy, delta_Mz] in real-time with zero allocations.
-func predict_correction(
-	alpha: float,
-	f_z: float,
-	gamma: float = 0.0,
-	p_kpa: float = 83.0
-) -> Dictionary:
+func _clear() -> void:
+	is_ready = false
+	bound_calibration_id = ""
+
+
+func _num_array(v: Variant, n: int) -> PackedFloat64Array:
+	var out: PackedFloat64Array = PackedFloat64Array()
+	if not (v is Array) or (v as Array).size() != n:
+		return out
+	for x in v:
+		if not (typeof(x) == TYPE_FLOAT or typeof(x) == TYPE_INT) or not is_finite(float(x)):
+			return PackedFloat64Array()
+		out.append(float(x))
+	return out
+
+
+func _flatten(v: Variant, rows: int, cols: int) -> PackedFloat64Array:
+	var out: PackedFloat64Array = PackedFloat64Array()
+	if not (v is Array) or (v as Array).size() != rows:
+		return out
+	for r in v:
+		var row: PackedFloat64Array = _num_array(r, cols)
+		if row.size() != cols:
+			return PackedFloat64Array()
+		out.append_array(row)
+	return out
+
+
+func _load_file(path: String, expected_compound: String, expected_calibration_id: String) -> String:
+	var f: FileAccess = FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return "cannot open (error %d)" % FileAccess.get_open_error()
+	var parsed: Variant = JSON.parse_string(f.get_as_text())
+	if not (parsed is Dictionary):
+		return "invalid JSON"
+	var data: Dictionary = parsed
+
+	var arch: Variant = data.get("architecture")
+	if not (arch is Dictionary):
+		return "missing architecture"
+	if int(arch.get("in_dim", -1)) != N_IN or int(arch.get("hidden1", -1)) != N_H \
+			or int(arch.get("hidden2", -1)) != N_H or int(arch.get("out_dim", -1)) != N_OUT:
+		return "architecture mismatch (expected 4-16-16-2)"
+	var comp: String = str(arch.get("compound", "")).strip_edges().to_upper()
+	if comp != expected_compound.strip_edges().to_upper():
+		return "compound mismatch: weights '%s' vs MF62 '%s'" % [comp, expected_compound]
+	var cid: String = str(data.get("mf62_calibration_id", ""))
+	if cid.is_empty() or cid != expected_calibration_id:
+		return "calibration mismatch: weights trained on '%s', MF62 is '%s' (retrain)" % [cid, expected_calibration_id]
+
+	var norm: Variant = data.get("normalization")
+	var w: Variant = data.get("weights")
+	var g: Variant = data.get("physics_gates")
+	if not (norm is Dictionary) or not (w is Dictionary) or not (g is Dictionary):
+		return "missing normalization / weights / physics_gates"
+
+	var xm: PackedFloat64Array = _num_array(norm.get("x_mean"), N_IN)
+	var xs: PackedFloat64Array = _num_array(norm.get("x_std"), N_IN)
+	var ym: PackedFloat64Array = _num_array(norm.get("y_mean"), N_OUT)
+	var ys: PackedFloat64Array = _num_array(norm.get("y_std"), N_OUT)
+	if xm.size() != N_IN or xs.size() != N_IN or ym.size() != N_OUT or ys.size() != N_OUT:
+		return "bad normalization arrays"
+	for v in xs:
+		if v <= 0.0:
+			return "x_std must be > 0"
+	for v in ys:
+		if v <= 0.0:
+			return "y_std must be > 0"
+
+	var w1: PackedFloat64Array = _flatten(w.get("w1"), N_H, N_IN)
+	var w2: PackedFloat64Array = _flatten(w.get("w2"), N_H, N_H)
+	var w3: PackedFloat64Array = _flatten(w.get("w3"), N_OUT, N_H)
+	var b1: PackedFloat64Array = _num_array(w.get("b1"), N_H)
+	var b2: PackedFloat64Array = _num_array(w.get("b2"), N_H)
+	var b3: PackedFloat64Array = _num_array(w.get("b3"), N_OUT)
+	if w1.is_empty() or w2.is_empty() or w3.is_empty() or b1.is_empty() or b2.is_empty() or b3.is_empty():
+		return "bad weight / bias shapes"
+
+	for k in GATE_KEYS:
+		var gv: Variant = g.get(k)
+		if not (typeof(gv) == TYPE_FLOAT or typeof(gv) == TYPE_INT) or not is_finite(float(gv)) or float(gv) <= 0.0:
+			return "bad gate '%s'" % k
+
+	_x_mean = xm
+	_x_std = xs
+	_y_mean = ym
+	_y_std = ys
+	_w1 = w1
+	_b1 = b1
+	_w2 = w2
+	_b2 = b2
+	_w3 = w3
+	_b3 = b3
+	_slip_scale = float(g["slip_scale_rad"])
+	_load_trans = float(g["load_trans_n"])
+	_alpha_limit = float(g["alpha_limit_rad"])
+	_alpha_slope = float(g["alpha_slope_rad"])
+	_fz_limit = float(g["fz_limit_n"])
+	_fz_slope = float(g["fz_slope_n"])
+	_clip_fy = float(g["clip_fy_n"])
+	_clip_mz = float(g["clip_mz_nm"])
+	compound = comp
+	bound_calibration_id = cid
+	return ""
+
+
+## Residual (dFy [N], dMz [Nm]). Zero when not ready, airborne, or outside the gates.
+func predict_residual(alpha: float, f_z: float, gamma: float = 0.0, p_kpa: float = 83.0, is_right_side: bool = false) -> Vector2:
 	if not is_ready or f_z <= 1e-3:
-		return {"delta_Fy": 0.0, "delta_Mz": 0.0, "delta_Fx": 0.0}
-	
-	# 1. Normalize 4 inputs directly in preallocated buffer
-	_buf_in_norm[0] = (alpha - x_mean[0]) / x_std[0]
-	_buf_in_norm[1] = (f_z - x_mean[1]) / x_std[1]
-	_buf_in_norm[2] = (gamma - x_mean[2]) / x_std[2]
-	_buf_in_norm[3] = (p_kpa - x_mean[3]) / x_std[3]
-	
-	# 2. Hidden Layer 1 (16 units, Tanh)
-	for i in range(16):
-		var sum_val = b1[i]
-		var row: Array = w1[i]
-		sum_val += row[0] * _buf_in_norm[0] + row[1] * _buf_in_norm[1] + row[2] * _buf_in_norm[2] + row[3] * _buf_in_norm[3]
-		_buf_h1[i] = tanh(sum_val)
-	
-	# 3. Hidden Layer 2 (16 units, Tanh)
-	for i in range(16):
-		var sum_val = b2[i]
-		var row: Array = w2[i]
-		for j in range(16):
-			sum_val += row[j] * _buf_h1[j]
-		_buf_h2[i] = tanh(sum_val)
-	
-	# 4. Output Layer (2 units: delta_Fy, delta_Mz, linear)
-	var row_out0: Array = w3[0]
-	var sum_out0 = b3[0]
-	for j in range(16):
-		sum_out0 += row_out0[j] * _buf_h2[j]
-	
-	var row_out1: Array = w3[1]
-	var sum_out1 = b3[1]
-	for j in range(16):
-		sum_out1 += row_out1[j] * _buf_h2[j]
-	
-	# 5. Denormalize
-	var delta_fy_raw = sum_out0 * y_std[0] + y_mean[0]
-	var delta_mz_raw = sum_out1 * y_std[1] + y_mean[1]
-	
-	# 6. Physics Constraints & Gating (Exact parity with PyTorch)
-	# Gate A: Zero-slip passivity (smooth tanh transition)
-	var g_slip = tanh((absf(alpha) + absf(gamma)) / slip_trans_rad)
-	
-	# Gate B: Low-load suppression (airborne tire / near zero load)
-	var g_load = clampf(f_z / load_trans_n, 0.0, 1.0)
-	
-	# Gate C: Domain falloff (prevents extrapolation outside experimental envelope)
-	var g_alpha = 1.0 / (1.0 + exp((absf(alpha) - alpha_limit_rad) / alpha_slope_rad))
-	var g_fz = 1.0 / (1.0 + exp((f_z - fz_limit_n) / fz_slope_n))
-	var g_domain = g_alpha * g_fz
-	
-	var scale = g_slip * g_load * g_domain
-	
-	# Gate D: Hard saturation clamp
-	var delta_Fy = clampf(delta_fy_raw * scale, -clip_fy_n, clip_fy_n)
-	var delta_Mz = clampf(delta_mz_raw * scale, -clip_mz_nm, clip_mz_nm)
-	
-	return {
-		"delta_Fy": delta_Fy,
-		"delta_Mz": delta_Mz,
-		"delta_Fx": 0.0 # Strict physical integrity: no ungrounded longitudinal output
-	}
+		return Vector2.ZERO
+	var side: float = -1.0 if is_right_side else 1.0
+	var a: float = alpha * side
+	var g: float = gamma * side
+
+	var x0: float = (a - _x_mean[0]) / _x_std[0]
+	var x1: float = (f_z - _x_mean[1]) / _x_std[1]
+	var x2: float = (g - _x_mean[2]) / _x_std[2]
+	var x3: float = (p_kpa - _x_mean[3]) / _x_std[3]
+
+	for i in range(N_H):
+		var o: int = i * N_IN
+		_h1[i] = tanh(_b1[i] + _w1[o] * x0 + _w1[o + 1] * x1 + _w1[o + 2] * x2 + _w1[o + 3] * x3)
+	for i in range(N_H):
+		var o2: int = i * N_H
+		var s2: float = _b2[i]
+		for j in range(N_H):
+			s2 += _w2[o2 + j] * _h1[j]
+		_h2[i] = tanh(s2)
+	var y0: float = _b3[0]
+	var y1: float = _b3[1]
+	for j in range(N_H):
+		y0 += _w3[j] * _h2[j]
+		y1 += _w3[N_H + j] * _h2[j]
+	y0 = y0 * _y_std[0] + _y_mean[0]
+	y1 = y1 * _y_std[1] + _y_mean[1]
+
+	var g_slip: float = 1.0 - exp(-(a * a + g * g) / (2.0 * _slip_scale * _slip_scale))
+	var t: float = clampf(f_z / _load_trans, 0.0, 1.0)
+	var g_load: float = t * t * (3.0 - 2.0 * t)
+	var a_abs: float = sqrt(a * a + 1e-6)
+	var g_alpha: float = 1.0 / (1.0 + exp((a_abs - _alpha_limit) / _alpha_slope))
+	var g_fz: float = 1.0 / (1.0 + exp((f_z - _fz_limit) / _fz_slope))
+	var gate: float = g_slip * g_load * g_alpha * g_fz
+
+	return Vector2(_clip_fy * tanh(y0 * gate / _clip_fy), _clip_mz * tanh(y1 * gate / _clip_mz)) * side
+
+
+## Backward-compatible wrapper (allocates a Dictionary; use predict_residual() in the physics loop).
+func predict_correction(alpha: float, f_z: float, gamma: float = 0.0, p_kpa: float = 83.0, is_right_side: bool = false) -> Dictionary:
+	var r: Vector2 = predict_residual(alpha, f_z, gamma, p_kpa, is_right_side)
+	return {"delta_Fy": r.x, "delta_Mz": r.y, "delta_Fx": 0.0}

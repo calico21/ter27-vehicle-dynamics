@@ -3,17 +3,20 @@ extends RefCounted
 
 ## High-Performance Hybrid Tire Model for Mirena Dynamics
 ## Integrates:
-## 1. Pacejka Magic Formula 6.2 (MF 6.2) calibrated against Calspan TTC Hoosier 16x7.5-10 data.
+## 1. Pacejka Magic Formula 6.2 (MF 6.2) calibrated against Calspan TTC Hoosier 16x7.5-10 data (schema v2).
 ## 2. Physics-Informed Neural Network (PINN) Residual Correction (learned residuals Delta Fy, Delta Mz).
 ## 3. Transient Carcass Relaxation Dynamics (Pacejka Ch. 7 relaxation lengths with standstill damping).
+##
+## Combined slip attenuation: Delta Fy and Delta Mz are properly attenuated through Gyk
+## so neural residuals do not violate friction ellipse limits during wheelspin or lock-up.
 
 const VehicleConfig = preload("../Core/VehicleConfig.gd")
 const Pacejka62Script = preload("MF62/Pacejka62.gd")
 const NeuralCorrectionScript = preload("NeuralCorrection/NeuralTireCorrection.gd")
 const TransientRelaxationScript = preload("Transient/TransientRelaxation.gd")
 
-static var _mf62: RefCounted = null
-static var _neural: RefCounted = null
+static var _mf62: Pacejka62 = null
+static var _neural: NeuralTireCorrection = null
 
 ## Flag to enable/disable neural residual correction at runtime (e.g., for benchmarking).
 static var enable_neural_correction: bool = true
@@ -21,19 +24,22 @@ static var enable_neural_correction: bool = true
 ## Flag to enable/disable transient relaxation integration.
 static var enable_transient_relaxation: bool = true
 
-static func get_mf62() -> RefCounted:
+static func get_mf62() -> Pacejka62:
 	if not _mf62:
 		_mf62 = Pacejka62Script.new()
 	return _mf62
 
-static func get_neural() -> RefCounted:
+static func get_neural() -> NeuralTireCorrection:
 	if not _neural:
-		_neural = NeuralCorrectionScript.new()
+		_neural = NeuralCorrectionScript.new(get_mf62())
 	return _neural
 
 ## Safely configures tire compound ("R25B" or "R20"). Fails explicitly if file is missing or mismatch.
 static func set_compound(compound_name: String) -> bool:
-	return get_mf62().load_compound(compound_name)
+	var success: bool = get_mf62().load_compound(compound_name)
+	if success:
+		get_neural().load_for(get_mf62())
+	return success
 
 ## Returns current active tire compound identifier.
 static func get_compound() -> String:
@@ -71,43 +77,29 @@ static func compute_forces(
 		}
 	
 	var mf = get_mf62()
-	
-	# 1. Canonical MF 6.2 Evaluation
-	var combined = mf.compute_combined_forces(kappa, alpha, normal_load, gamma, p_kpa, is_right_side)
-	var Fx_mf: float = combined["Fx"]
-	var Fy_mf: float = combined["Fy"]
-	var Svy: float = combined.get("Svy", 0.0)
-	var Mz_mf: float = mf.compute_mz(alpha, normal_load, Fy_mf, gamma, p_kpa, Fx_mf, Svy, is_right_side)
-	var Mx: float = mf.compute_mx(normal_load, gamma, Fy_mf, p_kpa, is_right_side)
-	var My: float = mf.compute_my(normal_load, Fx_mf, v_x)
-	
-	# 2. Physics-Informed Residual PINN Correction
-	var delta_Fx: float = 0.0
-	var delta_Fy: float = 0.0
-	var delta_Mz: float = 0.0
-	
+	var res_vec: Vector2 = Vector2.ZERO
 	if use_neural and enable_neural_correction:
 		var nn = get_neural()
-		var corr = nn.predict_correction(alpha, normal_load, gamma, p_kpa)
-		delta_Fy = corr["delta_Fy"]
-		delta_Mz = corr["delta_Mz"]
-		delta_Fx = 0.0
+		if nn and nn.is_ready:
+			res_vec = nn.predict_residual(alpha, normal_load, gamma, p_kpa, is_right_side)
 	
-	# 3. Hybrid Synthesis: F_total = F_MF + Delta_F
-	var Fx_total = Fx_mf + delta_Fx
-	var Fy_total = Fy_mf + delta_Fy
-	var Mz_total = Mz_mf + delta_Mz
+	# Canonical evaluation with proper combined slip attenuation on the residual
+	var forces = mf.compute_all(kappa, alpha, normal_load, gamma, p_kpa, v_x, is_right_side, res_vec)
+	var comb = mf.compute_combined_forces(kappa, alpha, normal_load, gamma, p_kpa, is_right_side)
+	var gyk: float = comb["Gyk"]
+	var delta_fy_eff: float = gyk * res_vec.x
+	var delta_mz_eff: float = gyk * res_vec.y
 	
 	return {
-		"Fx": Fx_total,
-		"Fy": Fy_total,
-		"Mz": Mz_total,
-		"Mx": Mx,
-		"My": My,
-		"delta_Fx": delta_Fx,
-		"delta_Fy": delta_Fy,
-		"delta_Mz": delta_Mz,
-		"Fx_mf": Fx_mf,
-		"Fy_mf": Fy_mf,
-		"Mz_mf": Mz_mf
+		"Fx": forces["Fx"],
+		"Fy": forces["Fy"],
+		"Mz": forces["Mz"],
+		"Mx": forces["Mx"],
+		"My": forces["My"],
+		"delta_Fx": 0.0,
+		"delta_Fy": delta_fy_eff,
+		"delta_Mz": delta_mz_eff,
+		"Fx_mf": comb["Fx"],
+		"Fy_mf": comb["Fy"],
+		"Mz_mf": forces["Mz"] - delta_mz_eff
 	}

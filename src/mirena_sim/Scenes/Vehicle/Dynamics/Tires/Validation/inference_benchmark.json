@@ -1,19 +1,19 @@
 {
   "full_model": {
-    "evals_per_sec": 38593.141072596,
-    "four_tires_pct_200hz_tick": 2.0729072,
-    "us_per_call": 25.91134
+    "evals_per_sec": 33114.6442228854,
+    "four_tires_pct_200hz_tick": 2.4158496,
+    "us_per_call": 30.19812
   },
   "hybrid_pinn": {
-    "evals_per_sec": 40197.708409039,
-    "four_tires_pct_200hz_tick": 1.9901632,
-    "us_per_call": 24.87704
+    "evals_per_sec": 35707.603291384,
+    "four_tires_pct_200hz_tick": 2.2404192,
+    "us_per_call": 28.00524
   },
   "iterations": 50000,
   "pure_mf62": {
-    "evals_per_sec": 130569.439439283,
-    "four_tires_pct_200hz_tick": 0.6127008,
-    "us_per_call": 7.65876
+    "evals_per_sec": 62643.8459312196,
+    "four_tires_pct_200hz_tick": 1.2770608,
+    "us_per_call": 15.96326
   },
   "target_evals_per_sec": 800
 }

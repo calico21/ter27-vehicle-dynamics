@@ -39,9 +39,9 @@ def generate_combined_slip_suite(evaluator, compound_name, out_dir):
         fx_list = []
         fy_list = []
         for k in kappa_range:
-            fx, fy, _ = Pacejka62Fitter.compute_combined_forces(p2, k, a_rad, fz_nom, gamma=0.0, p_kpa=83.0)
-            fx_list.append(fx)
-            fy_list.append(fy)
+            comb = Pacejka62Fitter.compute_combined_forces(p2, k, a_rad, fz_nom, gamma=0.0, p_kpa=83.0)
+            fx_list.append(comb["Fx"])
+            fy_list.append(comb["Fy"])
 
         ax1.plot(fy_list, fx_list, "-", color=col, lw=2.0, label=f"$\\alpha = {a_deg:.0f}^\\circ$")
 
@@ -59,10 +59,12 @@ def generate_combined_slip_suite(evaluator, compound_name, out_dir):
     k_pos_range = np.linspace(0.0, 0.20, 100)
     for a_deg, col in zip([2.0, 4.0, 8.0], ["#2ca02c", "#ff7f0e", "#d62728"]):
         a_rad = np.radians(a_deg)
-        _, fy_pure, _ = Pacejka62Fitter.compute_combined_forces(p2, 0.0, a_rad, fz_nom, gamma=0.0, p_kpa=83.0)
+        comb_pure = Pacejka62Fitter.compute_combined_forces(p2, 0.0, a_rad, fz_nom, gamma=0.0, p_kpa=83.0)
+        fy_pure = comb_pure["Fy"]
         g_y_list = []
         for k in k_pos_range:
-            _, fy_comb, _ = Pacejka62Fitter.compute_combined_forces(p2, -k, a_rad, fz_nom, gamma=0.0, p_kpa=83.0) # braking
+            comb_comb = Pacejka62Fitter.compute_combined_forces(p2, -k, a_rad, fz_nom, gamma=0.0, p_kpa=83.0) # braking
+            fy_comb = comb_comb["Fy"]
             g_y = float(fy_comb / max(fy_pure, 1e-4))
             g_y_list.append(g_y)
         ax2.plot(k_pos_range * 100.0, g_y_list, "-", color=col, lw=2.2, label=f"Braking $\\alpha = {a_deg:.0f}^\\circ$")
@@ -80,10 +82,12 @@ def generate_combined_slip_suite(evaluator, compound_name, out_dir):
     ax3 = axes[2]
     a_pos_deg = np.linspace(0.0, 12.0, 100)
     for k_val, col in zip([0.05, 0.10, 0.15], ["#1f77b4", "#e67e22", "#d62728"]):
-        fx_pure, _, _ = Pacejka62Fitter.compute_combined_forces(p2, -k_val, 0.0, fz_nom, gamma=0.0, p_kpa=83.0)
+        comb_pure = Pacejka62Fitter.compute_combined_forces(p2, -k_val, 0.0, fz_nom, gamma=0.0, p_kpa=83.0)
+        fx_pure = comb_pure["Fx"]
         g_x_list = []
         for a_deg in a_pos_deg:
-            fx_comb, _, _ = Pacejka62Fitter.compute_combined_forces(p2, -k_val, np.radians(a_deg), fz_nom, gamma=0.0, p_kpa=83.0)
+            comb_comb = Pacejka62Fitter.compute_combined_forces(p2, -k_val, np.radians(a_deg), fz_nom, gamma=0.0, p_kpa=83.0)
+            fx_comb = comb_comb["Fx"]
             g_x = float(fx_comb / max(abs(fx_pure), 1e-4))
             g_x_list.append(abs(g_x))
         ax3.plot(a_pos_deg, g_x_list, "-", color=col, lw=2.2, label=f"Longitudinal Slip $|\\kappa| = {k_val*100:.0f}\\%$")

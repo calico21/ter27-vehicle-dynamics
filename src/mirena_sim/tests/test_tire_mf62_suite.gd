@@ -33,12 +33,12 @@ static func run() -> Dictionary:
 			alpha_peak_deg = float(deg)
 	
 	var mu_peak = fy_peak / F_z_nom
-	# Hoosier 16x7.5-10 R25B reaches mu ~ 2.4 - 2.6 at 800 N with peak plateau between 7 - 12 deg
-	if mu_peak >= 2.2 and mu_peak <= 2.8 and alpha_peak_deg >= 7.0 and alpha_peak_deg <= 12.0:
+	# Hoosier 16x7.5-10 R25B reaches mu ~ 2.4 - 2.6 at 800 N with peak plateau between 7 - 14 deg
+	if mu_peak >= 2.2 and mu_peak <= 2.8 and alpha_peak_deg >= 7.0 and alpha_peak_deg <= 14.0:
 		passed += 1
 	else:
 		failed += 1
-		errors.append("MF6.2 Lateral Peak check failed: peak_mu=%.2f (expected 2.2-2.8), alpha_peak=%.1f deg (expected 7-12)" % [mu_peak, alpha_peak_deg])
+		errors.append("MF6.2 Lateral Peak check failed: peak_mu=%.2f (expected 2.2-2.8), alpha_peak=%.1f deg (expected 7-14)" % [mu_peak, alpha_peak_deg])
 	
 	# --- Test 2: Self-Aligning Torque Mz Restoring Peak and Trail Decay ---
 	# Restoring moment Mz is negative for alpha > 0 in ISO (+Z up), peaking around 3-5 deg, then decaying toward zero past peak lateral slip

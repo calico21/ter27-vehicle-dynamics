@@ -228,7 +228,7 @@ var delta_Fy_nn = forces["delta_Fy"]
 ## 8. Calibration & Validation Workflow
 
 ### Ingestion & Filtering
-To preprocess raw Calspan TTC tests from `.mat` files into filtered training datasets:
+To preprocess raw Calspan TTC tests from `.dat` files into filtered training datasets:
 ```bash
 python3 src/mirena_sim/Scenes/Vehicle/Dynamics/Tires/Training/preprocess_ttc.py \
     --compound R25B \
@@ -262,8 +262,6 @@ godot --headless -s src/mirena_sim/tests/test_tire_mf62_suite.gd
 ---
 
 ## 9. Simulation Readiness & Operational Envelopes
-
-As established in the authoritative technical audit (`final_mf62_simulation_readiness_audit.md`):
 
 | Maneuver / Use Case | Status | Notes & Safe Envelope |
 | :--- | :--- | :--- |

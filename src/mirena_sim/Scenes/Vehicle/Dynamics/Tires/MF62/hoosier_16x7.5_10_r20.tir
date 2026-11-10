@@ -1,0 +1,166 @@
+[MDI_HEADER]
+FILE_TYPE                = 'tir'
+FILE_VERSION             = 3.0
+FILE_FORMAT              = 'ASCII'
+! Hoosier 16.0x7.5-10 R20 — Mirena Dynamics MF 6.2 Calibration
+! Calibration ID: bd3755408a994492
+! Date: 2026-11-10
+$----------------------------------------------------------------units
+[UNITS]
+LENGTH                   = 'meter'
+FORCE                    = 'newton'
+ANGLE                    = 'radians'
+MASS                     = 'kg'
+TIME                     = 'second'
+$----------------------------------------------------------------model
+[MODEL]
+PROPERTY_FILE_FORMAT     = 'PAC2002'
+USE_MODE                 = 14
+VXLOW                    = 1.0
+LONGVL                   = 11.11
+TYRESIDE                 = 'LEFT'
+$------------------------------------------------------------dimension
+[DIMENSION]
+UNLOADED_RADIUS          = 0.2032
+WIDTH                    = 0.1905
+RIM_RADIUS               = 0.1270
+$-------------------------------------------------------------vertical
+[VERTICAL]
+VERTICAL_STIFFNESS       = 114663.7
+FNOMIN                   = 800.0
+NOMPRES                  = 83000.0
+$--------------------------------------------------scaling_coefficients
+[SCALING_COEFFICIENTS]
+LFZO                     = 1.0
+LCX                      = 1.0
+LMUX                     = 1.0
+LEX                      = 1.0
+LKX                      = 1.0
+LHX                      = 1.0
+LVX                      = 1.0
+LCY                      = 1.0
+LMUY                     = 1.0
+LEY                      = 1.0
+LKY                      = 1.0
+LHY                      = 1.0
+LVY                      = 1.0
+LTR                      = 1.0
+LRES                     = 1.0
+LXAL                     = 1.0
+LYKA                     = 1.0
+LVYKA                    = 1.0
+LS                       = 1.0
+$---------------------------------------------------------longitudinal
+[LONGITUDINAL_COEFFICIENTS]
+PCX1                     = 1.55
+PDX1                     = 2.3
+PDX2                     = -0.32
+PDX3                     = 0
+PEX1                     = 0.35
+PEX2                     = 0.1
+PEX3                     = 0
+PEX4                     = 0
+PHX1                     = 0
+PHX2                     = 0
+PKX1                     = 46
+PKX2                     = -0.12
+PKX3                     = 0
+PPX1                     = 0
+PPX2                     = 0
+PPX3                     = 0
+PPX4                     = 0
+PVX1                     = 0
+PVX2                     = 0
+$--------------------------------------------------------------lateral
+[LATERAL_COEFFICIENTS]
+PCY1                     = 1.55
+PDY1                     = 2.47437
+PDY2                     = -0.268348
+PDY3                     = 12.777
+PEY1                     = 0.670743
+PEY2                     = -1.00752
+PEY3                     = 0
+PEY4                     = 0
+PEY5                     = 0
+PHY1                     = 0.000869175
+PHY2                     = 0
+PHY3                     = 0.118234
+PKY1                     = 50.452
+PKY2                     = 1.9989
+PKY3                     = 1.26905
+PPY1                     = -0.458274
+PPY2                     = 0
+PPY3                     = -0.18196
+PPY4                     = 0
+PVY1                     = -0.00577211
+PVY2                     = 0
+PVY3                     = -0.457576
+PVY4                     = 1.48821
+$-------------------------------------------------------combined_slip
+RBX1                     = 12
+RBX2                     = 10
+RBX3                     = 0
+RBY1                     = 9.5
+RBY2                     = 8
+RBY3                     = 0
+RBY4                     = 0
+RCX1                     = 1.05
+RCY1                     = 1.02
+REX1                     = 0.1
+REX2                     = 0
+REY1                     = 0.1
+REY2                     = 0
+RHX1                     = 0
+RHY1                     = 0
+RHY2                     = 0
+RVY1                     = 0
+RVY2                     = 0
+RVY3                     = 0
+RVY4                     = 0
+RVY5                     = 1.9
+RVY6                     = 10
+$------------------------------------------------------------aligning
+[ALIGNING_COEFFICIENTS]
+PPZ1                     = 0
+PPZ2                     = 0
+QBZ1                     = 6.74695
+QBZ10                    = 0
+QBZ2                     = 3.28427
+QBZ3                     = 0
+QBZ4                     = 0
+QBZ5                     = 0
+QBZ9                     = 8
+QCZ1                     = 1.65
+QDZ1                     = 0.128989
+QDZ2                     = 0.00312828
+QDZ3                     = 0.159612
+QDZ4                     = 0
+QDZ6                     = 0.0107234
+QDZ7                     = -0.0034517
+QDZ8                     = 3.75955
+QDZ9                     = 0
+QEZ1                     = 0
+QEZ2                     = 1.66911
+QEZ3                     = 0
+QEZ4                     = 0
+QEZ5                     = 0
+QHZ1                     = 0.00155972
+QHZ2                     = 0
+QHZ3                     = 0
+QHZ4                     = 0
+SSZ1                     = 0
+SSZ2                     = 0.04
+SSZ3                     = 0.01
+SSZ4                     = 0
+$---------------------------------------------------------overturning
+[OVERTURNING_COEFFICIENTS]
+PPMX1                    = 0
+QSX1                     = -0.0237544
+QSX2                     = 2.03398
+QSX3                     = 0.0552241
+$---------------------------------------------------rolling_resistance
+[ROLLING_COEFFICIENTS]
+QSY1                     = 0.015
+QSY2                     = 0
+QSY3                     = 0.001
+QSY4                     = 0

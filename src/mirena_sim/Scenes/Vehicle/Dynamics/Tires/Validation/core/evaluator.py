@@ -100,8 +100,8 @@ class TireModelEvaluator:
         raw_fy = out_raw[:, 0] * y_std[0] + y_mean[0]
         raw_mz = out_raw[:, 1] * y_std[1] + y_mean[1]
 
-        # Physics gates
-        slip_trans = gates.get("slip_trans_rad", 0.02)
+        # Physics gates (schema v2)
+        slip_scale = gates.get("slip_scale_rad", 0.006)
         load_trans = gates.get("load_trans_n", 100.0)
         alpha_limit = gates.get("alpha_limit_rad", 0.22)
         alpha_slope = gates.get("alpha_slope_rad", 0.02)
@@ -110,14 +110,16 @@ class TireModelEvaluator:
         clip_fy = gates.get("clip_fy_n", 200.0)
         clip_mz = gates.get("clip_mz_nm", 10.0)
 
-        g_slip = np.tanh((np.abs(alpha_flat) + np.abs(gamma_flat)) / slip_trans)
-        g_load = np.clip(fz_flat / load_trans, 0.0, 1.0)
-        g_alpha = 1.0 / (1.0 + np.exp((np.abs(alpha_flat) - alpha_limit) / alpha_slope))
+        g_slip = 1.0 - np.exp(-(alpha_flat ** 2 + gamma_flat ** 2) / (2.0 * slip_scale ** 2))
+        t = np.clip(fz_flat / load_trans, 0.0, 1.0)
+        g_load = t * t * (3.0 - 2.0 * t)
+        a_abs = np.sqrt(alpha_flat ** 2 + 1e-6)
+        g_alpha = 1.0 / (1.0 + np.exp((a_abs - alpha_limit) / alpha_slope))
         g_fz = 1.0 / (1.0 + np.exp((fz_flat - fz_limit) / fz_slope))
         scale = g_slip * g_load * g_alpha * g_fz
 
-        delta_fy = np.clip(raw_fy * scale, -clip_fy, clip_fy)
-        delta_mz = np.clip(raw_mz * scale, -clip_mz, clip_mz)
+        delta_fy = clip_fy * np.tanh(raw_fy * scale / clip_fy)
+        delta_mz = clip_mz * np.tanh(raw_mz * scale / clip_mz)
 
         return delta_fy.reshape(orig_shape), delta_mz.reshape(orig_shape)
 
@@ -176,14 +178,15 @@ class TireModelEvaluator:
         g_flat = gamma.reshape(-1)
         p_flat = p.reshape(-1)
 
-        fx_m2, fy_m2, svy_m2 = Pacejka62Fitter.compute_combined_forces(
+        comb = Pacejka62Fitter.compute_combined_forces(
             self.params_m2, k_flat, a_flat, fz_flat, g_flat, p_flat,
             fnomin=self.fnomin, pinom=self.pinom
         )
+        fx_m2 = comb["Fx"]
+        fy_m2 = comb["Fy"]
         mz_m2 = Pacejka62Fitter.compute_mz(
-            self.params_m2, a_flat, fz_flat, g_flat, p_flat,
-            fx=fx_m2, fy_in=fy_m2, svy_in=svy_m2,
-            fnomin=self.fnomin, pinom=self.pinom, r0=self.r0_m2
+            self.params_m2, a_flat, fz_flat, g_flat, p_flat, kappa=k_flat,
+            comb=comb, fnomin=self.fnomin, pinom=self.pinom, r0=self.r0_m2
         )
         mx_m2 = Pacejka62Fitter.compute_mx(
             self.params_m2, fz_flat, g_flat, fy_m2, p_flat,
@@ -191,8 +194,9 @@ class TireModelEvaluator:
         )
 
         delta_fy, delta_mz = self.eval_pinn(a_flat, fz_flat, g_flat, p_flat)
-        fy_m3 = fy_m2 + delta_fy
-        mz_m3 = mz_m2 + delta_mz
+        gyk = comb["Gyk"]
+        fy_m3 = fy_m2 + gyk * delta_fy
+        mz_m3 = mz_m2 + gyk * delta_mz
         fx_m3 = fx_m2
         mx_m3 = mx_m2
 

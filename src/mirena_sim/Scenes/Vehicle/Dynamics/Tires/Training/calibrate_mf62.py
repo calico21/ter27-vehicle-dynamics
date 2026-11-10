@@ -1,1082 +1,748 @@
 #!/usr/bin/env python3
 """
-Pacejka Magic Formula 6.2 (MF 6.2) Rigorous Calibration & Identifiability Engine
-Senior Tire Dynamics Engineering Implementation for Mirena Dynamics (Hoosier 16.0x7.5-10)
+Pacejka MF 6.2 Calibration & Identifiability Engine — Mirena Dynamics (Hoosier 16.0x7.5-10)
+Parameter-file schema v2.
 
-Key Capabilities:
-- Canonical MF 6.2 formulation compliant with Pacejka 2012 / Besselink 2010 and ISO 8855
-- Complete coordinate consistency (+X fwd, +Y left, +Z up):
-    * Positive slip angle alpha produces positive lateral force Fy
-    * Positive pneumatic trail produces negative (restoring) aligning moment Mz
-    * Complete Mz decomposition: Mz = Mz' + Mzr + s * Fx, using measured Fx
-    * Consistent camber thrust and overturning moment Mx
-- Multi-stage hierarchical bounded least-squares optimization:
-    Stage 1: Pure lateral force at nominal pressure and zero camber (PCY, PDY, PEY, PKY, PHY, PVY)
-    Stage 2: Lateral pressure sensitivity (PPY1, PPY3)
-    Stage 3: Camber sensitivity & induced forces (PVY3, PVY4, PHY3, PDY3, PEY4)
-    Stage 4: Pneumatic trail and self-aligning torque Mz at zero camber (QDZ, QBZ, QCZ, QEZ, QHZ)
-    Stage 5: Camber residual aligning torque & trail modulation (QDZ8, QDZ3)
-    Stage 6: Overturning moment Mx (QSX1, QSX2, QSX3, PPMX1)
-    Stage 7: Joint refinement of identifiable parameters comparing staged vs joint solution
-- Scale-invariant identifiability & sensitivity analysis at EVERY stage:
-    * Dimensionless scaled Jacobian singular values and condition number
-    * Full parameter correlation matrix
-    * Parameter covariance and asymptotic standard errors
-    * Boundary saturation detection (flags parameters within 1% of bounds)
-- Vertical tire characterization from spring rate test runs:
-    * Identifies linear vertical stiffness kz and unloaded radius R0
-    * Accounts for pressure sensitivity of radial stiffness
-- Strict independent validation (ZERO leakage):
-    * R25B: calibrate on Run 6, validate on Run 7
-    * R20: calibrate on Run 8, validate on Run 9
-    * Global and sliced performance metrics (RMSE, NRMSE, MAE, Max Error, R^2, Bias)
-- Parameter categorization separating calibrated parameters from literature defaults
+Frame: ISO 8855 (+X fwd, +Y left, +Z up). alpha, gamma in rad. Data are "left wheel as tested";
+the right wheel is obtained at runtime by flipping conicity/ply-steer terms (see Pacejka62.gd).
+
+Key improvements vs v1:
+- R0 is a model constant (0.2032 m) shared by fitter and runtime. The spring-test intercept is stored
+  only as a diagnostic (R0_SPRING_FIT_M).
+- Mz follows canonical Pacejka 2012 / Besselink 2010 structure:
+    Mz = -t(alpha_t,eq) * (Fy - SVyk) + Mzr(alpha_r,eq) + s * Fx
+    alpha_t = alpha + SHt ; alpha_r = alpha + SHf ; SHf = SHy + SVy/Kya
+    Dt = (Fz/Fz0) R0 (QDZ1 + QDZ2 dfz)(1 + PPZ1 dpi)(1 + QDZ3|gamma| + QDZ4 gamma^2)
+    Br = QBZ9 + QBZ10 By Cy ; Dr carries cos(alpha)
+- Combined slip: Gxa/Gyk denominators use +B*SH; SVyk = mu_y Fz (RVY1+RVY2 dfz+RVY3 gamma) cos(atan(RVY4 alpha))
+  * sin(RVY5 atan(RVY6 kappa)).
+- Mz uses the MODEL Fx (not measured Fx): measured Fx contains cornering drag the runtime does not
+  reproduce, which biased Mz parameters and the NN residual.
+- Stage 7 chooses staged vs joint by blocked (leave-condition-out) CV inside TRAIN only; validation is untouched.
+- Standard errors are inflated by the lag-1 residual autocorrelation (effective-N correction).
+  Optimizer status/nfev recorded; x_scale="jac".
+- PVY3 lower bound released; QDZ3/QDZ8 bounds widened (QDZ3 sign: +QDZ3|gamma|).
+- Exports CALIBRATION_ID (hash of parameters) and canonical .tir export for external simulation suites.
 """
 
 import os
 import sys
 import json
+import hashlib
+import datetime
 import numpy as np
 import pandas as pd
 from scipy.optimize import least_squares
 
-# Robust repository path resolution
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "../../../../../../.."))
-if REPO_ROOT not in sys.path:
-    sys.path.insert(0, REPO_ROOT)
+SCHEMA_VERSION = 2
 
-TIRE_DIR = os.path.join(REPO_ROOT, "src/mirena_sim/Scenes/Vehicle/Dynamics/Tires")
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+TIRE_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 PROCESSED_DIR = os.path.join(TIRE_DIR, "Data/Hoosier_16x7.5-10/Processed")
 MF62_DIR = os.path.join(TIRE_DIR, "MF62")
 VALIDATION_DIR = os.path.join(TIRE_DIR, "Validation")
 
-os.makedirs(MF62_DIR, exist_ok=True)
-os.makedirs(VALIDATION_DIR, exist_ok=True)
+FNOMIN = 800.0          # N
+PINOM = 83.0            # kPa (~12 psi)
+R0_MODEL = 0.2032       # m, model constant (8.0 in)
+UNLOADED_RADIUS = R0_MODEL  # backward-compatible alias
+V0 = 11.11              # m/s
+JOINT_CV_FOLDS = 4
 
-# Fixed nominal reference quantities for Hoosier 16.0x7.5-10
-FNOMIN = 800.0   # Nominal normal load (N)
-PINOM  = 83.0    # Nominal inflation pressure (kPa) ~ 12 psi
-UNLOADED_RADIUS = 0.2032 # 8.0 inches (m)
-V0 = 11.11       # Reference speed (40 km/h in m/s)
+# Single source of truth. Pacejka62.gd REQUIRED_KEYS must equal these keys.
+ALL_DEFAULTS = {
+    # Fy
+    "PCY1": 1.55, "PDY1": 2.45, "PDY2": -0.30, "PDY3": 0.0, "PEY1": 0.35, "PEY2": -0.25, "PEY3": 0.0,
+    "PEY4": 0.0, "PEY5": 0.0, "PKY1": 48.0, "PKY2": 2.10, "PKY3": 0.0, "PHY1": 0.0, "PHY2": 0.0,
+    "PHY3": 0.0, "PVY1": 0.0, "PVY2": 0.0, "PVY3": 0.0, "PVY4": 0.0, "PPY1": 0.0, "PPY2": 0.0,
+    "PPY3": 0.0, "PPY4": 0.0,
+    # Fx (literature, not identifiable from cornering TTC)
+    "PCX1": 1.55, "PDX1": 2.30, "PDX2": -0.32, "PDX3": 0.0, "PEX1": 0.35, "PEX2": 0.10, "PEX3": 0.0,
+    "PEX4": 0.0, "PKX1": 46.0, "PKX2": -0.12, "PKX3": 0.0, "PHX1": 0.0, "PHX2": 0.0, "PVX1": 0.0,
+    "PVX2": 0.0, "PPX1": 0.0, "PPX2": 0.0, "PPX3": 0.0, "PPX4": 0.0,
+    # Combined slip (literature)
+    "RBX1": 12.0, "RBX2": 10.0, "RBX3": 0.0, "RCX1": 1.05, "REX1": 0.10, "REX2": 0.0, "RHX1": 0.0,
+    "RBY1": 9.5, "RBY2": 8.0, "RBY3": 0.0, "RBY4": 0.0, "RCY1": 1.02, "REY1": 0.10, "REY2": 0.0,
+    "RHY1": 0.0, "RHY2": 0.0, "RVY1": 0.0, "RVY2": 0.0, "RVY3": 0.0, "RVY4": 0.0, "RVY5": 1.9, "RVY6": 10.0,
+    # Mz
+    "QDZ1": 0.15, "QDZ2": -0.04, "QDZ3": 0.0, "QDZ4": 0.0, "QDZ6": 0.0, "QDZ7": 0.0, "QDZ8": 0.0,
+    "QDZ9": 0.0, "QBZ1": 6.0, "QBZ2": 1.2, "QBZ3": 0.0, "QBZ4": 0.0, "QBZ5": 0.0, "QBZ9": 8.0,
+    "QBZ10": 0.0, "QCZ1": 1.65, "QEZ1": 0.0, "QEZ2": 0.90, "QEZ3": 0.0, "QEZ4": 0.0, "QEZ5": 0.0,
+    "QHZ1": 0.0, "QHZ2": 0.0, "QHZ3": 0.0, "QHZ4": 0.0, "PPZ1": 0.0, "PPZ2": 0.0,
+    "SSZ1": 0.0, "SSZ2": 0.04, "SSZ3": 0.01, "SSZ4": 0.0,
+    # Mx
+    "QSX1": 0.0, "QSX2": 2.0, "QSX3": 0.05, "PPMX1": 0.0,
+    # My (literature)
+    "QSY1": 0.015, "QSY2": 0.0, "QSY3": 0.001, "QSY4": 0.0,
+}
+
+LITERATURE_KEYS = [k for k in ALL_DEFAULTS if k[:3] in ("PCX", "PDX", "PEX", "PKX", "PHX", "PVX", "PPX", "RBX", "RCX",
+                                                         "REX", "RHX", "RBY", "RCY", "REY", "RHY", "RVY", "QSY")]
+
+
+def _p(params, key):
+    return params.get(key, ALL_DEFAULTS[key])
+
+
+def _shape_cos(b, c, e, x):
+    bx = b * x
+    return np.cos(c * np.arctan(bx - e * (bx - np.arctan(bx))))
+
+
+def _sgn(x):
+    return np.where(x >= 0.0, 1.0, -1.0)
 
 
 class Pacejka62Fitter:
-    """
-    Evaluates canonical MF 6.2 formulas for pure slip, combined slip,
-    aligning torque, overturning moment, and rolling resistance.
-    """
-    def __init__(self, fnomin=FNOMIN, pinom=PINOM, r0=UNLOADED_RADIUS):
-        self.fnomin = fnomin
-        self.pinom = pinom
-        self.r0 = r0
+    """Vectorised MF 6.2 evaluation (numpy)."""
+
+    @staticmethod
+    def compute_fy0_full(params, alpha, f_z, gamma=0.0, p_kpa=PINOM, fnomin=FNOMIN, pinom=PINOM):
+        g = lambda k: _p(params, k)
+        dfz = (f_z - fnomin) / fnomin
+        dpi = (p_kpa - pinom) / pinom
+        Cy = g("PCY1")
+        camber_f = np.maximum(1.0 - g("PDY3") * gamma * gamma, 0.2)
+        mu_y = (g("PDY1") + g("PDY2") * dfz) * (1.0 + g("PPY3") * dpi + g("PPY4") * dpi * dpi) * camber_f
+        Dy = mu_y * f_z
+        Shy = g("PHY1") + g("PHY2") * dfz + g("PHY3") * gamma
+        Svy = f_z * ((g("PVY1") + g("PVY2") * dfz) + (g("PVY3") + g("PVY4") * dfz) * gamma)
+        alpha_y = alpha + Shy
+        kya_arg = 2.0 * np.arctan(f_z / (g("PKY2") * fnomin * (1.0 + g("PPY2") * dpi) + 1e-4))
+        Kya = g("PKY1") * fnomin * (1.0 + g("PPY1") * dpi) * (1.0 - g("PKY3") * np.abs(gamma)) * np.sin(kya_arg)
+        By = Kya / (Cy * Dy + 1e-4)
+        Ey = np.clip((g("PEY1") + g("PEY2") * dfz) *
+                     (1.0 + g("PEY5") * gamma * gamma - (g("PEY3") + g("PEY4") * gamma) * np.sign(alpha_y)), -10.0, 1.0)
+        y = By * alpha_y
+        Fy0 = Dy * np.sin(Cy * np.arctan(y - Ey * (y - np.arctan(y)))) + Svy
+        return {"Fy0": Fy0, "Svy": Svy, "Shy": Shy, "Kya": Kya, "By": By, "Cy": Cy, "mu_y": mu_y}
 
     @staticmethod
     def compute_fy0(params, alpha, f_z, gamma=0.0, p_kpa=PINOM, fnomin=FNOMIN, pinom=PINOM):
-        """
-        Computes pure lateral force Fy0 (N) and intermediate vertical shift Svy.
-        Complies with canonical MF 6.2 (Pacejka 2012 Eq. 4.E19 - 4.E30).
-        """
+        d = Pacejka62Fitter.compute_fy0_full(params, alpha, f_z, gamma, p_kpa, fnomin, pinom)
+        return d["Fy0"], d["Svy"]
+
+    @staticmethod
+    def compute_fx0_full(params, kappa, f_z, gamma=0.0, p_kpa=PINOM, fnomin=FNOMIN, pinom=PINOM):
+        g = lambda k: _p(params, k)
         dfz = (f_z - fnomin) / fnomin
         dpi = (p_kpa - pinom) / pinom
-
-        PCY1 = params.get("PCY1", 1.50)
-        PDY1 = params.get("PDY1", 2.45)
-        PDY2 = params.get("PDY2", -0.30)
-        PDY3 = params.get("PDY3", 0.0)
-        PEY1 = params.get("PEY1", 0.35)
-        PEY2 = params.get("PEY2", -0.25)
-        PEY3 = params.get("PEY3", 0.0)
-        PEY4 = params.get("PEY4", 0.0)
-        PEY5 = params.get("PEY5", 0.0)
-        PKY1 = params.get("PKY1", 48.0)
-        PKY2 = params.get("PKY2", 2.10)
-        PKY3 = params.get("PKY3", 0.0)
-        PHY1 = params.get("PHY1", 0.0)
-        PHY2 = params.get("PHY2", 0.0)
-        PHY3 = params.get("PHY3", 0.0)
-        PVY1 = params.get("PVY1", 0.0)
-        PVY2 = params.get("PVY2", 0.0)
-        PVY3 = params.get("PVY3", 0.0)
-        PVY4 = params.get("PVY4", 0.0)
-        PPY1 = params.get("PPY1", 0.0)
-        PPY2 = params.get("PPY2", 0.0)
-        PPY3 = params.get("PPY3", 0.0)
-        PPY4 = params.get("PPY4", 0.0)
-
-        Cy = PCY1
-        mu_y = (PDY1 + PDY2 * dfz) * (1.0 + PPY3 * dpi + PPY4 * dpi * dpi) * (1.0 - PDY3 * gamma * gamma)
-        Dy = mu_y * f_z
-
-        Shy = PHY1 + PHY2 * dfz + PHY3 * gamma
-        Svy = f_z * ((PVY1 + PVY2 * dfz) + (PVY3 + PVY4 * dfz) * gamma)
-
-        alpha_y = alpha + Shy
-        kya_arg = 2.0 * np.arctan(f_z / (PKY2 * fnomin * (1.0 + PPY2 * dpi) + 1e-4))
-        Kya0 = PKY1 * fnomin * (1.0 + PPY1 * dpi) * (1.0 - PKY3 * np.abs(gamma)) * np.sin(kya_arg)
-        By = Kya0 / (Cy * Dy + 1e-4)
-
-        Ey_base = PEY1 + PEY2 * dfz
-        Ey_camber = 1.0 + PEY5 * gamma * gamma - (PEY3 + PEY4 * gamma) * np.sign(alpha_y)
-        Ey = np.clip(Ey_base * Ey_camber, -10.0, 1.0)
-
-        y_arg = By * alpha_y
-        inner = y_arg - Ey * (y_arg - np.arctan(y_arg))
-        Fy0 = Dy * np.sin(Cy * np.arctan(inner)) + Svy
-
-        return Fy0, Svy
+        Cx = g("PCX1")
+        mu_x = (g("PDX1") + g("PDX2") * dfz) * (1.0 + g("PPX3") * dpi + g("PPX4") * dpi * dpi) * np.maximum(1.0 - g("PDX3") * gamma * gamma, 0.2)
+        Dx = mu_x * f_z
+        kx = kappa + g("PHX1") + g("PHX2") * dfz
+        Svx = f_z * (g("PVX1") + g("PVX2") * dfz)
+        Kxk = f_z * (g("PKX1") + g("PKX2") * dfz) * np.exp(g("PKX3") * dfz) * (1.0 + g("PPX1") * dpi + g("PPX2") * dpi * dpi)
+        Bx = Kxk / (Cx * Dx + 1e-4)
+        Ex = np.clip((g("PEX1") + g("PEX2") * dfz + g("PEX3") * dfz * dfz) * (1.0 - g("PEX4") * np.sign(kx)), -10.0, 1.0)
+        x = Bx * kx
+        Fx0 = Dx * np.sin(Cx * np.arctan(x - Ex * (x - np.arctan(x)))) + Svx
+        return Fx0, Kxk
 
     @staticmethod
     def compute_fx0(params, kappa, f_z, gamma=0.0, p_kpa=PINOM, fnomin=FNOMIN, pinom=PINOM):
-        """Computes pure longitudinal force Fx0 (N)."""
-        dfz = (f_z - fnomin) / fnomin
-        dpi = (p_kpa - pinom) / pinom
-
-        PCX1 = params.get("PCX1", 1.55)
-        PDX1 = params.get("PDX1", 2.30)
-        PDX2 = params.get("PDX2", -0.32)
-        PDX3 = params.get("PDX3", 0.0)
-        PEX1 = params.get("PEX1", 0.35)
-        PEX2 = params.get("PEX2", 0.10)
-        PEX3 = params.get("PEX3", 0.0)
-        PEX4 = params.get("PEX4", 0.0)
-        PKX1 = params.get("PKX1", 46.0)
-        PKX2 = params.get("PKX2", -0.12)
-        PKX3 = params.get("PKX3", 0.0)
-        PHX1 = params.get("PHX1", 0.0)
-        PHX2 = params.get("PHX2", 0.0)
-        PVX1 = params.get("PVX1", 0.0)
-        PVX2 = params.get("PVX2", 0.0)
-        PPX1 = params.get("PPX1", 0.0)
-        PPX2 = params.get("PPX2", 0.0)
-        PPX3 = params.get("PPX3", 0.0)
-        PPX4 = params.get("PPX4", 0.0)
-
-        Cx = PCX1
-        mu_x = (PDX1 + PDX2 * dfz) * (1.0 + PPX3 * dpi + PPX4 * dpi * dpi) * (1.0 - PDX3 * gamma * gamma)
-        Dx = mu_x * f_z
-
-        Shx = PHX1 + PHX2 * dfz
-        Svx = f_z * (PVX1 + PVX2 * dfz)
-        kappa_x = kappa + Shx
-
-        Kx0 = f_z * (PKX1 + PKX2 * dfz) * np.exp(PKX3 * dfz) * (1.0 + PPX1 * dpi)
-        Bx = Kx0 / (Cx * Dx + 1e-4)
-
-        sign_kx = np.sign(kappa_x)
-        Ex = np.clip((PEX1 + PEX2 * dfz + PEX3 * dfz * dfz) * (1.0 - PEX4 * sign_kx), -10.0, 1.0)
-
-        x_arg = Bx * kappa_x
-        inner = x_arg - Ex * (x_arg - np.arctan(x_arg))
-        Fx0 = Dx * np.sin(Cx * np.arctan(inner)) + Svx
-        return Fx0
+        return Pacejka62Fitter.compute_fx0_full(params, kappa, f_z, gamma, p_kpa, fnomin, pinom)[0]
 
     @staticmethod
     def compute_combined_forces(params, kappa, alpha, f_z, gamma=0.0, p_kpa=PINOM, fnomin=FNOMIN, pinom=PINOM):
-        """Computes combined slip forces Fx, Fy using canonical MF 6.2 weighting functions and shifts."""
-        Fx0 = Pacejka62Fitter.compute_fx0(params, kappa, f_z, gamma, p_kpa, fnomin, pinom)
-        Fy0, Svy = Pacejka62Fitter.compute_fy0(params, alpha, f_z, gamma, p_kpa, fnomin, pinom)
-
+        """Returns dict: Fx, Fy, Fy0, Svy, Svyk, Shf, Kya, Kxk, By, Cy, Gyk."""
+        g = lambda k: _p(params, k)
+        fy = Pacejka62Fitter.compute_fy0_full(params, alpha, f_z, gamma, p_kpa, fnomin, pinom)
+        Fx0, Kxk = Pacejka62Fitter.compute_fx0_full(params, kappa, f_z, gamma, p_kpa, fnomin, pinom)
         dfz = (f_z - fnomin) / fnomin
 
-        # Longitudinal factor Gxa
-        RBX1 = params.get("RBX1", 12.0)
-        RBX2 = params.get("RBX2", 10.0)
-        RBX3 = params.get("RBX3", 0.0)
-        RCX1 = params.get("RCX1", 1.05)
-        REX1 = params.get("REX1", 0.10)
-        REX2 = params.get("REX2", 0.0)
-        RHX1 = params.get("RHX1", 0.0)
+        Bxa = (g("RBX1") + g("RBX3") * gamma * gamma) * np.cos(np.arctan(g("RBX2") * kappa))
+        Exa = np.clip(g("REX1") + g("REX2") * dfz, -10.0, 1.0)
+        Shxa = g("RHX1")
+        Gxa = np.maximum(_shape_cos(Bxa, g("RCX1"), Exa, alpha + Shxa) /
+                         np.maximum(_shape_cos(Bxa, g("RCX1"), Exa, Shxa), 1e-4), 0.0)
 
-        Bxa = (RBX1 + RBX3 * gamma * gamma) * np.cos(np.arctan(RBX2 * kappa))
-        Cxa = RCX1
-        Exa = np.clip(REX1 + REX2 * dfz, -10.0, 1.0)
-        Shxa = RHX1
-        alpha_s = alpha + Shxa
-        arg_xa = Bxa * alpha_s
-        Gxa0 = np.cos(Cxa * np.arctan(arg_xa - Exa * (arg_xa - np.arctan(arg_xa))))
-        base_arg_xa = -Bxa * Shxa
-        Gxa_base = np.cos(Cxa * np.arctan(base_arg_xa - Exa * (base_arg_xa - np.arctan(base_arg_xa))))
-        Gxa = np.clip(Gxa0 / np.maximum(np.abs(Gxa_base), 1e-4), 0.0, 1.0)
-
-        # Lateral factor Gyk and induced shift Svyk
-        RBY1 = params.get("RBY1", 9.5)
-        RBY2 = params.get("RBY2", 8.0)
-        RBY3 = params.get("RBY3", 0.0)
-        RBY4 = params.get("RBY4", 0.0)
-        RCY1 = params.get("RCY1", 1.02)
-        REY1 = params.get("REY1", 0.10)
-        REY2 = params.get("REY2", 0.0)
-        RHY1 = params.get("RHY1", 0.0)
-        RHY2 = params.get("RHY2", 0.0)
-        RVY1 = params.get("RVY1", 0.0)
-        RVY2 = params.get("RVY2", 0.0)
-        RVY3 = params.get("RVY3", 0.0)
-        RVY4 = params.get("RVY4", 0.0)
-
-        Byk = (RBY1 + RBY4 * gamma * gamma) * np.cos(np.arctan(RBY2 * (alpha - RBY3)))
-        Cyk = RCY1
-        Eyk = np.clip(REY1 + REY2 * dfz, -10.0, 1.0)
-        Shyk = RHY1 + RHY2 * dfz
+        Byk = (g("RBY1") + g("RBY4") * gamma * gamma) * np.cos(np.arctan(g("RBY2") * (alpha - g("RBY3"))))
+        Eyk = np.clip(g("REY1") + g("REY2") * dfz, -10.0, 1.0)
+        Shyk = g("RHY1") + g("RHY2") * dfz
         kappa_s = kappa + Shyk
-        arg_yk = Byk * kappa_s
-        Gyk0 = np.cos(Cyk * np.arctan(arg_yk - Eyk * (arg_yk - np.arctan(arg_yk))))
-        base_arg_yk = -Byk * Shyk
-        Gyk_base = np.cos(Cyk * np.arctan(base_arg_yk - Eyk * (base_arg_yk - np.arctan(base_arg_yk))))
-        Gyk = np.clip(Gyk0 / np.maximum(np.abs(Gyk_base), 1e-4), 0.0, 1.0)
+        Gyk = np.maximum(_shape_cos(Byk, g("RCY1"), Eyk, kappa_s) /
+                         np.maximum(_shape_cos(Byk, g("RCY1"), Eyk, Shyk), 1e-4), 0.0)
 
-        # Induced vertical shift Svyk (MF 6.2 Eq. 4.E60)
-        Dvyk = (Fy0 - Svy) * (RVY1 + RVY2 * dfz + RVY3 * gamma) * np.cos(np.arctan(RVY4 * alpha))
-        Svyk = Dvyk * np.sin(1.05 * np.arctan(Byk * kappa_s))
+        Dvyk = fy["mu_y"] * f_z * (g("RVY1") + g("RVY2") * dfz + g("RVY3") * gamma) * np.cos(np.arctan(g("RVY4") * alpha))
+        Svyk = Dvyk * np.sin(g("RVY5") * np.arctan(g("RVY6") * kappa))
 
-        Fx = Gxa * Fx0
-        Fy = Gyk * Fy0 + Svyk
-        return Fx, Fy, Svy
+        Shf = fy["Shy"] + fy["Svy"] / (fy["Kya"] + 1e-3)
+        return {"Fx": Gxa * Fx0, "Fy": Gyk * fy["Fy0"] + Svyk, "Fy0": fy["Fy0"], "Svy": fy["Svy"], "Svyk": Svyk,
+                "Shf": Shf, "Kya": fy["Kya"], "Kxk": Kxk, "By": fy["By"], "Cy": fy["Cy"], "Gyk": Gyk}
 
     @staticmethod
-    def compute_mz(params, alpha, f_z, gamma=0.0, p_kpa=PINOM, fx=0.0, fy_in=None, svy_in=None, fnomin=FNOMIN, pinom=PINOM, r0=UNLOADED_RADIUS):
-        """
-        Computes self-aligning torque Mz according to canonical MF 6.2:
-        Mz = Mz' + Mzr + s * Fx = - trail * Fy' + Mzr + s * Fx
-        In ISO 8855 with +Z upward, restoring torque is negative for alpha > 0.
-        """
+    def compute_mz(params, alpha, f_z, gamma=0.0, p_kpa=PINOM, kappa=0.0, fx=None, comb=None,
+                   fnomin=FNOMIN, pinom=PINOM, r0=R0_MODEL, is_right_side=False, **kwargs):
+        """Mz = -t*(Fy - SVyk) + Mzr + s*Fx. `comb` = output of compute_combined_forces (computed if None).
+        fx=None uses the model Fx (what the runtime has)."""
+        g = lambda k: _p(params, k)
+        if comb is None:
+            comb = Pacejka62Fitter.compute_combined_forces(params, kappa, alpha, f_z, gamma, p_kpa, fnomin, pinom)
+        Fy = comb["Fy"]
+        Fx = comb["Fx"] if fx is None else fx
         dfz = (f_z - fnomin) / fnomin
         dpi = (p_kpa - pinom) / pinom
 
-        if fy_in is None or svy_in is None:
-            Fy, Svy = Pacejka62Fitter.compute_fy0(params, alpha, f_z, gamma, p_kpa, fnomin, pinom)
-        else:
-            Fy = fy_in
-            Svy = svy_in
-
-        Fy_prime = Fy - Svy
-
-        QDZ1 = params.get("QDZ1", 0.15)
-        QDZ2 = params.get("QDZ2", -0.04)
-        QDZ3 = params.get("QDZ3", 0.0)
-        QDZ6 = params.get("QDZ6", 0.0)
-        QDZ7 = params.get("QDZ7", 0.0)
-        QDZ8 = params.get("QDZ8", 0.0)
-        QDZ9 = params.get("QDZ9", 0.0)
-        QBZ1 = params.get("QBZ1", 6.0)
-        QBZ2 = params.get("QBZ2", 1.2)
-        QBZ3 = params.get("QBZ3", 0.0)
-        QBZ4 = params.get("QBZ4", 0.0)
-        QBZ5 = params.get("QBZ5", 0.0)
-        QBZ9 = params.get("QBZ9", 8.0)
-        QBZ10 = params.get("QBZ10", 0.0)
-        QCZ1 = params.get("QCZ1", 1.65)
-        QEZ1 = params.get("QEZ1", 0.05)
-        QEZ2 = params.get("QEZ2", 0.90)
-        QEZ3 = params.get("QEZ3", 0.0)
-        QEZ4 = params.get("QEZ4", 0.0)
-        QEZ5 = params.get("QEZ5", 0.0)
-        QHZ1 = params.get("QHZ1", 0.0)
-        QHZ2 = params.get("QHZ2", 0.0)
-        QHZ3 = params.get("QHZ3", 0.0)
-        QHZ4 = params.get("QHZ4", 0.0)
-        PPZ1 = params.get("PPZ1", 0.0)
-        PPZ2 = params.get("PPZ2", 0.0)
-        SSZ1 = params.get("SSZ1", 0.0)
-        SSZ2 = params.get("SSZ2", 0.04)
-        SSZ3 = params.get("SSZ3", 0.01)
-        SSZ4 = params.get("SSZ4", 0.0)
-
-        # 1. Pneumatic Trail
-        Sht = QHZ1 + QHZ2 * dfz + (QHZ3 + QHZ4 * dfz) * gamma
+        Sht = g("QHZ1") + g("QHZ2") * dfz + (g("QHZ3") + g("QHZ4") * dfz) * gamma
         alpha_t = alpha + Sht
+        alpha_r = alpha + comb["Shf"]
+        kx = comb["Kxk"] / (comb["Kya"] + 1e-3) * kappa
+        alpha_t_eq = _sgn(alpha_t) * np.sqrt(alpha_t ** 2 + kx ** 2)
+        alpha_r_eq = _sgn(alpha_r) * np.sqrt(alpha_r ** 2 + kx ** 2)
 
-        Dt = (f_z / fnomin) * r0 * (QDZ1 + QDZ2 * dfz) * (1.0 + PPZ1 * dpi) * (1.0 - QDZ3 * np.abs(gamma))
-        Ct = QCZ1
-        Bt = (QBZ1 + QBZ2 * dfz + QBZ3 * dfz * dfz) * (1.0 + QBZ4 * gamma + QBZ5 * np.abs(gamma))
-        Et = np.clip((QEZ1 + QEZ2 * dfz + QEZ3 * dfz * dfz) * (1.0 + (QEZ4 + QEZ5 * gamma) * (2.0 / np.pi) * np.arctan(Bt * Ct * alpha_t)), -10.0, 1.0)
-
-        t_arg = Bt * alpha_t
+        Dt = (f_z / fnomin) * r0 * (g("QDZ1") + g("QDZ2") * dfz) * (1.0 + g("PPZ1") * dpi) * \
+             (1.0 + g("QDZ3") * np.abs(gamma) + g("QDZ4") * gamma * gamma)
+        Ct = g("QCZ1")
+        Bt = (g("QBZ1") + g("QBZ2") * dfz + g("QBZ3") * dfz * dfz) * (1.0 + g("QBZ4") * gamma + g("QBZ5") * np.abs(gamma))
+        t_arg = Bt * alpha_t_eq
+        Et = np.clip((g("QEZ1") + g("QEZ2") * dfz + g("QEZ3") * dfz * dfz) *
+                     (1.0 + (g("QEZ4") + g("QEZ5") * gamma) * (2.0 / np.pi) * np.arctan(Bt * Ct * alpha_t_eq)), -10.0, 1.0)
         trail = Dt * np.cos(Ct * np.arctan(t_arg - Et * (t_arg - np.arctan(t_arg)))) * np.cos(alpha)
-        Mz_prime = -trail * Fy_prime # Canonical minus sign: restoring moment
+        Mz_prime = -trail * (Fy - comb["Svyk"])
 
-        # 2. Residual Aligning Torque
-        Dr = f_z * r0 * ((QDZ6 + QDZ7 * dfz) + (QDZ8 + QDZ9 * dfz) * (1.0 + PPZ2 * dpi) * gamma)
-        Br = QBZ9
-        Cr = 1.0
-        Shr = Sht
-        alpha_r = alpha + Shr
-        Mzr = Dr * np.cos(Cr * np.arctan(Br * alpha_r))
+        side = -1.0 if is_right_side else 1.0
+        Dr = f_z * r0 * (side * (g("QDZ6") + g("QDZ7") * dfz) +
+                         (g("QDZ8") + g("QDZ9") * dfz) * (1.0 + g("PPZ2") * dpi) * gamma) * np.cos(alpha)
+        Br = g("QBZ9") + g("QBZ10") * comb["By"] * comb["Cy"]
+        Mzr = Dr * np.cos(np.arctan(Br * alpha_r_eq))
 
-        # 3. Longitudinal force arm coupling s * Fx
-        s = r0 * (SSZ1 + SSZ2 * (Fy / fnomin) + (SSZ3 + SSZ4 * dfz) * gamma)
-        Mz_fx = s * fx
-
-        return Mz_prime + Mzr + Mz_fx
+        s = r0 * (g("SSZ1") + g("SSZ2") * (Fy / fnomin) + (g("SSZ3") + g("SSZ4") * dfz) * gamma)
+        return Mz_prime + Mzr + s * Fx
 
     @staticmethod
-    def compute_mx(params, f_z, gamma, fy, p_kpa=PINOM, fnomin=FNOMIN, pinom=PINOM, r0=UNLOADED_RADIUS):
-        """Computes overturning moment Mx (Nm) in target ISO coordinate system."""
+    def compute_mx(params, f_z, gamma, fy, p_kpa=PINOM, fnomin=FNOMIN, pinom=PINOM, r0=R0_MODEL, is_right_side=False):
         dpi = (p_kpa - pinom) / pinom
-        QSX1 = params.get("QSX1", 0.0)
-        QSX2 = params.get("QSX2", 2.0)
-        QSX3 = params.get("QSX3", 0.05)
-        PPMX1 = params.get("PPMX1", 0.0)
-        return f_z * r0 * (QSX1 + QSX2 * gamma + QSX3 * (fy / fnomin) + PPMX1 * dpi)
+        qsx1 = -_p(params, "QSX1") if is_right_side else _p(params, "QSX1")
+        return f_z * r0 * (qsx1 + _p(params, "QSX2") * gamma +
+                           _p(params, "QSX3") * (fy / fnomin) + _p(params, "PPMX1") * dpi)
 
     @staticmethod
-    def compute_my(params, f_z, fx, v_x, fnomin=FNOMIN, r0=UNLOADED_RADIUS, v0=V0):
-        """Computes rolling resistance moment My (Nm) according to MF 6.2 Eq. 4.E65."""
-        QSY1 = params.get("QSY1", 0.015)
-        QSY2 = params.get("QSY2", 0.0)
-        QSY3 = params.get("QSY3", 0.001)
-        QSY4 = params.get("QSY4", 0.0)
+    def compute_my(params, f_z, fx, v_x, fnomin=FNOMIN, r0=R0_MODEL, v0=V0, v_eps=0.5):
         v_ratio = np.abs(v_x) / max(v0, 1.0)
-        rr = QSY1 + QSY2 * (fx / fnomin) + QSY3 * v_ratio + QSY4 * (v_ratio ** 4)
-        return -r0 * f_z * rr * np.sign(v_x)
+        rr = _p(params, "QSY1") + _p(params, "QSY2") * (fx / fnomin) + _p(params, "QSY3") * v_ratio + \
+             _p(params, "QSY4") * v_ratio ** 4
+        return -r0 * f_z * rr * np.tanh(v_x / v_eps)
 
     @staticmethod
-    def estimate_vertical_properties(spring_csv_path, p_nom=83.0):
-        """
-        Estimates tire vertical stiffness kz and unloaded radius R0 from vertical characterization data.
-        Returns linear stiffness at nominal pressure, pressure sensitivity, R0, R2, and uncertainty.
-        """
+    def estimate_vertical_properties(spring_csv_path, p_nom=PINOM):
+        """Linear vertical stiffness kz. The intercept is a linear extrapolation to Fz=0 (diagnostic only)."""
         if not os.path.exists(spring_csv_path):
             raise FileNotFoundError(f"Spring rate dataset not found: {spring_csv_path}")
-
         df = pd.read_csv(spring_csv_path)
-        fz = df["f_z"].values
-        rl = df["r_l"].values
-        p = df["p_kpa"].values
+        fz, rl, p = df["f_z"].values, df["r_l"].values, df["p_kpa"].values
 
-        # Nominal pressure subset
-        m_nom = (np.abs(p - p_nom) < 4.0)
+        m_nom = np.abs(p - p_nom) < 4.0
         if np.sum(m_nom) < 100:
             m_nom = np.ones(len(fz), dtype=bool)
-
-        poly_nom = np.polyfit(fz[m_nom], rl[m_nom], 1)
-        kz_nom = float(-1.0 / poly_nom[0])
-        r0_nom = float(poly_nom[1])
-
-        # Goodness of fit
-        defl_pred = r0_nom - (1.0 / kz_nom) * fz[m_nom]
-        err = rl[m_nom] - defl_pred
-        rmse_m = float(np.sqrt(np.mean(err ** 2)))
+        poly = np.polyfit(fz[m_nom], rl[m_nom], 1)
+        kz_nom = float(-1.0 / poly[0])
+        r_icpt = float(poly[1])
+        err = rl[m_nom] - np.polyval(poly, fz[m_nom])
         ss_tot = float(np.sum((rl[m_nom] - np.mean(rl[m_nom])) ** 2))
-        ss_res = float(np.sum(err ** 2))
-        r2 = float(1.0 - ss_res / max(ss_tot, 1e-6))
+        r2 = float(1.0 - np.sum(err ** 2) / max(ss_tot, 1e-6))
 
-        # Pressure sensitivity of stiffness
         kz_p = {}
         for p_val in [69.0, 83.0, 97.0]:
-            m_p = (np.abs(p - p_val) < 4.0)
+            m_p = np.abs(p - p_val) < 4.0
             if np.sum(m_p) > 100:
-                p_fit = np.polyfit(fz[m_p], rl[m_p], 1)
-                kz_p[p_val] = float(-1.0 / p_fit[0])
-
+                kz_p[p_val] = float(-1.0 / np.polyfit(fz[m_p], rl[m_p], 1)[0])
         dp_slope = 0.0
         if len(kz_p) >= 2:
-            p_pts = np.array(list(kz_p.keys()))
-            k_pts = np.array(list(kz_p.values()))
-            p_poly = np.polyfit(p_pts, k_pts, 1)
-            dp_slope = float(p_poly[0])
-
+            dp_slope = float(np.polyfit(list(kz_p.keys()), list(kz_p.values()), 1)[0])
         return {
             "linear_stiffness_n_m": kz_nom,
-            "unloaded_radius_m": r0_nom,
+            "intercept_radius_m_extrapolated": r_icpt,
             "stiffness_r2": r2,
-            "deflection_rmse_mm": rmse_m * 1000.0,
+            "deflection_rmse_mm": float(np.sqrt(np.mean(err ** 2)) * 1000.0),
             "fitting_range_fz_n": [float(np.min(fz[m_nom])), float(np.max(fz[m_nom]))],
             "pressure_sensitivity_npm_per_kpa": dp_slope,
-            "stiffness_by_pressure": kz_p
+            "stiffness_by_pressure": kz_p,
         }
 
 
-def multistart_least_squares(resid_func, bounds, default_p0, num_starts=6, loss="soft_l1", f_scale=25.0, max_nfev=350, seed=42):
-    """
-    Multi-start optimization engine to escape local minima in non-convex Magic Formula stages.
-    Samples candidate seeds within parameter bounds, evaluates residual costs,
-    and executes Trust Region Reflective (TRF) optimization with robust loss from the top seeds.
-    """
+def evaluate_pure_slip(params, alpha, fz, gamma, p_kpa, is_right_side=False):
+    """Pure-slip (kappa=0) evaluation exactly as the runtime does it: model Fx, SVyk included in Mz.
+    Returns (Fy, Mz, comb)."""
+    alpha = np.asarray(alpha, dtype=float)
+    comb = Pacejka62Fitter.compute_combined_forces(params, np.zeros_like(alpha), alpha, fz, gamma, p_kpa)
+    mz = Pacejka62Fitter.compute_mz(params, alpha, fz, gamma, p_kpa, kappa=0.0, fx=None, comb=comb, is_right_side=is_right_side)
+    return comb["Fy"], mz, comb
+
+
+def calibration_id(params):
+    core = {k: v for k, v in params.items() if k not in ("CALIBRATION_ID", "CALIBRATION_DATE")}
+    return hashlib.sha256(json.dumps(core, sort_keys=True, default=float).encode()).hexdigest()[:16]
+
+
+def export_tir(params, out_path):
+    """Exports parameters to a canonical TYDEX / standard Pacejka .tir format for external CAD/Sim suites."""
+    comp = str(params.get("COMPOUND", "HOOSIER_16X7.5_10")).upper()
+    lines = [
+        "[MDI_HEADER]",
+        "FILE_TYPE                = 'tir'",
+        "FILE_VERSION             = 3.0",
+        "FILE_FORMAT              = 'ASCII'",
+        f"! Hoosier 16.0x7.5-10 {comp} — Mirena Dynamics MF 6.2 Calibration",
+        f"! Calibration ID: {params.get('CALIBRATION_ID', 'N/A')}",
+        f"! Date: {params.get('CALIBRATION_DATE', datetime.date.today().isoformat())}",
+        "$----------------------------------------------------------------units",
+        "[UNITS]",
+        "LENGTH                   = 'meter'",
+        "FORCE                    = 'newton'",
+        "ANGLE                    = 'radians'",
+        "MASS                     = 'kg'",
+        "TIME                     = 'second'",
+        "$----------------------------------------------------------------model",
+        "[MODEL]",
+        "PROPERTY_FILE_FORMAT     = 'PAC2002'",
+        "USE_MODE                 = 14",
+        "VXLOW                    = 1.0",
+        "LONGVL                   = 11.11",
+        "TYRESIDE                 = 'LEFT'",
+        "$------------------------------------------------------------dimension",
+        "[DIMENSION]",
+        f"UNLOADED_RADIUS          = {params.get('UNLOADED_RADIUS', R0_MODEL):.4f}",
+        "WIDTH                    = 0.1905",
+        "RIM_RADIUS               = 0.1270",
+        "$-------------------------------------------------------------vertical",
+        "[VERTICAL]",
+        f"VERTICAL_STIFFNESS       = {params.get('VERTICAL_STIFFNESS', 115000.0):.1f}",
+        f"FNOMIN                   = {params.get('FNOMIN', FNOMIN):.1f}",
+        f"NOMPRES                  = {params.get('PINOM', PINOM) * 1000.0:.1f}",
+        "$--------------------------------------------------scaling_coefficients",
+        "[SCALING_COEFFICIENTS]",
+        "LFZO                     = 1.0",
+        "LCX                      = 1.0",
+        "LMUX                     = 1.0",
+        "LEX                      = 1.0",
+        "LKX                      = 1.0",
+        "LHX                      = 1.0",
+        "LVX                      = 1.0",
+        "LCY                      = 1.0",
+        "LMUY                     = 1.0",
+        "LEY                      = 1.0",
+        "LKY                      = 1.0",
+        "LHY                      = 1.0",
+        "LVY                      = 1.0",
+        "LTR                      = 1.0",
+        "LRES                     = 1.0",
+        "LXAL                     = 1.0",
+        "LYKA                     = 1.0",
+        "LVYKA                    = 1.0",
+        "LS                       = 1.0",
+        "$---------------------------------------------------------longitudinal",
+        "[LONGITUDINAL_COEFFICIENTS]",
+    ]
+    for k in sorted([k for k in params if k[:2] in ("PC", "PD", "PE", "PK", "PH", "PV", "PP") and k[2] == "X"]):
+        lines.append(f"{k:<25}= {params[k]:.6g}")
+    lines.append("$--------------------------------------------------------------lateral")
+    lines.append("[LATERAL_COEFFICIENTS]")
+    for k in sorted([k for k in params if k[:2] in ("PC", "PD", "PE", "PK", "PH", "PV", "PP") and k[2] == "Y"]):
+        lines.append(f"{k:<25}= {params[k]:.6g}")
+    lines.append("$-------------------------------------------------------combined_slip")
+    for k in sorted([k for k in params if k[:2] in ("RB", "RC", "RE", "RH", "RV")]):
+        lines.append(f"{k:<25}= {params[k]:.6g}")
+    lines.append("$------------------------------------------------------------aligning")
+    lines.append("[ALIGNING_COEFFICIENTS]")
+    for k in sorted([k for k in params if k[:2] in ("QD", "QB", "QC", "QE", "QH", "SS") and k[2] == "Z"] + ["PPZ1", "PPZ2"]):
+        lines.append(f"{k:<25}= {params[k]:.6g}")
+    lines.append("$---------------------------------------------------------overturning")
+    lines.append("[OVERTURNING_COEFFICIENTS]")
+    for k in sorted([k for k in params if k[:2] == "QS" and k[2] == "X"] + ["PPMX1"]):
+        lines.append(f"{k:<25}= {params[k]:.6g}")
+    lines.append("$---------------------------------------------------rolling_resistance")
+    lines.append("[ROLLING_COEFFICIENTS]")
+    for k in sorted([k for k in params if k[:2] == "QS" and k[2] == "Y"]):
+        lines.append(f"{k:<25}= {params[k]:.6g}")
+
+    with open(out_path, "w") as fp:
+        fp.write("\n".join(lines) + "\n")
+    print(f">> Exported canonical .tir: {out_path}")
+
+
+def _sub(d, m):
+    return {k: (v[m] if isinstance(v, np.ndarray) else v) for k, v in d.items()}
+
+
+def multistart_least_squares(resid_func, bounds, default_p0, num_starts=6, loss="soft_l1", f_scale=25.0,
+                             max_nfev=350, seed=42):
     lb = np.array(bounds[0], dtype=float)
     ub = np.array(bounds[1], dtype=float)
     default_p0 = np.array(default_p0, dtype=float)
-
     rng = np.random.RandomState(seed)
-    candidates = [default_p0, 0.5 * (lb + ub)]
-    for _ in range(num_starts):
-        rand_pt = rng.uniform(lb, ub)
-        candidates.append(rand_pt)
+    candidates = [default_p0, 0.5 * (lb + ub)] + [rng.uniform(lb, ub) for _ in range(num_starts)]
 
     costs = []
     for pt in candidates:
         try:
-            r = resid_func(pt)
-            costs.append(np.sum(r ** 2))
+            costs.append(float(np.sum(resid_func(pt) ** 2)))
         except Exception:
             costs.append(float("inf"))
+    top = [candidates[i] for i in np.argsort(costs)[:3]]
+    if not any(np.allclose(default_p0, c) for c in top):
+        top.append(default_p0)
 
-    sorted_indices = np.argsort(costs)
-    top_candidates = [candidates[idx] for idx in sorted_indices[:3]]
-    if not any(np.allclose(default_p0, c) for c in top_candidates):
-        top_candidates.append(default_p0)
-
-    best_res = None
-    best_cost = float("inf")
-    for p0_try in top_candidates:
+    best, best_cost = None, float("inf")
+    for p0_try in top:
         try:
-            res = least_squares(resid_func, p0_try, bounds=bounds, loss=loss, f_scale=f_scale, method="trf", max_nfev=max_nfev)
+            res = least_squares(resid_func, p0_try, bounds=bounds, loss=loss, f_scale=f_scale, method="trf",
+                                x_scale="jac", max_nfev=max_nfev)
             if res.cost < best_cost:
-                best_cost = res.cost
-                best_res = res
+                best, best_cost = res, res.cost
         except Exception:
             continue
-
-    if best_res is None:
-        best_res = least_squares(resid_func, default_p0, bounds=bounds, loss=loss, f_scale=f_scale, method="trf", max_nfev=max_nfev)
-    return best_res
+    if best is None:
+        best = least_squares(resid_func, default_p0, bounds=bounds, loss=loss, f_scale=f_scale, method="trf",
+                             x_scale="jac", max_nfev=max_nfev)
+    return best
 
 
 def compute_stage_identifiability(res, param_names, stage_name, p0_scale, bounds=None):
-    """
-    Calculates scale-invariant Jacobian SVD, condition number, correlations,
-    standard errors, and checks for boundary saturation.
-    """
+    """Scaled-Jacobian SVD, correlations, SEs (inflated by lag-1 residual autocorrelation), bound saturation."""
     J = res.jac
     N, P = J.shape
     p_opt = res.x
 
-    # Parameter scale vector for scale-invariant Jacobian
-    scale_vec = np.abs(np.array(p0_scale))
+    scale_vec = np.abs(np.array(p0_scale, dtype=float))
     scale_vec = np.where(scale_vec < 1e-4, 1.0, scale_vec)
-
-    # Scaled Jacobian: J_scaled = J * diag(scale_vec)
-    J_scaled = J * scale_vec[np.newaxis, :]
-    JTJ = J.T @ J
-
-    # SVD of scaled Jacobian
-    U, S, Vt = np.linalg.svd(J_scaled, full_matrices=False)
+    S = np.linalg.svd(J * scale_vec[np.newaxis, :], full_matrices=False)[1]
     cond_num = float(S[0] / max(S[-1], 1e-12))
     rank = int(np.sum(S > 1e-5 * S[0]))
 
-    # Robust covariance via pseudo-inverse
-    inv_JTJ = np.linalg.pinv(JTJ)
-    residual_variance = float(np.sum(res.fun ** 2) / max(N - P, 1))
-    cov_matrix = inv_JTJ * residual_variance
-    std_errors = np.sqrt(np.maximum(np.diag(cov_matrix), 0.0))
+    inv_JTJ = np.linalg.pinv(J.T @ J)
+    r = res.fun - np.mean(res.fun)
+    rho = float(np.clip(np.dot(r[:-1], r[1:]) / max(np.dot(r, r), 1e-12), 0.0, 0.999))
+    inflation = (1.0 + rho) / (1.0 - rho)
+    cov = inv_JTJ * float(np.sum(res.fun ** 2) / max(N - P, 1)) * inflation
+    std_errors = np.sqrt(np.maximum(np.diag(cov), 0.0))
 
-    # Parameter correlation matrix
-    diag_inv = np.sqrt(np.maximum(np.diag(inv_JTJ), 1e-12))
-    corr = inv_JTJ / np.outer(diag_inv, diag_inv)
+    d = np.sqrt(np.maximum(np.diag(inv_JTJ), 1e-12))
+    corr = inv_JTJ / np.outer(d, d)
+    high_corrs = [{"param_i": param_names[i], "param_j": param_names[j], "correlation": float(corr[i, j])}
+                  for i in range(P) for j in range(i + 1, P) if abs(corr[i, j]) > 0.85]
 
-    high_corrs = []
-    for i in range(P):
-        for j in range(i + 1, P):
-            if abs(corr[i, j]) > 0.85:
-                high_corrs.append({
-                    "param_i": param_names[i],
-                    "param_j": param_names[j],
-                    "correlation": float(corr[i, j])
-                })
-
-    # Boundary saturation check (within 1% of bound)
-    boundary_saturated = []
+    saturated = []
     if bounds is not None:
         lb, ub = bounds
         for i, name in enumerate(param_names):
             span = ub[i] - lb[i]
             if span > 1e-6:
-                dist_lb = (p_opt[i] - lb[i]) / span
-                dist_ub = (ub[i] - p_opt[i]) / span
-                if dist_lb < 0.01:
-                    boundary_saturated.append({"param": name, "bound": "lower", "value": float(p_opt[i]), "limit": float(lb[i])})
-                elif dist_ub < 0.01:
-                    boundary_saturated.append({"param": name, "bound": "upper", "value": float(p_opt[i]), "limit": float(ub[i])})
+                if (p_opt[i] - lb[i]) / span < 0.01:
+                    saturated.append({"param": name, "bound": "lower", "value": float(p_opt[i]), "limit": float(lb[i])})
+                elif (ub[i] - p_opt[i]) / span < 0.01:
+                    saturated.append({"param": name, "bound": "upper", "value": float(p_opt[i]), "limit": float(ub[i])})
 
-    param_diagnostics = {}
-    for i, name in enumerate(param_names):
-        param_diagnostics[name] = {
-            "optimal_value": float(p_opt[i]),
-            "std_error": float(std_errors[i]),
-            "relative_uncertainty_pct": float(std_errors[i] / max(abs(p_opt[i]), 1e-4) * 100.0)
-        }
+    diag = {n: {"optimal_value": float(p_opt[i]), "std_error": float(std_errors[i]),
+                "relative_uncertainty_pct": float(std_errors[i] / max(abs(p_opt[i]), 1e-4) * 100.0)}
+            for i, n in enumerate(param_names)}
 
-    print(f"\n--- Identifiability Analysis: {stage_name} ---")
-    print(f"   Numerical Rank: {rank}/{P} | Scaled Condition Number: {cond_num:.2e}")
-    print(f"   Scaled Singular Values: [{', '.join([f'{s:.1f}' for s in S])}]")
-    if boundary_saturated:
-        print("   [WARNING] Parameters Saturated at Optimization Bounds:")
-        for bs in boundary_saturated:
-            print(f"     - {bs['param']} hit {bs['bound']} bound: {bs['value']:.4f} (limit: {bs['limit']:.4f})")
-    else:
-        print("   Zero parameters saturated at optimization bounds.")
+    print(f"\n--- Identifiability: {stage_name} ---")
+    print(f"   Rank {rank}/{P} | scaled cond {cond_num:.2e} | status {res.status} nfev {res.nfev} | "
+          f"lag-1 rho {rho:.3f} (SE x{np.sqrt(inflation):.2f})")
+    if res.status == 0:
+        print("   [WARNING] max_nfev reached: not converged.")
+    for bs in saturated:
+        print(f"   [WARNING] {bs['param']} at {bs['bound']} bound: {bs['value']:.4g} (limit {bs['limit']:.4g})")
+    for hc in high_corrs:
+        print(f"   corr |r|>0.85: {hc['param_i']} <-> {hc['param_j']}: {hc['correlation']:+.3f}")
 
-    if high_corrs:
-        print("   Correlated Parameter Pairs (|r| > 0.85):")
-        for hc in high_corrs:
-            print(f"     - {hc['param_i']} <-> {hc['param_j']}: r = {hc['correlation']:+.3f}")
-    else:
-        print("   No parameter pairs exceed correlation threshold 0.85.")
+    return {"stage": stage_name, "jacobian_rank": rank, "num_params": P, "scaled_condition_number": cond_num,
+            "singular_values": S.tolist(), "optimizer_status": int(res.status), "nfev": int(res.nfev),
+            "residual_lag1_autocorr": rho, "se_inflation_factor": float(np.sqrt(inflation)),
+            "boundary_saturated_parameters": saturated, "high_correlations": high_corrs, "parameters": diag}
 
-    return {
-        "stage": stage_name,
-        "jacobian_rank": rank,
-        "num_params": P,
-        "scaled_condition_number": cond_num,
-        "singular_values": S.tolist(),
-        "boundary_saturated_parameters": boundary_saturated,
-        "high_correlations": high_corrs,
-        "parameters": param_diagnostics
-    }
+
+def _err_block(err, exp):
+    rng = max(float(np.max(exp) - np.min(exp)), 1e-4)
+    rmse = float(np.sqrt(np.mean(err ** 2)))
+    ss_tot = max(float(np.sum((exp - np.mean(exp)) ** 2)), 1e-6)
+    return {"rmse": rmse, "nrmse_pct": rmse / rng * 100.0, "mae": float(np.mean(np.abs(err))),
+            "max_err": float(np.max(np.abs(err))), "bias": float(np.mean(err)),
+            "r2": float(1.0 - np.sum(err ** 2) / ss_tot)}
+
+
+def _slice(err_fy, err_mz, mask, min_count):
+    if np.sum(mask) <= min_count:
+        return None
+    return {"count": int(np.sum(mask)), "rmse_fy_n": float(np.sqrt(np.mean(err_fy[mask] ** 2))),
+            "mae_fy_n": float(np.mean(np.abs(err_fy[mask]))), "rmse_mz_nm": float(np.sqrt(np.mean(err_mz[mask] ** 2))),
+            "mae_mz_nm": float(np.mean(np.abs(err_mz[mask])))}
 
 
 def fit_mf62_compound(compound_name, df_train, df_val, spring_csv_path):
-    print(f"\n{'=' * 78}")
-    print(f"   CALIBRATING MF 6.2 MODEL: HOOSIER 16.0x7.5-10 {compound_name}")
-    print(f"{'=' * 78}")
+    print(f"\n{'=' * 78}\n   CALIBRATING MF 6.2: HOOSIER 16.0x7.5-10 {compound_name} (schema v{SCHEMA_VERSION})\n{'=' * 78}")
 
-    alpha_tr = df_train["alpha"].values
-    fz_tr = df_train["f_z"].values
-    gamma_tr = df_train["gamma"].values
-    p_tr = df_train["p_kpa"].values
-    fy_tr = df_train["f_y"].values
-    mz_tr = df_train["m_z"].values
-    mx_tr = df_train["m_x"].values
-    fx_tr = df_train["f_x"].values
+    alpha_tr, fz_tr, gamma_tr, p_tr = (df_train[c].values for c in ("alpha", "f_z", "gamma", "p_kpa"))
+    fy_tr, mz_tr, mx_tr = (df_train[c].values for c in ("f_y", "m_z", "m_x"))
 
-    # 0. Characterize vertical stiffness from spring rate test
-    print("\n>> Characterizing vertical load-deflection from experimental spring data...")
-    vert_props = Pacejka62Fitter.estimate_vertical_properties(spring_csv_path, p_nom=PINOM)
-    print(f"   Fitted Vertical Stiffness: {vert_props['linear_stiffness_n_m']:.1f} N/m (R^2 = {vert_props['stiffness_r2']:.4f})")
-    print(f"   Fitted Reference Radius R0: {vert_props['unloaded_radius_m']:.4f} m")
+    vert = Pacejka62Fitter.estimate_vertical_properties(spring_csv_path, p_nom=PINOM)
+    print(f">> kz = {vert['linear_stiffness_n_m']:.1f} N/m (R2 {vert['stiffness_r2']:.4f}); "
+          f"R0 model = {R0_MODEL} m (spring intercept {vert['intercept_radius_m_extrapolated']:.4f} m, diagnostic)")
 
-    # Load-bin weights to balance normal load contributions across the 5 physical test levels
     load_bins = np.digitize(fz_tr, [330.0, 550.0, 770.0, 990.0])
-    bin_counts = np.bincount(load_bins, minlength=5)
-    bin_weights_arr = 1.0 / np.sqrt(np.maximum(bin_counts[load_bins], 1))
-    bin_weights_arr = bin_weights_arr / np.mean(bin_weights_arr)
+    w_all = 1.0 / np.sqrt(np.maximum(np.bincount(load_bins, minlength=5)[load_bins], 1))
+    w_all = w_all / np.mean(w_all)
 
-    stage_reports = {}
+    reports = {}
 
-    # ------------------------------------------------------------------
-    # Stage 1: Zero-Camber Nominal Lateral Force (at p = 83 kPa, gamma = 0)
-    # Identifies: PDY1, PDY2, PKY1, PKY2, PEY1, PEY2, PHY1, PVY1
-    # NOTE: PCY1 is fixed to canonical 1.55 to decouple the near-perfect
-    # collinearity with PEY1 (r = 0.9997 when unconstrained).
-    # ------------------------------------------------------------------
-    mask_c0_p0 = (np.abs(df_train["ia_deg"]) < 0.2) & (np.abs(p_tr - PINOM) < 4.0)
-    alpha_s1 = alpha_tr[mask_c0_p0]
-    fz_s1 = fz_tr[mask_c0_p0]
-    fy_s1 = fy_tr[mask_c0_p0]
-    w_s1 = bin_weights_arr[mask_c0_p0]
+    # ---- Stage 1: zero camber, nominal pressure. PCY1 fixed (collinear with PEY1 otherwise).
+    m1 = (np.abs(df_train["ia_deg"]) < 0.2) & (np.abs(p_tr - PINOM) < 4.0)
+    a1, f1, y1, w1 = alpha_tr[m1], fz_tr[m1], fy_tr[m1], w_all[m1]
+    names1 = ["PDY1", "PDY2", "PKY1", "PKY2", "PEY1", "PEY2", "PHY1", "PVY1"]
+    p01 = [2.50, -0.30, 48.0, 2.05, 0.40, -0.20, 0.001, 0.025]
+    b1 = ([1.6, -1.0, 20.0, 0.8, -1.2, -1.2, -0.02, -0.08], [3.4, 0.1, 90.0, 4.5, 0.9, 0.9, 0.02, 0.08])
 
-    names_s1 = ["PDY1", "PDY2", "PKY1", "PKY2", "PEY1", "PEY2", "PHY1", "PVY1"]
-    p0_s1 = [2.50, -0.30, 48.0, 2.05, 0.40, -0.20, 0.001, 0.025]
-    bounds_s1 = (
-        [1.6, -1.0, 20.0, 0.8, -1.2, -1.2, -0.02, -0.08],
-        [3.4,  0.1, 90.0, 4.5,  0.9,  0.9,  0.02,  0.08]
-    )
+    def r1(p):
+        cur = dict(zip(names1, p))
+        cur["PCY1"] = 1.55
+        pred, _ = Pacejka62Fitter.compute_fy0(cur, a1, f1, gamma=0.0, p_kpa=PINOM)
+        return (pred - y1) * w1
 
-    def resid_stage1(p):
-        cur = {
-            "PCY1": 1.55,
-            "PDY1": p[0], "PDY2": p[1],
-            "PKY1": p[2], "PKY2": p[3],
-            "PEY1": p[4], "PEY2": p[5],
-            "PHY1": p[6], "PVY1": p[7]
-        }
-        pred, _ = Pacejka62Fitter.compute_fy0(cur, alpha_s1, fz_s1, gamma=0.0, p_kpa=PINOM)
-        return (pred - fy_s1) * w_s1
+    print("\n>> Stage 1: pure Fy0 (PCY1=1.55 fixed)")
+    res1 = multistart_least_squares(r1, b1, p01, 6, max_nfev=350)
+    po1 = res1.x
+    reports["stage1_zero_camber_fy"] = compute_stage_identifiability(res1, names1, "Stage 1: Pure Fy0", p01, b1)
 
-    print("\n>> Optimizing Stage 1: Nominal lateral parameters at zero camber & nominal pressure (PCY1=1.55 fixed)...")
-    res_s1 = multistart_least_squares(resid_stage1, bounds_s1, p0_s1, num_starts=6, loss="soft_l1", f_scale=25.0, max_nfev=350)
-    p_opt1 = res_s1.x
-    stage_reports["stage1_zero_camber_fy"] = compute_stage_identifiability(res_s1, names_s1, "Stage 1: Pure Fy0 (PCY1=1.55 fixed)", p0_s1, bounds_s1)
+    # ---- Stage 2: pressure sensitivity
+    m2 = np.abs(df_train["ia_deg"]) < 0.2
+    a2, f2, pp2, y2, w2 = alpha_tr[m2], fz_tr[m2], p_tr[m2], fy_tr[m2], w_all[m2]
+    names2, p02, b2 = ["PPY1", "PPY3"], [-0.40, -0.25], ([-1.2, -1.2], [1.2, 1.2])
+    base1 = dict(zip(names1, po1))
+    base1["PCY1"] = 1.55
 
-    # ------------------------------------------------------------------
-    # Stage 2: Lateral Pressure Sensitivity (at gamma = 0 across all pressures)
-    # Identifies: PPY1, PPY3
-    # ------------------------------------------------------------------
-    mask_c0_all_p = (np.abs(df_train["ia_deg"]) < 0.2)
-    alpha_s2 = alpha_tr[mask_c0_all_p]
-    fz_s2 = fz_tr[mask_c0_all_p]
-    p_s2 = p_tr[mask_c0_all_p]
-    fy_s2 = fy_tr[mask_c0_all_p]
-    w_s2 = bin_weights_arr[mask_c0_all_p]
+    def r2(p):
+        cur = dict(base1)
+        cur.update({"PPY1": p[0], "PPY3": p[1]})
+        pred, _ = Pacejka62Fitter.compute_fy0(cur, a2, f2, gamma=0.0, p_kpa=pp2)
+        return (pred - y2) * w2
 
-    names_s2 = ["PPY1", "PPY3"]
-    p0_s2 = [-0.40, -0.25]
-    bounds_s2 = ([-1.2, -1.2], [1.2, 1.2])
+    print("\n>> Stage 2: pressure sensitivity")
+    res2 = multistart_least_squares(r2, b2, p02, 4, max_nfev=250)
+    po2 = res2.x
+    reports["stage2_pressure_fy"] = compute_stage_identifiability(res2, names2, "Stage 2: Pressure", p02, b2)
 
-    def resid_stage2(p):
-        cur = {
-            "PCY1": 1.55, "PDY1": p_opt1[0], "PDY2": p_opt1[1],
-            "PKY1": p_opt1[2], "PKY2": p_opt1[3],
-            "PEY1": p_opt1[4], "PEY2": p_opt1[5],
-            "PHY1": p_opt1[6], "PVY1": p_opt1[7],
-            "PPY1": p[0], "PPY3": p[1]
-        }
-        pred, _ = Pacejka62Fitter.compute_fy0(cur, alpha_s2, fz_s2, gamma=0.0, p_kpa=p_s2)
-        return (pred - fy_s2) * w_s2
+    # ---- Stage 3: camber. PVY3 lower bound released (was pinned at 0 in v1). PEY4 fixed at 0.
+    m3 = np.abs(df_train["ia_deg"]) > 0.5
+    m3c = m3 & (np.abs(df_train["sa_deg"]) < 0.5)
+    names3 = ["PVY3", "PVY4", "PDY3", "PHY3", "PKY3"]
+    p03 = [0.3, 0.5, 6.0, 0.04, 1.5]
+    b3 = ([-1.0, -4.0, 0.0, 0.0, 0.0], [5.0, 4.0, 30.0, 0.15, 6.0])
+    base2 = dict(base1)
+    base2.update({"PPY1": po2[0], "PPY3": po2[1], "PEY4": 0.0})
 
-    print("\n>> Optimizing Stage 2: Lateral pressure sensitivity cross-terms...")
-    res_s2 = multistart_least_squares(resid_stage2, bounds_s2, p0_s2, num_starts=4, loss="soft_l1", f_scale=25.0, max_nfev=250)
-    p_opt2 = res_s2.x
-    stage_reports["stage2_pressure_fy"] = compute_stage_identifiability(res_s2, names_s2, "Stage 2: Pressure Sensitivity", p0_s2, bounds_s2)
+    def r3(p):
+        cur = dict(base2)
+        cur.update(dict(zip(names3, p)))
+        ps, _ = Pacejka62Fitter.compute_fy0(cur, alpha_tr[m3], fz_tr[m3], gamma_tr[m3], p_tr[m3])
+        pc, _ = Pacejka62Fitter.compute_fy0(cur, alpha_tr[m3c], fz_tr[m3c], gamma_tr[m3c], p_tr[m3c])
+        return np.concatenate([(ps - fy_tr[m3]) * w_all[m3], (pc - fy_tr[m3c]) * 5.0 * w_all[m3c]])
 
-    # ------------------------------------------------------------------
-    # Stage 3: Camber Sensitivity Parameters
-    # Coupled optimization of [PVY3, PVY4, PDY3, PHY3, PKY3]
-    # Resolves previous staged decoupling and peak collapse:
-    # - Accommodates contact patch lateral shift Shy (PHY3 > 0)
-    # - Identifies camber cornering stiffness change (PKY3)
-    # - Enforces zero-slip camber thrust constraint simultaneously with slip sweep saturation
-    # - Fixes PEY4 to 0.0 to prevent boundary saturation
-    # ------------------------------------------------------------------
-    mask_camber_all = np.abs(df_train["ia_deg"]) > 0.5
-    mask_c0 = mask_camber_all & (np.abs(df_train["sa_deg"]) < 0.5)
+    print("\n>> Stage 3: coupled camber (PVY3, PVY4, PDY3, PHY3, PKY3)")
+    res3 = multistart_least_squares(r3, b3, p03, 6, max_nfev=400)
+    po3 = res3.x
+    reports["stage3_camber_coupled"] = compute_stage_identifiability(res3, names3, "Stage 3: Camber", p03, b3)
 
-    names_s3 = ["PVY3", "PVY4", "PDY3", "PHY3", "PKY3"]
-    p0_s3 = [0.8, 0.5, 6.0, 0.04, 1.5]
-    bounds_s3 = (
-        [0.0, -4.0, 0.0, 0.0, 0.0],
-        [5.0,  4.0, 30.0, 0.15, 6.0]
-    )
+    fitted_fy = dict(base2)
+    fitted_fy.update(dict(zip(names3, [float(v) for v in po3])))
+    fitted_fy = {k: float(v) for k, v in fitted_fy.items()}
+    comb_tr = Pacejka62Fitter.compute_combined_forces(fitted_fy, np.zeros_like(alpha_tr), alpha_tr, fz_tr, gamma_tr, p_tr)
+    pred_fy_tr = comb_tr["Fy"]
 
-    alpha_s3 = alpha_tr[mask_camber_all]
-    fz_s3 = fz_tr[mask_camber_all]
-    gamma_s3 = gamma_tr[mask_camber_all]
-    p_s3 = p_tr[mask_camber_all]
-    fy_s3 = fy_tr[mask_camber_all]
-    w_s3 = bin_weights_arr[mask_camber_all]
+    # ---- Stage 4: zero-camber Mz. QCZ1=1.65, QEZ1=0 fixed. Model Fx used.
+    names4 = ["QDZ1", "QDZ2", "QBZ1", "QBZ2", "QEZ2", "QHZ1", "QDZ6", "QDZ7"]
+    p04 = [0.15, -0.04, 6.0, 1.2, 0.90, 0.002, 0.002, 0.0]
+    b4 = ([0.05, -0.15, 2.0, -4.0, -0.5, -0.03, -0.05, -0.05], [0.35, 0.15, 15.0, 5.0, 2.0, 0.03, 0.05, 0.05])
+    a4, f4, g4, pp4, y4, w4 = alpha_tr[m2], fz_tr[m2], gamma_tr[m2], p_tr[m2], mz_tr[m2], w_all[m2]
+    comb4 = _sub(comb_tr, m2)
 
-    alpha_c0 = alpha_tr[mask_c0]
-    fz_c0 = fz_tr[mask_c0]
-    gamma_c0 = gamma_tr[mask_c0]
-    p_c0 = p_tr[mask_c0]
-    fy_c0 = fy_tr[mask_c0]
-    w_c0 = bin_weights_arr[mask_c0]
+    def r4(p):
+        cur = dict(fitted_fy)
+        cur.update(dict(zip(names4, p)))
+        cur.update({"QCZ1": 1.65, "QEZ1": 0.0, "QDZ8": 0.0, "QDZ3": 0.0})
+        return (Pacejka62Fitter.compute_mz(cur, a4, f4, g4, pp4, comb=comb4) - y4) * w4
 
-    def resid_stage3(p):
-        cur = {
-            "PCY1": 1.55, "PDY1": p_opt1[0], "PDY2": p_opt1[1],
-            "PKY1": p_opt1[2], "PKY2": p_opt1[3],
-            "PEY1": p_opt1[4], "PEY2": p_opt1[5],
-            "PHY1": p_opt1[6], "PVY1": p_opt1[7],
-            "PPY1": p_opt2[0], "PPY3": p_opt2[1],
-            "PVY3": p[0], "PVY4": p[1],
-            "PDY3": p[2], "PHY3": p[3], "PKY3": p[4],
-            "PEY4": 0.0
-        }
-        pred_sweep, _ = Pacejka62Fitter.compute_fy0(cur, alpha_s3, fz_s3, gamma=gamma_s3, p_kpa=p_s3)
-        err_sweep = (pred_sweep - fy_s3) * w_s3
-        pred_c0, _ = Pacejka62Fitter.compute_fy0(cur, alpha_c0, fz_c0, gamma=gamma_c0, p_kpa=p_c0)
-        err_c0 = (pred_c0 - fy_c0) * 5.0 * w_c0
-        return np.concatenate([err_sweep, err_c0])
+    print("\n>> Stage 4: pneumatic trail & residual torque at zero camber")
+    res4 = multistart_least_squares(r4, b4, p04, 6, f_scale=2.5, max_nfev=350)
+    po4 = res4.x
+    reports["stage4_trail_mz0"] = compute_stage_identifiability(res4, names4, "Stage 4: Mz0", p04, b4)
 
-    print("\n>> Optimizing Stage 3: Coupled camber formulation (PVY3, PVY4, PDY3, PHY3, PKY3, PEY4=0.0 fixed)...")
-    res_s3 = multistart_least_squares(resid_stage3, bounds_s3, p0_s3, num_starts=6, loss="soft_l1", f_scale=25.0, max_nfev=400)
-    p_opt3 = res_s3.x
-    stage_reports["stage3_camber_coupled"] = compute_stage_identifiability(res_s3, names_s3, "Stage 3: Coupled Camber Sensitivity", p0_s3, bounds_s3)
+    # ---- Stage 5: camber Mz. QDZ3 now enters as (1 + QDZ3|gamma|): sign flipped vs v1.
+    names5, p05, b5 = ["QDZ8", "QDZ3"], [1.2, 0.5], ([-3.0, -4.0], [10.0, 12.0])
+    base4 = dict(fitted_fy)
+    base4.update(dict(zip(names4, [float(v) for v in po4])))
+    base4.update({"QCZ1": 1.65, "QEZ1": 0.0})
 
-    fitted_fy_params = {
-        "PCY1": 1.55,
-        "PDY1": float(p_opt1[0]), "PDY2": float(p_opt1[1]),
-        "PKY1": float(p_opt1[2]), "PKY2": float(p_opt1[3]),
-        "PEY1": float(p_opt1[4]), "PEY2": float(p_opt1[5]),
-        "PHY1": float(p_opt1[6]), "PVY1": float(p_opt1[7]),
-        "PPY1": float(p_opt2[0]), "PPY3": float(p_opt2[1]),
-        "PVY3": float(p_opt3[0]), "PVY4": float(p_opt3[1]),
-        "PDY3": float(p_opt3[2]), "PEY4": 0.0,
-        "PHY3": float(p_opt3[3]), "PKY3": float(p_opt3[4]),
-        "PEY3": 0.0, "PEY5": 0.0, "PHY2": 0.0, "PVY2": 0.0,
-        "PPY2": 0.0, "PPY4": 0.0
-    }
+    def r5(p):
+        cur = dict(base4)
+        cur.update({"QDZ8": p[0], "QDZ3": p[1]})
+        return (Pacejka62Fitter.compute_mz(cur, alpha_tr, fz_tr, gamma_tr, p_tr, comb=comb_tr) - mz_tr) * w_all
 
-    pred_fy_tr, pred_svy_tr = Pacejka62Fitter.compute_fy0(fitted_fy_params, alpha_tr, fz_tr, gamma_tr, p_tr)
+    print("\n>> Stage 5: camber aligning torque")
+    res5 = multistart_least_squares(r5, b5, p05, 4, f_scale=2.5, max_nfev=250)
+    po5 = res5.x
+    reports["stage5_camber_mz"] = compute_stage_identifiability(res5, names5, "Stage 5: Camber Mz", p05, b5)
 
-    # ------------------------------------------------------------------
-    # Stage 4: Self-Aligning Torque Mz & Pneumatic Trail (at gamma = 0)
-    # Identifies: QDZ1, QDZ2, QBZ1, QBZ2, QEZ2, QHZ1, QDZ6, QDZ7
-    # NOTE: QCZ1 is fixed to 1.65 (canonical shape factor) and QEZ1 is fixed
-    # to 0.0 to resolve the extreme Bt/Ct/Et collinearity (cond drops by 10x).
-    # ------------------------------------------------------------------
-    names_s4 = ["QDZ1", "QDZ2", "QBZ1", "QBZ2", "QEZ2", "QHZ1", "QDZ6", "QDZ7"]
-    p0_s4 = [0.15, -0.04, 6.0, 1.2, 0.90, 0.002, 0.002, 0.0]
-    bounds_s4 = (
-        [0.05, -0.15,  2.0, -4.0, -0.5, -0.03, -0.05, -0.05],
-        [0.35,  0.15, 15.0,  5.0,  2.0,  0.03,  0.05,  0.05]
-    )
+    # ---- Stage 6: Mx. PPMX1 fixed (excitation below load-cell crosstalk).
+    names6, p06, b6 = ["QSX1", "QSX2", "QSX3"], [0.0, 2.0, 0.05], ([-0.1, 0.5, -0.1], [0.1, 4.0, 0.3])
 
-    alpha_s4 = alpha_tr[mask_c0_all_p]
-    fz_s4 = fz_tr[mask_c0_all_p]
-    p_s4 = p_tr[mask_c0_all_p]
-    mz_s4 = mz_tr[mask_c0_all_p]
-    fx_s4 = fx_tr[mask_c0_all_p]
-    fy_s4 = pred_fy_tr[mask_c0_all_p]
-    svy_s4 = pred_svy_tr[mask_c0_all_p]
-    w_s4 = bin_weights_arr[mask_c0_all_p]
+    def r6(p):
+        cur = dict(zip(names6, p))
+        cur["PPMX1"] = 0.0
+        return Pacejka62Fitter.compute_mx(cur, fz_tr, gamma_tr, pred_fy_tr, p_kpa=p_tr) - mx_tr
 
-    def resid_stage4(p):
-        cur = dict(fitted_fy_params)
-        cur.update({
-            "QDZ1": p[0], "QDZ2": p[1],
-            "QBZ1": p[2], "QBZ2": p[3],
-            "QCZ1": 1.65,
-            "QEZ1": 0.0, "QEZ2": p[4],
-            "QHZ1": p[5],
-            "QDZ6": p[6], "QDZ7": p[7],
-            "QDZ8": 0.0, "QDZ3": 0.0
-        })
-        pred = Pacejka62Fitter.compute_mz(cur, alpha_s4, fz_s4, gamma=0.0, p_kpa=p_s4, fx=fx_s4, fy_in=fy_s4, svy_in=svy_s4)
-        return (pred - mz_s4) * w_s4
+    print("\n>> Stage 6: overturning moment")
+    res6 = multistart_least_squares(r6, b6, p06, 4, f_scale=2.0, max_nfev=250)
+    po6 = res6.x
+    reports["stage6_overturning_mx"] = compute_stage_identifiability(res6, names6, "Stage 6: Mx", p06, b6)
 
-    print("\n>> Optimizing Stage 4: Zero-camber pneumatic trail & residual torque (QCZ1=1.65, QEZ1=0.0 fixed)...")
-    res_s4 = multistart_least_squares(resid_stage4, bounds_s4, p0_s4, num_starts=6, loss="soft_l1", f_scale=2.5, max_nfev=350)
-    p_opt4 = res_s4.x
-    stage_reports["stage4_trail_mz0"] = compute_stage_identifiability(res_s4, names_s4, "Stage 4: Aligning Torque Mz0 (QCZ1=1.65, QEZ1=0.0 fixed)", p0_s4, bounds_s4)
-
-    # ------------------------------------------------------------------
-    # Stage 5: Camber Aligning Torque Modulation & Camber Residual Torque
-    # Identifies: QDZ8, QDZ3
-    # ------------------------------------------------------------------
-    names_s5 = ["QDZ8", "QDZ3"]
-    p0_s5 = [1.2, 0.15]
-    bounds_s5 = ([-1.0, -0.5], [4.0, 1.0])
-
-    def resid_stage5(p):
-        cur = dict(fitted_fy_params)
-        cur.update({
-            "QDZ1": p_opt4[0], "QDZ2": p_opt4[1],
-            "QBZ1": p_opt4[2], "QBZ2": p_opt4[3],
-            "QCZ1": 1.65,
-            "QEZ1": 0.0, "QEZ2": p_opt4[4],
-            "QHZ1": p_opt4[5],
-            "QDZ6": p_opt4[6], "QDZ7": p_opt4[7],
-            "QDZ8": p[0], "QDZ3": p[1]
-        })
-        pred = Pacejka62Fitter.compute_mz(cur, alpha_tr, fz_tr, gamma=gamma_tr, p_kpa=p_tr, fx=fx_tr, fy_in=pred_fy_tr, svy_in=pred_svy_tr)
-        return (pred - mz_tr) * bin_weights_arr
-
-    print("\n>> Optimizing Stage 5: Camber aligning torque & camber residual torque...")
-    res_s5 = multistart_least_squares(resid_stage5, bounds_s5, p0_s5, num_starts=4, loss="soft_l1", f_scale=2.5, max_nfev=250)
-    p_opt5 = res_s5.x
-    stage_reports["stage5_camber_mz"] = compute_stage_identifiability(res_s5, names_s5, "Stage 5: Camber Mz", p0_s5, bounds_s5)
-
-    fitted_mz_params = {
-        "QDZ1": float(p_opt4[0]), "QDZ2": float(p_opt4[1]),
-        "QBZ1": float(p_opt4[2]), "QBZ2": float(p_opt4[3]),
-        "QCZ1": 1.65,
-        "QEZ1": 0.0, "QEZ2": float(p_opt4[4]),
-        "QHZ1": float(p_opt4[5]),
-        "QDZ6": float(p_opt4[6]), "QDZ7": float(p_opt4[7]),
-        "QDZ8": float(p_opt5[0]), "QDZ3": float(p_opt5[1]),
-        "QDZ9": 0.0, "QBZ3": 0.0, "QBZ4": 0.0, "QBZ5": 0.0,
-        "QBZ9": 8.0, "QBZ10": 0.0, "QEZ3": 0.0, "QEZ4": 0.0, "QEZ5": 0.0,
-        "QHZ2": 0.0, "QHZ3": 0.0, "QHZ4": 0.0, "PPZ1": 0.0, "PPZ2": 0.0,
-        "SSZ1": 0.0, "SSZ2": 0.04, "SSZ3": 0.01, "SSZ4": 0.0
-    }
-
-    # ------------------------------------------------------------------
-    # Stage 6: Overturning Moment Mx
-    # Identifies: QSX1, QSX2, QSX3
-    # NOTE: PPMX1 is fixed to 0.0 because pressure excitation in Mx (<0.15 Nm)
-    # is an order of magnitude smaller than load cell cross-talk/noise (2-3 Nm).
-    # ------------------------------------------------------------------
-    names_s6 = ["QSX1", "QSX2", "QSX3"]
-    p0_s6 = [0.0, 2.0, 0.05]
-    bounds_s6 = ([-0.1, 0.5, -0.1], [0.1, 4.0, 0.3])
-
-    def resid_stage6(p):
-        cur = {"QSX1": p[0], "QSX2": p[1], "QSX3": p[2], "PPMX1": 0.0}
-        pred = Pacejka62Fitter.compute_mx(cur, fz_tr, gamma_tr, pred_fy_tr, p_kpa=p_tr)
-        return pred - mx_tr
-
-    print("\n>> Optimizing Stage 6: Overturning moment Mx (PPMX1=0.0 fixed)...")
-    res_s6 = multistart_least_squares(resid_stage6, bounds_s6, p0_s6, num_starts=4, loss="soft_l1", f_scale=2.0, max_nfev=250)
-    p_opt6 = res_s6.x
-    stage_reports["stage6_overturning_mx"] = compute_stage_identifiability(res_s6, names_s6, "Stage 6: Overturning Moment Mx (PPMX1=0.0 fixed)", p0_s6, bounds_s6)
-
-    fitted_mx_params = {
-        "QSX1": float(p_opt6[0]), "QSX2": float(p_opt6[1]), "QSX3": float(p_opt6[2]),
-        "PPMX1": 0.0
-    }
-
-    # Literature FSAE defaults for unidentifiable longitudinal/combined parameters
-    literature_params = {
-        "PCX1": 1.55,
-        "PDX1": 2.30,
-        "PDX2": -0.32,
-        "PDX3": 0.0,
-        "PEX1": 0.35,
-        "PEX2": 0.10,
-        "PEX3": 0.0,
-        "PEX4": 0.0,
-        "PKX1": 46.0,
-        "PKX2": -0.12,
-        "PKX3": 0.0,
-        "PHX1": 0.0,
-        "PHX2": 0.0,
-        "PVX1": 0.0,
-        "PVX2": 0.0,
-        "PPX1": 0.0,
-        "PPX2": 0.0,
-        "PPX3": 0.0,
-        "PPX4": 0.0,
-        "RBX1": 12.0,
-        "RBX2": 10.0,
-        "RBX3": 0.0,
-        "RCX1": 1.05,
-        "REX1": 0.10,
-        "REX2": 0.0,
-        "RHX1": 0.0,
-        "RBY1": 9.5,
-        "RBY2": 8.0,
-        "RBY3": 0.0,
-        "RBY4": 0.0,
-        "RCY1": 1.02,
-        "REY1": 0.10,
-        "REY2": 0.0,
-        "RHY1": 0.0,
-        "RHY2": 0.0,
-        "RVY1": 0.0,
-        "RVY2": 0.0,
-        "RVY3": 0.0,
-        "RVY4": 0.0,
-        "QSY1": 0.015,
-        "QSY2": 0.0,
-        "QSY3": 0.001,
-        "QSY4": 0.0
-    }
-
+    # ---- Assemble
     all_params = {
         "MODEL_IDENTIFIER": f"Pacejka MF6.2 Hoosier 16.0x7.5-10 {compound_name}",
+        "SCHEMA_VERSION": SCHEMA_VERSION,
         "COMPOUND": compound_name,
-        "CALIBRATION_DATE": "2026-11-10",
+        "CALIBRATION_DATE": datetime.date.today().isoformat(),
         "FNOMIN": FNOMIN,
         "PINOM": PINOM,
-        "UNLOADED_RADIUS": vert_props["unloaded_radius_m"],
-        "VERTICAL_STIFFNESS": vert_props["linear_stiffness_n_m"],
-        "VERTICAL_STIFFNESS_ANALYSIS": vert_props,
-        "PARAMETER_CATEGORIZATION": {
-            "calibrated_from_ttc": list(fitted_fy_params.keys()) + list(fitted_mz_params.keys()) + list(fitted_mx_params.keys()),
-            "literature_fsae_reference": list(literature_params.keys()),
-            "unidentifiable_unsupported": {
-                "Drive_Brake_longitudinal_sweeps": "Cornering TTC dataset has spindle free-rolling (SR ~ -1, N ~ 0 rpm); pure longitudinal slip cannot be identified.",
-                "Combined_slip_Fx_Fy_sweeps": "TTC cornering tests maintain zero traction/braking torque; combined slip factors cannot be identified.",
-                "Rolling_resistance_torque_My": "TTC test spindle does not record wheel hub drag torque My."
-            }
-        }
+        "UNLOADED_RADIUS": R0_MODEL,
+        "R0_SPRING_FIT_M": vert["intercept_radius_m_extrapolated"],
+        "VERTICAL_STIFFNESS": vert["linear_stiffness_n_m"],
+        "FZ_VALID_MAX": float(np.percentile(fz_tr, 99.5)),
+        "VERTICAL_STIFFNESS_ANALYSIS": vert,
     }
-    all_params.update(fitted_fy_params)
-    all_params.update(fitted_mz_params)
-    all_params.update(fitted_mx_params)
-    all_params.update(literature_params)
+    all_params.update(ALL_DEFAULTS)
+    all_params.update(fitted_fy)
+    all_params.update({"QDZ8": float(po5[0]), "QDZ3": float(po5[1]), "QCZ1": 1.65, "QEZ1": 0.0})
+    all_params.update(dict(zip(names4, [float(v) for v in po4])))
+    all_params.update(dict(zip(names6, [float(v) for v in po6])))
+    all_params["PPMX1"] = 0.0
+    fitted_keys = list(names1) + ["PCY1"] + names2 + names3 + ["PEY4"] + names4 + names5 + names6
+    all_params["PARAMETER_CATEGORIZATION"] = {
+        "calibrated_from_ttc": fitted_keys,
+        "literature_fsae_reference": LITERATURE_KEYS,
+        "unidentifiable_unsupported": {
+            "Drive_Brake_longitudinal": "Cornering TTC runs are free-rolling; pure longitudinal slip cannot be identified.",
+            "Combined_slip": "No traction/braking torque in TTC cornering tests; combined-slip factors are literature values.",
+            "Rolling_resistance_My": "TTC spindle does not record hub drag torque.",
+            "Surface_scaling": "No lambda_mu factors: flat-trac grip is used as-is (overestimates asphalt grip).",
+        },
+    }
 
-    # ------------------------------------------------------------------
-    # Stage 7: Joint Refinement Comparison (Staged vs Joint Refined)
-    # ------------------------------------------------------------------
-    print("\n>> Executing Stage 7: Joint refinement of identifiable parameters...")
-    joint_names = ["PDY1", "PDY2", "PKY1", "PKY2", "PEY1", "PEY2", "PVY3", "PVY4", "PDY3", "PHY3", "PKY3", "QDZ1", "QDZ2", "QBZ1", "QEZ2", "QDZ8"]
-    p0_joint = [all_params[n] for n in joint_names]
+    # ---- Stage 7: staged vs joint, decided by blocked CV inside TRAIN (validation untouched).
+    print("\n>> Stage 7: joint refinement, blocked CV on train")
+    joint_names = ["PDY1", "PDY2", "PKY1", "PKY2", "PEY1", "PEY2", "PVY3", "PVY4", "PDY3", "PHY3", "PKY3",
+                   "QDZ1", "QDZ2", "QBZ1", "QEZ2", "QDZ8"]
+    p0j = np.array([all_params[n] for n in joint_names], dtype=float)
+    delta = np.maximum(0.15 * np.abs(p0j), 1e-3)
+    bj = (p0j - delta, p0j + delta)
 
-    def joint_resid(p):
-        cur = dict(all_params)
-        for i, n in enumerate(joint_names):
-            cur[n] = p[i]
-        pred_fy, pred_svy = Pacejka62Fitter.compute_fy0(cur, alpha_tr, fz_tr, gamma_tr, p_tr)
-        pred_mz = Pacejka62Fitter.compute_mz(cur, alpha_tr, fz_tr, gamma_tr, p_tr, fx=fx_tr, fy_in=pred_fy, svy_in=pred_svy)
+    def factory(sl):
+        def f(p):
+            cur = dict(all_params)
+            cur.update(zip(joint_names, p))
+            fy, mz, _ = evaluate_pure_slip(cur, alpha_tr[sl], fz_tr[sl], gamma_tr[sl], p_tr[sl])
+            return np.concatenate([(fy - fy_tr[sl]) / 25.0 * w_all[sl], (mz - mz_tr[sl]) / 2.5 * w_all[sl]])
+        return f
 
-        res_fy = (pred_fy - fy_tr) / 25.0 * bin_weights_arr
-        res_mz = (pred_mz - mz_tr) / 2.5 * bin_weights_arr
-        return np.concatenate([res_fy, res_mz])
+    def robust(r):
+        return float(np.sum(2.0 * (np.sqrt(1.0 + r * r) - 1.0)))
 
-    bounds_joint_lb = [p0_joint[i] * 0.85 if p0_joint[i] > 0 else p0_joint[i] * 1.15 for i in range(len(p0_joint))]
-    bounds_joint_ub = [p0_joint[i] * 1.15 if p0_joint[i] > 0 else p0_joint[i] * 0.85 for i in range(len(p0_joint))]
-    for i in range(len(p0_joint)):
-        if bounds_joint_lb[i] > bounds_joint_ub[i]:
-            bounds_joint_lb[i], bounds_joint_ub[i] = bounds_joint_ub[i], bounds_joint_lb[i]
+    n = len(alpha_tr)
+    edges = np.linspace(0, n, JOINT_CV_FOLDS + 1).astype(int)
+    cv_staged, cv_joint = [], []
+    for k in range(JOINT_CV_FOLDS):
+        held = np.zeros(n, dtype=bool)
+        held[edges[k]:edges[k + 1]] = True
+        rk = least_squares(factory(~held), p0j, bounds=bj, loss="soft_l1", f_scale=1.0, method="trf",
+                           x_scale="jac", max_nfev=120)
+        f_held = factory(held)
+        cv_staged.append(robust(f_held(p0j)) / held.sum())
+        cv_joint.append(robust(f_held(rk.x)) / held.sum())
+    cv_s, cv_j = float(np.mean(cv_staged)), float(np.mean(cv_joint))
+    adopt = cv_j < 0.99 * cv_s
+    print(f"   Held-out robust cost/sample: staged {cv_s:.4f} | joint {cv_j:.4f} -> "
+          f"{'ADOPT joint (refit on all train)' if adopt else 'KEEP staged'}")
+    if adopt:
+        rj = least_squares(factory(np.ones(n, dtype=bool)), p0j, bounds=bj, loss="soft_l1", f_scale=1.0,
+                           method="trf", x_scale="jac", max_nfev=350)
+        for nme, v in zip(joint_names, rj.x):
+            all_params[nme] = float(v)
+    reports["stage7_joint_cv"] = {"cv_cost_staged": cv_staged, "cv_cost_joint": cv_joint, "adopted_joint": bool(adopt),
+                                  "note": "staged params were fit on all train rows, so the comparison is biased toward staged"}
 
-    cost_before = np.sum(joint_resid(p0_joint) ** 2)
-    res_joint = least_squares(joint_resid, p0_joint, bounds=(bounds_joint_lb, bounds_joint_ub), loss="soft_l1", f_scale=1.0, method="trf", max_nfev=350)
-    cost_after = np.sum(joint_resid(res_joint.x) ** 2)
-    print(f"   Joint refinement objective: {cost_before:.2f} -> {cost_after:.2f}")
+    # ---- Evaluation
+    print("\n>> Evaluating Train / Independent Validation")
+    evals = {}
+    for subset, df_sub in [("Train", df_train), ("Independent_Validation", df_val)]:
+        a, fz, g, pk, vx = (df_sub[c].values for c in ("alpha", "f_z", "gamma", "p_kpa", "v_x"))
+        fy_e, mz_e, mx_e = (df_sub[c].values for c in ("f_y", "m_z", "m_x"))
+        fy_p, mz_p, _ = evaluate_pure_slip(all_params, a, fz, g, pk)
+        mx_p = Pacejka62Fitter.compute_mx(all_params, fz, g, fy_p, p_kpa=pk)
+        efy, emz = fy_p - fy_e, mz_p - mz_e
+        sl = {}
+        for lo, hi, nm in [(0.0, 3.0, "Linear (|alpha| <= 3 deg)"), (3.0, 8.0, "Transitional (3-8 deg)"),
+                           (8.0, 15.0, "Saturation (>8 deg)")]:
+            s = _slice(efy, emz, (np.abs(a) >= np.radians(lo)) & (np.abs(a) < np.radians(hi)), 50)
+            if s:
+                sl[nm] = s
+        sf = {}
+        for lo, hi, nm in [(100, 330, "Load 1 (~220 N)"), (330, 550, "Load 2 (~440 N)"), (550, 770, "Load 3 (~665 N)"),
+                           (770, 990, "Load 4 (~885 N)"), (990, 1400, "Load 5 (~1110 N)")]:
+            s = _slice(efy, emz, (fz >= lo) & (fz < hi), 100)
+            if s:
+                sf[nm] = s
+        sg = {}
+        for c in (0.0, 2.0, 4.0):
+            s = _slice(efy, emz, np.abs(df_sub["ia_deg"].values - c) < 0.5, 100)
+            if s:
+                sg[f"Camber {c} deg"] = s
+        sv = {}
+        for lo, hi, nm in [(5.0, 9.0, "Low speed (~24 km/h) [extrapolated]"), (9.0, 14.0, "Nominal (~40 km/h)"),
+                           (14.0, 22.0, "High speed (~72 km/h) [extrapolated]")]:
+            s = _slice(efy, emz, (vx >= lo) & (vx < hi), 100)
+            if s:
+                sv[nm] = s
+        evals[subset] = {"num_samples": len(df_sub), "fy": _err_block(efy, fy_e), "mz": _err_block(emz, mz_e),
+                         "mx": _err_block(mx_p - mx_e, mx_e), "sliced_by_slip_region": sl, "sliced_by_load": sf,
+                         "sliced_by_camber": sg, "sliced_by_speed": sv}
+        e = evals[subset]
+        print(f"  [{subset}] Fy RMSE {e['fy']['rmse']:.1f} N (bias {e['fy']['bias']:+.1f}, R2 {e['fy']['r2']:.4f}) | "
+              f"Mz RMSE {e['mz']['rmse']:.2f} Nm (R2 {e['mz']['r2']:.4f}) | Mx RMSE {e['mx']['rmse']:.2f} Nm")
 
-    if cost_after < cost_before:
-        print("   Adopting joint refined parameters (improved multi-objective cost).")
-        for i, n in enumerate(joint_names):
-            all_params[n] = float(res_joint.x[i])
-    else:
-        print("   Retaining staged parameters (staged solution maintained optimal balance).")
+    all_params["CALIBRATION_ID"] = calibration_id(all_params)
 
-    # ------------------------------------------------------------------
-    # Quantitative Evaluation on Training & Independent Validation Sets
-    # ------------------------------------------------------------------
-    print("\n>> Evaluating quantitative metrics on Train & Independent Validation sets...")
-    eval_results = {}
-    for subset_name, df_sub in [("Train", df_train), ("Independent_Validation", df_val)]:
-        a_sub = df_sub["alpha"].values
-        fz_sub = df_sub["f_z"].values
-        g_sub = df_sub["gamma"].values
-        p_sub = df_sub["p_kpa"].values
-        v_sub = df_sub["v_x"].values
-        fy_exp = df_sub["f_y"].values
-        mz_exp = df_sub["m_z"].values
-        mx_exp = df_sub["m_x"].values
-        fx_sub = df_sub["f_x"].values
-
-        fy_pred, svy_pred = Pacejka62Fitter.compute_fy0(all_params, a_sub, fz_sub, g_sub, p_sub)
-        mz_pred = Pacejka62Fitter.compute_mz(all_params, a_sub, fz_sub, g_sub, p_sub, fx=fx_sub, fy_in=fy_pred, svy_in=svy_pred)
-        mx_pred = Pacejka62Fitter.compute_mx(all_params, fz_sub, g_sub, fy_pred, p_kpa=p_sub)
-
-        # Fy Metrics
-        err_fy = fy_pred - fy_exp
-        rmse_fy = float(np.sqrt(np.mean(err_fy ** 2)))
-        mae_fy = float(np.mean(np.abs(err_fy)))
-        max_fy = float(np.max(np.abs(err_fy)))
-        bias_fy = float(np.mean(err_fy))
-        range_fy = max(float(np.max(fy_exp) - np.min(fy_exp)), 1e-4)
-        nrmse_fy = float(rmse_fy / range_fy * 100.0)
-        ss_tot_fy = max(float(np.sum((fy_exp - np.mean(fy_exp)) ** 2)), 1e-6)
-        r2_fy = float(1.0 - (np.sum(err_fy ** 2) / ss_tot_fy))
-
-        # Mz Metrics
-        err_mz = mz_pred - mz_exp
-        rmse_mz = float(np.sqrt(np.mean(err_mz ** 2)))
-        mae_mz = float(np.mean(np.abs(err_mz)))
-        max_mz = float(np.max(np.abs(err_mz)))
-        bias_mz = float(np.mean(err_mz))
-        range_mz = max(float(np.max(mz_exp) - np.min(mz_exp)), 1e-4)
-        nrmse_mz = float(rmse_mz / range_mz * 100.0)
-        ss_tot_mz = max(float(np.sum((mz_exp - np.mean(mz_exp)) ** 2)), 1e-6)
-        r2_mz = float(1.0 - (np.sum(err_mz ** 2) / ss_tot_mz))
-
-        # Mx Metrics
-        err_mx = mx_pred - mx_exp
-        rmse_mx = float(np.sqrt(np.mean(err_mx ** 2)))
-        mae_mx = float(np.mean(np.abs(err_mx)))
-        max_mx = float(np.max(np.abs(err_mx)))
-        bias_mx = float(np.mean(err_mx))
-        range_mx = max(float(np.max(mx_exp) - np.min(mx_exp)), 1e-4)
-        nrmse_mx = float(rmse_mx / range_mx * 100.0)
-        ss_tot_mx = max(float(np.sum((mx_exp - np.mean(mx_exp)) ** 2)), 1e-6)
-        r2_mx = float(1.0 - (np.sum(err_mx ** 2) / ss_tot_mx))
-
-        # Sliced metrics: Slip angle regions
-        slip_intervals = [
-            (0.0, np.radians(3.0), "Linear (|alpha| <= 3 deg)"),
-            (np.radians(3.0), np.radians(8.0), "Transitional (3 deg < |alpha| <= 8 deg)"),
-            (np.radians(8.0), np.radians(15.0), "Saturation / post-peak (|alpha| > 8 deg)")
-        ]
-        sliced_slip = {}
-        for a_lo, a_hi, sname in slip_intervals:
-            s_mask = (np.abs(a_sub) >= a_lo) & (np.abs(a_sub) < a_hi)
-            if np.sum(s_mask) > 50:
-                sliced_slip[sname] = {
-                    "count": int(np.sum(s_mask)),
-                    "rmse_fy_n": float(np.sqrt(np.mean(err_fy[s_mask] ** 2))),
-                    "mae_fy_n": float(np.mean(np.abs(err_fy[s_mask]))),
-                    "rmse_mz_nm": float(np.sqrt(np.mean(err_mz[s_mask] ** 2))),
-                    "mae_mz_nm": float(np.mean(np.abs(err_mz[s_mask])))
-                }
-
-        # Sliced metrics: 5 physical test load levels
-        fz_bins = [
-            (100, 330, "Load Level 1 (~220 N)"),
-            (330, 550, "Load Level 2 (~440 N)"),
-            (550, 770, "Load Level 3 (~665 N)"),
-            (770, 990, "Load Level 4 (~885 N)"),
-            (990, 1400, "Load Level 5 (~1110 N)")
-        ]
-        sliced_fz = {}
-        for fz_l, fz_h, bname in fz_bins:
-            b_mask = (fz_sub >= fz_l) & (fz_sub < fz_h)
-            if np.sum(b_mask) > 100:
-                sliced_fz[bname] = {
-                    "count": int(np.sum(b_mask)),
-                    "rmse_fy_n": float(np.sqrt(np.mean(err_fy[b_mask] ** 2))),
-                    "mae_fy_n": float(np.mean(np.abs(err_fy[b_mask]))),
-                    "rmse_mz_nm": float(np.sqrt(np.mean(err_mz[b_mask] ** 2))),
-                    "mae_mz_nm": float(np.mean(np.abs(err_mz[b_mask])))
-                }
-
-        # Sliced metrics: Camber
-        sliced_gamma = {}
-        for c_deg in [0.0, 2.0, 4.0]:
-            g_mask = np.abs(df_sub["ia_deg"].values - c_deg) < 0.5
-            if np.sum(g_mask) > 100:
-                sliced_gamma[f"Camber {c_deg} deg"] = {
-                    "count": int(np.sum(g_mask)),
-                    "rmse_fy_n": float(np.sqrt(np.mean(err_fy[g_mask] ** 2))),
-                    "mae_fy_n": float(np.mean(np.abs(err_fy[g_mask]))),
-                    "rmse_mz_nm": float(np.sqrt(np.mean(err_mz[g_mask] ** 2)))
-                }
-
-        # Sliced metrics: Speed (interpolated vs extrapolated)
-        sliced_v = {}
-        for v_l, v_h, vname in [(5.0, 9.0, "Low speed (~24 km/h) [extrapolated]"), (9.0, 14.0, "Nominal speed (~40 km/h) [interpolated]"), (14.0, 22.0, "High speed (~72 km/h) [extrapolated]")]:
-            v_mask = (v_sub >= v_l) & (v_sub < v_h)
-            if np.sum(v_mask) > 100:
-                sliced_v[vname] = {
-                    "count": int(np.sum(v_mask)),
-                    "rmse_fy_n": float(np.sqrt(np.mean(err_fy[v_mask] ** 2))),
-                    "mae_fy_n": float(np.mean(np.abs(err_fy[v_mask]))),
-                    "rmse_mz_nm": float(np.sqrt(np.mean(err_mz[v_mask] ** 2)))
-                }
-
-        eval_results[subset_name] = {
-            "num_samples": len(df_sub),
-            "fy": {"rmse_n": rmse_fy, "nrmse_pct": nrmse_fy, "mae_n": mae_fy, "max_err_n": max_fy, "bias_n": bias_fy, "r2": r2_fy},
-            "mz": {"rmse_nm": rmse_mz, "nrmse_pct": nrmse_mz, "mae_nm": mae_mz, "max_err_nm": max_mz, "bias_nm": bias_mz, "r2": r2_mz},
-            "mx": {"rmse_nm": rmse_mx, "nrmse_pct": nrmse_mx, "mae_nm": mae_mx, "max_err_nm": max_mx, "bias_nm": bias_mx, "r2": r2_mx},
-            "sliced_by_slip_region": sliced_slip,
-            "sliced_by_load": sliced_fz,
-            "sliced_by_camber": sliced_gamma,
-            "sliced_by_speed": sliced_v
-        }
-
-        print(f"  [{subset_name} Set ({len(df_sub)} points)]")
-        print(f"    Fy: RMSE = {rmse_fy:6.2f} N  | MAE = {mae_fy:6.2f} N  | Max = {max_fy:6.2f} N  | NRMSE = {nrmse_fy:4.2f}% | R^2 = {r2_fy:.4f} | Bias = {bias_fy:+.2f} N")
-        print(f"    Mz: RMSE = {rmse_mz:6.2f} Nm | MAE = {mae_mz:6.2f} Nm | Max = {max_mz:6.2f} Nm | NRMSE = {nrmse_mz:4.2f}% | R^2 = {r2_mz:.4f} | Bias = {bias_mz:+.2f} Nm")
-        print(f"    Mx: RMSE = {rmse_mx:6.2f} Nm | MAE = {mae_mx:6.2f} Nm | Max = {max_mx:6.2f} Nm | NRMSE = {nrmse_mx:4.2f}% | R^2 = {r2_mx:.4f} | Bias = {bias_mx:+.2f} Nm")
-
-    # Export parameter JSON
-    out_param_file = os.path.join(MF62_DIR, f"hoosier_16x7.5_10_{compound_name.lower()}_mf62.json")
-    with open(out_param_file, "w") as fp:
+    os.makedirs(MF62_DIR, exist_ok=True)
+    os.makedirs(VALIDATION_DIR, exist_ok=True)
+    out = os.path.join(MF62_DIR, f"hoosier_16x7.5_10_{compound_name.lower()}_mf62.json")
+    with open(out, "w") as fp:
         json.dump(all_params, fp, indent=2)
-    print(f"\n>> Saved calibrated parameters: {out_param_file}")
-
-    # Export calibration report
-    rep_file = os.path.join(VALIDATION_DIR, f"calibration_report_{compound_name.lower()}.json")
-    with open(rep_file, "w") as fp:
-        json.dump({
-            "compound": compound_name,
-            "identifiability_stages": stage_reports,
-            "evaluation": eval_results
-        }, fp, indent=2)
-    print(f">> Saved detailed calibration report: {rep_file}")
-
-    return all_params, eval_results
+    print(f"\n>> Saved {out}  [CALIBRATION_ID {all_params['CALIBRATION_ID']}]")
+    
+    # Export canonical .tir file
+    tir_out = os.path.join(MF62_DIR, f"hoosier_16x7.5_10_{compound_name.lower()}.tir")
+    export_tir(all_params, tir_out)
+    
+    with open(os.path.join(VALIDATION_DIR, f"calibration_report_{compound_name.lower()}.json"), "w") as fp:
+        json.dump({"compound": compound_name, "calibration_id": all_params["CALIBRATION_ID"],
+                   "identifiability_stages": reports, "evaluation": evals}, fp, indent=2)
+    return all_params, evals
 
 
 def main():
-    print("=" * 78)
-    print("   STARTING MF 6.2 CALIBRATION ENGINE (R25B & R20)")
-    print("=" * 78)
-
-    # 1. Fit Round 8 (R25B)
-    r25b_tr = pd.read_csv(os.path.join(PROCESSED_DIR, "R25B_train.csv"))
-    r25b_val = pd.read_csv(os.path.join(PROCESSED_DIR, "R25B_val.csv"))
-    r25b_spring_path = os.path.join(PROCESSED_DIR, "R25B_spring.csv")
-    params_r25b, res_r25b = fit_mf62_compound("R25B", r25b_tr, r25b_val, r25b_spring_path)
-
-    # 2. Fit Round 9 (R20)
-    r20_tr = pd.read_csv(os.path.join(PROCESSED_DIR, "R20_train.csv"))
-    r20_val = pd.read_csv(os.path.join(PROCESSED_DIR, "R20_val.csv"))
-    r20_spring_path = os.path.join(PROCESSED_DIR, "R20_spring.csv")
-    params_r20, res_r20 = fit_mf62_compound("R20", r20_tr, r20_val, r20_spring_path)
-
-    # 3. Export default parameter file (R25B primary compound)
+    print("=" * 78 + "\n   MF 6.2 CALIBRATION ENGINE (R25B & R20), schema v%d\n" % SCHEMA_VERSION + "=" * 78)
+    os.makedirs(MF62_DIR, exist_ok=True)
+    os.makedirs(VALIDATION_DIR, exist_ok=True)
+    params = {}
+    for comp in ("R25B", "R20"):
+        tr = pd.read_csv(os.path.join(PROCESSED_DIR, f"{comp}_train.csv"))
+        va = pd.read_csv(os.path.join(PROCESSED_DIR, f"{comp}_val.csv"))
+        params[comp], _ = fit_mf62_compound(comp, tr, va, os.path.join(PROCESSED_DIR, f"{comp}_spring.csv"))
     default_path = os.path.join(MF62_DIR, "hoosier_16x7.5_10_mf62.json")
     with open(default_path, "w") as fp:
-        json.dump(params_r25b, fp, indent=2)
-    print(f"\n>> Exported default parameter file: {default_path}")
-    print("=" * 78)
+        json.dump(params["R25B"], fp, indent=2)
+    default_tir = os.path.join(MF62_DIR, "hoosier_16x7.5_10.tir")
+    export_tir(params["R25B"], default_tir)
+    print(f"\n>> Default parameter file (R25B): {default_path}")
 
 
 if __name__ == "__main__":
