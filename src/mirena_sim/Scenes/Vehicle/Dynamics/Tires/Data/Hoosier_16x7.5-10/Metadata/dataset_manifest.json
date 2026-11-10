@@ -1,127 +1,311 @@
 {
-  "tire_model": "Hoosier 16.0x7.5-10",
+  "tire_specification": "Hoosier 16.0x7.5-10, 8.0-inch rim",
+  "nominal_conditions": {
+    "fnomin_n": 800.0,
+    "pinom_kpa": 83.0,
+    "unloaded_radius_m": 0.2032,
+    "reference_speed_mps": 11.11
+  },
+  "coordinate_conventions": {
+    "frame": "ISO 8855 / target vehicle simulation",
+    "x_axis": "+X forward",
+    "y_axis": "+Y left",
+    "z_axis": "+Z upward",
+    "normal_force": "f_z = -FZ (compressive normal load positive, N)",
+    "lateral_force": "f_y = -FY (positive slip produces positive lateral force, N)",
+    "aligning_torque": "m_z = -MZ (restoring moment about upward Z is negative, Nm)",
+    "camber_angle": "gamma = -radians(IA) (wheel tilt left is positive, rad)"
+  },
   "datasets": {
     "R25B_train": {
       "file": "R25B_train.csv",
       "compound": "R25B",
-      "type": "cornering_train",
-      "rows": 59842,
-      "fz_range_n": [
-        150.09,
-        1194.77
-      ],
-      "alpha_range_deg": [
-        -12.174,
-        12.212
-      ],
-      "gamma_range_deg": [
-        -0.035,
-        4.029
-      ],
-      "pressure_range_kpa": [
-        67.84,
-        99.2
-      ],
-      "velocity_range_mps": [
-        11.130555555555555,
-        11.213888888888889
-      ],
-      "description": "Round 8 R25B Cornering test at 40 kph, multi-load, multi-camber, multi-pressure"
+      "round": 8,
+      "run": 6,
+      "category": "cornering_calibration",
+      "is_cornering_calibration": true,
+      "statistics": {
+        "raw_samples": 59945,
+        "retained_samples": 59753,
+        "retained_pct": 99.67970639753106,
+        "rejected_by_velocity": 0,
+        "rejected_by_normal_load": 0,
+        "rejected_by_turnaround_transient": 192,
+        "num_sweeps": 48,
+        "operating_ranges": {
+          "fz_range_n": [
+            136.99,
+            1194.77
+          ],
+          "alpha_range_deg": [
+            -12.174,
+            12.204
+          ],
+          "gamma_range_deg": [
+            -4.029,
+            0.035
+          ],
+          "pressure_range_kpa": [
+            67.84,
+            99.2
+          ],
+          "velocity_range_mps": [
+            11.130555555555555,
+            11.213888888888889
+          ],
+          "fx_range_n": [
+            -90.56,
+            55.94
+          ],
+          "fy_range_n": [
+            -2818.36,
+            3027.96
+          ],
+          "mz_range_nm": [
+            -84.68,
+            72.31
+          ],
+          "mx_range_nm": [
+            -73.68,
+            56.25
+          ]
+        }
+      },
+      "description": "Round 8 R25B Cornering calibration test at 40 kph (multi-load, multi-camber, multi-pressure)"
     },
     "R25B_val": {
       "file": "R25B_val.csv",
       "compound": "R25B",
-      "type": "cornering_val",
-      "rows": 52288,
-      "fz_range_n": [
-        150.0,
-        1200.96
-      ],
-      "alpha_range_deg": [
-        -12.208,
-        12.245
-      ],
-      "gamma_range_deg": [
-        -0.032,
-        4.027
-      ],
-      "pressure_range_kpa": [
-        53.63,
-        85.49
-      ],
-      "velocity_range_mps": [
-        6.675,
-        20.150000000000002
-      ],
-      "description": "Round 8 R25B Cornering test with speed sweeps (24-72 kph) & pressure sweeps"
-    },
-    "R20_train": {
-      "file": "R20_train.csv",
-      "compound": "R20",
-      "type": "cornering_train",
-      "rows": 61020,
-      "fz_range_n": [
-        189.63,
-        1188.52
-      ],
-      "alpha_range_deg": [
-        -12.249,
-        12.282
-      ],
-      "gamma_range_deg": [
-        -0.015,
-        4.02
-      ],
-      "pressure_range_kpa": [
-        66.02,
-        97.43
-      ],
-      "velocity_range_mps": [
-        11.119444444444445,
-        11.225
-      ],
-      "description": "Round 9 R20 Cornering test at 40 kph, multi-load, multi-camber, multi-pressure"
-    },
-    "R20_val": {
-      "file": "R20_val.csv",
-      "compound": "R20",
-      "type": "cornering_val",
-      "rows": 52322,
-      "fz_range_n": [
-        187.32,
-        1207.14
-      ],
-      "alpha_range_deg": [
-        -12.306,
-        12.385
-      ],
-      "gamma_range_deg": [
-        -0.016,
-        4.019
-      ],
-      "pressure_range_kpa": [
-        51.1,
-        84.53
-      ],
-      "velocity_range_mps": [
-        6.663888888888888,
-        20.172222222222224
-      ],
-      "description": "Round 9 R20 Cornering test with speed sweeps (24-72 kph) & low pressure"
+      "round": 8,
+      "run": 7,
+      "category": "cornering_validation",
+      "is_cornering_calibration": false,
+      "statistics": {
+        "raw_samples": 52462,
+        "retained_samples": 52294,
+        "retained_pct": 99.67976821318287,
+        "rejected_by_velocity": 0,
+        "rejected_by_normal_load": 0,
+        "rejected_by_turnaround_transient": 168,
+        "num_sweeps": 42,
+        "operating_ranges": {
+          "fz_range_n": [
+            118.97,
+            1200.96
+          ],
+          "alpha_range_deg": [
+            -12.208,
+            12.245
+          ],
+          "gamma_range_deg": [
+            -4.027,
+            0.032
+          ],
+          "pressure_range_kpa": [
+            53.63,
+            85.49
+          ],
+          "velocity_range_mps": [
+            6.675,
+            20.150000000000002
+          ],
+          "fx_range_n": [
+            -106.91,
+            57.61
+          ],
+          "fy_range_n": [
+            -2717.55,
+            2941.4
+          ],
+          "mz_range_nm": [
+            -94.52,
+            78.18
+          ],
+          "mx_range_nm": [
+            -77.62,
+            58.33
+          ]
+        }
+      },
+      "description": "Round 8 R25B Independent cornering validation test with speed sweeps (24-72 kph) & low pressure"
     },
     "R25B_spring": {
       "file": "R25B_spring.csv",
       "compound": "R25B",
-      "type": "spring_rate",
-      "rows": 58687,
-      "description": "Round 8 R25B Vertical deflection and spring rate characterization"
+      "round": 8,
+      "run": 5,
+      "category": "vertical_characterization",
+      "is_cornering_calibration": false,
+      "statistics": {
+        "raw_samples": 58739,
+        "retained_samples": 42333,
+        "retained_pct": 72.06966410732221,
+        "operating_ranges": {
+          "fz_range_n": [
+            59.79,
+            1253.46
+          ],
+          "rl_range_m": [
+            0.18739999999999998,
+            0.2005
+          ],
+          "pressure_range_kpa": [
+            67.94,
+            99.05
+          ]
+        }
+      },
+      "description": "Round 8 R25B Vertical load-deflection and radial stiffness characterization"
+    },
+    "R20_train": {
+      "file": "R20_train.csv",
+      "compound": "R20",
+      "round": 9,
+      "run": 8,
+      "category": "cornering_calibration",
+      "is_cornering_calibration": true,
+      "statistics": {
+        "raw_samples": 61020,
+        "retained_samples": 60824,
+        "retained_pct": 99.67879383808588,
+        "rejected_by_velocity": 0,
+        "rejected_by_normal_load": 0,
+        "rejected_by_turnaround_transient": 196,
+        "num_sweeps": 49,
+        "operating_ranges": {
+          "fz_range_n": [
+            189.63,
+            1188.52
+          ],
+          "alpha_range_deg": [
+            -12.249,
+            12.282
+          ],
+          "gamma_range_deg": [
+            -4.02,
+            0.015
+          ],
+          "pressure_range_kpa": [
+            66.02,
+            97.43
+          ],
+          "velocity_range_mps": [
+            11.119444444444445,
+            11.225
+          ],
+          "fx_range_n": [
+            -100.11,
+            92.55
+          ],
+          "fy_range_n": [
+            -2755.68,
+            2793.2
+          ],
+          "mz_range_nm": [
+            -96.18,
+            65.5
+          ],
+          "mx_range_nm": [
+            -74.48,
+            50.09
+          ]
+        }
+      },
+      "description": "Round 9 R20 Cornering calibration test at 40 kph (multi-load, multi-camber, multi-pressure)"
+    },
+    "R20_val": {
+      "file": "R20_val.csv",
+      "compound": "R20",
+      "round": 9,
+      "run": 9,
+      "category": "cornering_validation",
+      "is_cornering_calibration": false,
+      "statistics": {
+        "raw_samples": 52322,
+        "retained_samples": 52154,
+        "retained_pct": 99.67891135659951,
+        "rejected_by_velocity": 0,
+        "rejected_by_normal_load": 0,
+        "rejected_by_turnaround_transient": 168,
+        "num_sweeps": 42,
+        "operating_ranges": {
+          "fz_range_n": [
+            187.32,
+            1207.14
+          ],
+          "alpha_range_deg": [
+            -12.306,
+            12.385
+          ],
+          "gamma_range_deg": [
+            -4.019,
+            0.016
+          ],
+          "pressure_range_kpa": [
+            51.1,
+            84.53
+          ],
+          "velocity_range_mps": [
+            6.663888888888888,
+            20.172222222222224
+          ],
+          "fx_range_n": [
+            -100.65,
+            86.65
+          ],
+          "fy_range_n": [
+            -2724.54,
+            2891.08
+          ],
+          "mz_range_nm": [
+            -114.32,
+            84.67
+          ],
+          "mx_range_nm": [
+            -76.2,
+            59.48
+          ]
+        }
+      },
+      "description": "Round 9 R20 Independent cornering validation test with speed sweeps (24-72 kph) & low pressure"
     },
     "R20_spring": {
       "file": "R20_spring.csv",
       "compound": "R20",
-      "type": "spring_rate",
-      "rows": 58707,
-      "description": "Round 9 R20 Vertical deflection and spring rate characterization"
+      "round": 9,
+      "run": 7,
+      "category": "vertical_characterization",
+      "is_cornering_calibration": false,
+      "statistics": {
+        "raw_samples": 58762,
+        "retained_samples": 40987,
+        "retained_pct": 69.75085939893128,
+        "operating_ranges": {
+          "fz_range_n": [
+            52.15,
+            1247.48
+          ],
+          "rl_range_m": [
+            0.1887,
+            0.2006
+          ],
+          "pressure_range_kpa": [
+            67.54,
+            100.11
+          ]
+        }
+      },
+      "description": "Round 9 R20 Vertical load-deflection and radial stiffness characterization"
+    }
+  },
+  "summary": {
+    "total_cornering_rows": 225025,
+    "total_vertical_spring_rows": 83320,
+    "cornering_rows_breakdown": {
+      "R25B_train": 59753,
+      "R25B_val": 52294,
+      "R20_train": 60824,
+      "R20_val": 52154
     }
   }
 }

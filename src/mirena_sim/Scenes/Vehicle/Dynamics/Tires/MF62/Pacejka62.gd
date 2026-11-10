@@ -482,7 +482,7 @@ func compute_mz(
 	
 	var t_arg = Bt * alpha_t
 	var trail = Dt * cos(Ct * atan(t_arg - Et * (t_arg - atan(t_arg)))) * cos(alpha)
-	var Mz_prime = trail * Fy_prime
+	var Mz_prime = -trail * Fy_prime
 	
 	# Residual torque Mzr
 	var dr_conicity = normal_load * r0 * (QDZ6 + QDZ7 * dfz)
@@ -505,7 +505,7 @@ func compute_mx(f_z: float, gamma: float, Fy: float, p_kpa: float = 83.0, is_rig
 	var normal_load = maxf(0.0, f_z)
 	var dpi = (p_kpa - pinom) / pinom
 	var qsx1 = -QSX1 if is_right_side else QSX1
-	return normal_load * r0 * (qsx1 - QSX2 * gamma + QSX3 * (Fy / fnomin) + PPMX1 * dpi)
+	return normal_load * r0 * (qsx1 + QSX2 * gamma + QSX3 * (Fy / fnomin) + PPMX1 * dpi)
 
 ## Computes rolling resistance moment My (Nm) according to MF 6.2 Eq. 4.E65.
 func compute_my(f_z: float, Fx: float, v_x: float) -> float:

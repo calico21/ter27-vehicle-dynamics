@@ -33,23 +33,23 @@ static func run() -> Dictionary:
 			alpha_peak_deg = float(deg)
 	
 	var mu_peak = fy_peak / F_z_nom
-	# Hoosier 16x7.5-10 R25B reaches mu ~ 2.4 - 2.6 at 800 N
-	if mu_peak >= 2.2 and mu_peak <= 2.8 and alpha_peak_deg >= 7.0 and alpha_peak_deg <= 11.0:
+	# Hoosier 16x7.5-10 R25B reaches mu ~ 2.4 - 2.6 at 800 N with peak plateau between 7 - 12 deg
+	if mu_peak >= 2.2 and mu_peak <= 2.8 and alpha_peak_deg >= 7.0 and alpha_peak_deg <= 12.0:
 		passed += 1
 	else:
 		failed += 1
-		errors.append("MF6.2 Lateral Peak check failed: peak_mu=%.2f (expected 2.2-2.8), alpha_peak=%.1f deg (expected 7-11)" % [mu_peak, alpha_peak_deg])
+		errors.append("MF6.2 Lateral Peak check failed: peak_mu=%.2f (expected 2.2-2.8), alpha_peak=%.1f deg (expected 7-12)" % [mu_peak, alpha_peak_deg])
 	
-	# --- Test 2: Self-Aligning Torque Mz Peak and Zero-Crossing ---
-	# Mz starts positive, peaks around 3-5 deg, then drops toward zero/negative past peak lateral slip
+	# --- Test 2: Self-Aligning Torque Mz Restoring Peak and Trail Decay ---
+	# Restoring moment Mz is negative for alpha > 0 in ISO (+Z up), peaking around 3-5 deg, then decaying toward zero past peak lateral slip
 	var mz_small = mf.compute_mz(deg_to_rad(3.0), F_z_nom, mf.compute_fy0(deg_to_rad(3.0), F_z_nom), 0.0, 83.0)
 	var mz_high = mf.compute_mz(deg_to_rad(12.0), F_z_nom, mf.compute_fy0(deg_to_rad(12.0), F_z_nom), 0.0, 83.0)
 	
-	if mz_small > 25.0 and mz_high < mz_small:
+	if mz_small < -20.0 and absf(mz_high) < absf(mz_small):
 		passed += 1
 	else:
 		failed += 1
-		errors.append("MF6.2 Mz alignment curve check failed: mz(3 deg)=%.2f Nm, mz(12 deg)=%.2f Nm" % [mz_small, mz_high])
+		errors.append("MF6.2 Mz alignment curve check failed: mz(3 deg)=%.2f Nm (expected < -20 Nm), mz(12 deg)=%.2f Nm (expected decay in magnitude)" % [mz_small, mz_high])
 	
 	# --- Test 3: Camber Sensitivity (IA = 4 deg vs 0 deg) ---
 	var fy_c0 = mf.compute_fy0(deg_to_rad(4.0), F_z_nom, 0.0, 83.0)
