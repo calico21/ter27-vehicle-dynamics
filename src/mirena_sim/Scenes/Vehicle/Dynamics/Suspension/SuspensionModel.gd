@@ -5,20 +5,23 @@ extends RefCounted
 ## Computes spring/damper forces and dynamic axle load transfers.
 
 const VehicleConfig = preload("../Core/VehicleConfig.gd")
+const SuspensionSystem = preload("SuspensionSystem.gd")
 
-## Computes spring and damping force for a single suspension corner.
-static func compute_corner_force(compression: float, comp_velocity: float, is_front: bool, config: VehicleConfig) -> float:
-	var k_spring = config.spring_stiffness_front if is_front else config.spring_stiffness_rear
-	var c_damper = 0.0
-	
-	if comp_velocity >= 0.0:
-		c_damper = config.damping_compression_front if is_front else config.damping_compression_rear
-	else:
-		c_damper = config.damping_relaxation_front if is_front else config.damping_relaxation_rear
-	
-	var f_spring = k_spring * compression
-	var f_damper = c_damper * comp_velocity
-	return maxf(0.0, f_spring + f_damper)
+## Legacy single-corner helper; delegates wheel-referred stiffness/damping (MR^2) and bumpstops
+## to SuspensionSystem with optional static preload.
+static func compute_corner_force(
+	compression: float,
+	comp_velocity: float,
+	is_front: bool,
+	config: VehicleConfig,
+	static_preload: float = 0.0
+) -> float:
+	var k_wheel = SuspensionSystem.get_wheel_spring_stiffness(is_front, config)
+	var c_wheel = SuspensionSystem.get_wheel_damping(is_front, comp_velocity, config)
+	var f_spring = k_wheel * compression
+	var f_damper = c_wheel * comp_velocity
+	var f_bump = SuspensionSystem.compute_bumpstop_force(compression, is_front, config)
+	return maxf(0.0, static_preload + f_spring + f_damper + f_bump)
 
 ## Analytic dynamic load transfer for unit testing and offline 10-DOF simulation:
 ## Computes dynamic Fz per wheel [FL, FR, RL, RR] from static weight, ax, ay and aero downforce.

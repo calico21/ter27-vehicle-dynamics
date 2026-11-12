@@ -98,8 +98,9 @@ var car_state = null
 var wheel_speeds = null
 var lap_status_msg = null
 
-# Previous suspension compressions for damping
+# Previous suspension compressions (signed delta_z) & contact state for damping
 var _prev_compressions: Array[float] = [0.0, 0.0, 0.0, 0.0]
+var _was_grounded: Array[bool] = [false, false, false, false]
 
 func _ready() -> void:
 	contact_monitor = true
@@ -260,9 +261,9 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	var local_v_ros: Vector3 = VehicleConfigScript.godot_to_ros_vec(inv_basis * state.linear_velocity)
 	var local_w_ros: Vector3 = VehicleConfigScript.godot_to_ros_vec(inv_basis * state.angular_velocity)
 	
-	# 3. Raycast Suspension & Contact Dynamics
-	var current_compressions: Array[float] = [0.0, 0.0, 0.0, 0.0]
-	var normal_forces: Array[float] = [0.0, 0.0, 0.0, 0.0]
+	# 3. Raycast Suspension & Contact Geometry (signed delta_z: >0 jounce, 0 design static, <0 droop)
+	var delta_z: Array[float] = [0.0, 0.0, 0.0, 0.0]
+	var delta_z_dot: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	var hit_pts: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
 	var hit_norms: Array[Vector3] = [Vector3.UP, Vector3.UP, Vector3.UP, Vector3.UP]
 	var grounded: Array[bool] = [false, false, false, false]
@@ -277,26 +278,18 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 			hit_pts[i] = hit_pt
 			hit_norms[i] = ray.get_collision_normal()
 			var hit_dist = ray.global_position.distance_to(hit_pt)
-			var comp = maxf(0.0, ray_rest_lengths[i] - hit_dist)
-			current_compressions[i] = comp
-			
-			var comp_vel = (comp - _prev_compressions[i]) / dt
-			_prev_compressions[i] = comp
-			
-			normal_forces[i] = SuspensionModelScript.compute_corner_force(comp, comp_vel, i < 2, config)
+			var dz = ray_rest_lengths[i] - hit_dist
+			delta_z[i] = dz
+			delta_z_dot[i] = (dz - _prev_compressions[i]) / dt if _was_grounded[i] else 0.0
+			_prev_compressions[i] = dz
+			_was_grounded[i] = true
 		else:
-			_prev_compressions[i] = 0.0
-			normal_forces[i] = 0.0
+			_prev_compressions[i] = ray_rest_lengths[i] - ray_cast_length
+			_was_grounded[i] = false
+			delta_z[i] = _prev_compressions[i]
+			delta_z_dot[i] = 0.0
 	
-	# Anti-roll bar coupling: F_ARB_L = +k_arb*(dz_L - dz_R), F_ARB_R = -k_arb*(dz_L - dz_R)
-	var arb_f = config.arb_stiffness_front * (current_compressions[0] - current_compressions[1])
-	var arb_r = config.arb_stiffness_rear * (current_compressions[2] - current_compressions[3])
-	normal_forces[0] = maxf(0.0, normal_forces[0] + arb_f)
-	normal_forces[1] = maxf(0.0, normal_forces[1] - arb_f)
-	normal_forces[2] = maxf(0.0, normal_forces[2] + arb_r)
-	normal_forces[3] = maxf(0.0, normal_forces[3] - arb_r)
-	
-	# 4. Build ground contacts in ISO/ROS frame and delegate physics to VehicleDynamicsModel
+	# 4. Build ground contacts in ISO/ROS frame and delegate suspension + tire physics to VehicleDynamicsModel
 	var ground_contacts: Array = []
 	for i in range(4):
 		var r_pos_ros: Vector3 = model.get_wheel_pos_ros(i)
@@ -305,25 +298,27 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 			r_pos_ros = VehicleConfigScript.godot_to_ros_vec(inv_basis * r_from_com_world)
 		ground_contacts.append({
 			"grounded": grounded[i],
-			"fz": normal_forces[i],
+			"delta_z": delta_z[i],
+			"delta_z_dot": delta_z_dot[i],
 			"r_pos_ros": r_pos_ros
 		})
 	
 	var step_res: Dictionary = model.step(inputs, local_v_ros, local_w_ros, ground_contacts, dt)
+	var normal_forces: Array = step_res["normal_forces"]
 	var wheel_forces_ros: Array = step_res["wheel_forces_ros"]
 	var wheel_moments_ros: Array = step_res["wheel_moments_ros"]
-	var steer_rad: float = inputs.steer_angle
+	var wheel_steer_angles: Array = step_res["wheel_steer_angles"]
 	
 	# 5. Apply wheel tire forces, ground normal forces, and tire moments (Mz, Mx) to RigidBody3D
 	for i in range(4):
 		var ray = raycasts[i]
 		var w = model.wheels[i]
-		var delta_w = steer_rad if (i == 0 or i == 1) else 0.0
+		var delta_w: float = float(wheel_steer_angles[i])
 		
 		if grounded[i]:
 			var f_ros: Vector3 = wheel_forces_ros[i]
 			var f_planar_godot_local: Vector3 = VehicleConfigScript.ros_to_godot_vec(Vector3(f_ros.x, f_ros.y, 0.0))
-			var f_wheel_world: Vector3 = state.transform.basis * f_planar_godot_local + normal_forces[i] * hit_norms[i]
+			var f_wheel_world: Vector3 = state.transform.basis * f_planar_godot_local + float(normal_forces[i]) * hit_norms[i]
 			var r_from_origin_world: Vector3 = hit_pts[i] - state.transform.origin
 			state.apply_force(f_wheel_world, r_from_origin_world)
 			

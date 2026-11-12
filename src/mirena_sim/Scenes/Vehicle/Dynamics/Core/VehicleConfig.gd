@@ -36,16 +36,32 @@ var a_cog: float = 0.8262
 var b_cog: float = 0.7038
 
 # --- Suspension & Raycast ---
-@export var spring_stiffness_front: float = 45000.0
-@export var spring_stiffness_rear: float = 40000.0
-@export var damping_compression_front: float = 6700.0
-@export var damping_relaxation_front: float = 2700.0
-@export var damping_compression_rear: float = 6700.0
-@export var damping_relaxation_rear: float = 2700.0
+# TeR27 design values: spring stiffness & constant motion ratios (MR = dx_spring / dz_wheel)
+@export var spring_stiffness_front: float = 35000.0
+@export var spring_stiffness_rear: float = 48000.0
+@export var motion_ratio_front: float = 1.0862
+@export var motion_ratio_rear: float = 1.0951
+# Estimated / configurable damper, ARB, bumpstop & geometry parameters
+@export var damping_compression_front: float = 2400.0
+@export var damping_relaxation_front: float = 3600.0
+@export var damping_compression_rear: float = 2800.0
+@export var damping_relaxation_rear: float = 4200.0
 @export var arb_stiffness_front: float = 2000.0
 @export var arb_stiffness_rear: float = 1000.0
+@export var bumpstop_start_front: float = 0.025
+@export var bumpstop_start_rear: float = 0.025
+@export var bumpstop_stiffness_front: float = 120000.0
+@export var bumpstop_stiffness_rear: float = 150000.0
+@export var bumpstop_quadratic_front: float = 2000000.0
+@export var bumpstop_quadratic_rear: float = 2500000.0
 @export var ray_rest_length: float = 0.32
 @export var ray_cast_length: float = 0.45
+
+# Optimum Kinematics 1D tables stored internally as [[delta_z_m, angle_rad], ...]
+var camber_table_front: Array = []
+var camber_table_rear: Array = []
+var toe_table_front: Array = []
+var toe_table_rear: Array = []
 
 # --- Powertrain & Drivetrain ---
 @export var drive_mode: DriveMode = DriveMode.FOUR_WD
@@ -144,14 +160,36 @@ func _load_suspension_json(file_path: String) -> void:
 		return
 	spring_stiffness_front = float(d.get("spring_stiffness_front", spring_stiffness_front))
 	spring_stiffness_rear = float(d.get("spring_stiffness_rear", spring_stiffness_rear))
+	motion_ratio_front = float(d.get("motion_ratio_front", motion_ratio_front))
+	motion_ratio_rear = float(d.get("motion_ratio_rear", motion_ratio_rear))
 	damping_compression_front = float(d.get("damping_compression_front", damping_compression_front))
 	damping_relaxation_front = float(d.get("damping_relaxation_front", damping_relaxation_front))
 	damping_compression_rear = float(d.get("damping_compression_rear", damping_compression_rear))
 	damping_relaxation_rear = float(d.get("damping_relaxation_rear", damping_relaxation_rear))
 	arb_stiffness_front = float(d.get("arb_stiffness_front", arb_stiffness_front))
 	arb_stiffness_rear = float(d.get("arb_stiffness_rear", arb_stiffness_rear))
+	bumpstop_start_front = float(d.get("bumpstop_start_front", bumpstop_start_front))
+	bumpstop_start_rear = float(d.get("bumpstop_start_rear", bumpstop_start_rear))
+	bumpstop_stiffness_front = float(d.get("bumpstop_stiffness_front", bumpstop_stiffness_front))
+	bumpstop_stiffness_rear = float(d.get("bumpstop_stiffness_rear", bumpstop_stiffness_rear))
+	bumpstop_quadratic_front = float(d.get("bumpstop_quadratic_front", bumpstop_quadratic_front))
+	bumpstop_quadratic_rear = float(d.get("bumpstop_quadratic_rear", bumpstop_quadratic_rear))
 	ray_rest_length = float(d.get("ray_rest_length", ray_rest_length))
 	ray_cast_length = float(d.get("ray_cast_length", ray_cast_length))
+	camber_table_front = _parse_kinematic_table_deg(d.get("camber_table_front_deg", []))
+	camber_table_rear = _parse_kinematic_table_deg(d.get("camber_table_rear_deg", []))
+	toe_table_front = _parse_kinematic_table_deg(d.get("toe_table_front_deg", []))
+	toe_table_rear = _parse_kinematic_table_deg(d.get("toe_table_rear_deg", []))
+
+static func _parse_kinematic_table_deg(raw_table: Variant) -> Array:
+	var out: Array = []
+	if not (raw_table is Array):
+		return out
+	for pt in raw_table:
+		if pt is Array and pt.size() >= 2:
+			out.append([float(pt[0]), deg_to_rad(float(pt[1]))])
+	out.sort_custom(func(a, b): return float(a[0]) < float(b[0]))
+	return out
 
 func _load_tires_json(file_path: String) -> void:
 	var d = _read_json_file(file_path)

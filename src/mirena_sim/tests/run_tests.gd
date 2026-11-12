@@ -6,6 +6,7 @@ const TestDrivetrain4WD = preload("test_drivetrain_4wd.gd")
 const TestWheelSpinIntegration = preload("test_wheel_spin_integration.gd")
 const TestSlipAndTyre = preload("test_slip_and_tyre.gd")
 const TestLoadTransfer = preload("test_load_transfer.gd")
+const TestSuspensionSystem = preload("test_suspension_system.gd")
 const TestResultantForces = preload("test_resultant_forces.gd")
 const TestTireMF62 = preload("test_tire_mf62_suite.gd")
 const TestTireParity = preload("test_tire_parity.gd")
@@ -26,6 +27,7 @@ func _init() -> void:
 		TestTireParity,
 		TestTransientDynamics,
 		TestLoadTransfer,
+		TestSuspensionSystem,
 		TestResultantForces
 	]
 	

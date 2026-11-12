@@ -12,11 +12,14 @@ const VehicleInputs = preload("VehicleInputs.gd")
 const WheelDynamics = preload("../Tires/WheelDynamics.gd")
 const DrivetrainModel = preload("../Drivetrain/DrivetrainModel.gd")
 const SuspensionModel = preload("../Suspension/SuspensionModel.gd")
+const SuspensionCorner = preload("../Suspension/SuspensionCorner.gd")
+const SuspensionSystem = preload("../Suspension/SuspensionSystem.gd")
 const AeroModel = preload("../Aerodynamics/AeroModel.gd")
 const ChassisDynamics = preload("../Chassis/ChassisDynamics.gd")
 
 var config: VehicleConfig
 var wheels: Array[WheelDynamics] = []
+var suspension: SuspensionSystem
 var inputs: VehicleInputs
 
 # --- Output Net Quantities (in ISO/ROS chassis frame around CoG) ---
@@ -38,6 +41,7 @@ func _init(cfg: VehicleConfig = null) -> void:
 		config = VehicleConfig.new()
 	
 	inputs = VehicleInputs.new()
+	suspension = SuspensionSystem.new()
 	_init_wheels()
 
 func _init_wheels() -> void:
@@ -84,18 +88,41 @@ func step(
 	var drive_trqs: Array[float] = torques["drive"]
 	var brake_trqs: Array[float] = torques["brake"]
 	
-	# 2. Determine Normal Forces Fz
+	# 2. Determine Normal Forces Fz and Suspension Alignment (zero load-transfer double counting)
 	var normal_forces: Array[float] = [0.0, 0.0, 0.0, 0.0]
+	var toe_offsets: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	if ground_contacts.size() >= 4:
-		for i in range(4):
-			var c = ground_contacts[i]
-			wheels[i].is_grounded = c.get("grounded", true)
-			normal_forces[i] = c.get("fz", 0.0)
+		var has_corner_travel: bool = (ground_contacts[0] is Dictionary) and ground_contacts[0].has("delta_z")
+		if has_corner_travel:
+			var dz_arr: Array[float] = [0.0, 0.0, 0.0, 0.0]
+			var dz_dot_arr: Array[float] = [0.0, 0.0, 0.0, 0.0]
+			var g_arr: Array[bool] = [false, false, false, false]
+			for i in range(4):
+				var c: Dictionary = ground_contacts[i]
+				g_arr[i] = bool(c.get("grounded", true))
+				dz_arr[i] = float(c.get("delta_z", 0.0))
+				dz_dot_arr[i] = float(c.get("delta_z_dot", 0.0))
+			var corners: Array[SuspensionCorner] = suspension.evaluate_from_corners(dz_arr, dz_dot_arr, g_arr, config)
+			for i in range(4):
+				var sc: SuspensionCorner = corners[i]
+				wheels[i].is_grounded = sc.is_grounded
+				wheels[i].camber_angle = sc.camber_rad
+				toe_offsets[i] = sc.toe_rad
+				normal_forces[i] = sc.fz
+		else:
+			for i in range(4):
+				var c = ground_contacts[i]
+				wheels[i].is_grounded = c.get("grounded", true)
+				normal_forces[i] = c.get("fz", 0.0)
+				wheels[i].camber_angle = SuspensionSystem.compute_corner_camber_iso(0.0, i < 2, wheels[i].is_right_side, config)
+				toe_offsets[i] = SuspensionSystem.compute_corner_toe_iso(0.0, i < 2, wheels[i].is_right_side, config)
 	else:
 		var ax_approx = (drive_trqs[0] + drive_trqs[1] + drive_trqs[2] + drive_trqs[3]) / (config.mass * config.wheel_radius)
 		normal_forces = compute_analytic_normal_forces(ax_approx, u * r, local_v_ros.length())
 		for i in range(4):
 			wheels[i].is_grounded = true
+			wheels[i].camber_angle = SuspensionSystem.compute_corner_camber_iso(0.0, i < 2, wheels[i].is_right_side, config)
+			toe_offsets[i] = SuspensionSystem.compute_corner_toe_iso(0.0, i < 2, wheels[i].is_right_side, config)
 	
 	# 3. Kinematics, Slips, Forces and Wheel Spin per Wheel
 	var steer_angle = in_inputs.steer_angle
@@ -103,6 +130,7 @@ func step(
 	var total_wheel_torque_ros = Vector3.ZERO
 	var wheel_forces_ros: Array[Vector3] = []
 	var wheel_moments_ros: Array[Vector3] = []
+	var wheel_steer_angles: Array[float] = []
 	
 	for i in range(4):
 		var w = wheels[i]
@@ -112,7 +140,9 @@ func step(
 		var v_hub = local_v_ros + local_w_ros.cross(r_pos)
 		w.v_hub_chassis = v_hub
 		
-		var delta_w = steer_angle if (i == VehicleConfig.WheelIndex.FL or i == VehicleConfig.WheelIndex.FR) else 0.0
+		var base_steer = steer_angle if (i == VehicleConfig.WheelIndex.FL or i == VehicleConfig.WheelIndex.FR) else 0.0
+		var delta_w = base_steer + toe_offsets[i]
+		wheel_steer_angles.append(delta_w)
 		
 		w.compute_slip(v_hub.x, v_hub.y, delta_w, config.slip_regularization_speed, config.wheel_radius, dt)
 		w.compute_forces(normal_forces[i], config)
@@ -156,12 +186,14 @@ func step(
 		"aero_torque_ros": tau_aero_ros,
 		"drive_torques": drive_trqs,
 		"brake_torques": brake_trqs,
-		"normal_forces": normal_forces
+		"normal_forces": normal_forces,
+		"wheel_steer_angles": wheel_steer_angles
 	}
 
 func reset() -> void:
 	for w in wheels:
 		w.reset()
+	suspension.reset()
 	inputs.reset()
 	net_force_chassis_ros = Vector3.ZERO
 	net_torque_chassis_ros = Vector3.ZERO
