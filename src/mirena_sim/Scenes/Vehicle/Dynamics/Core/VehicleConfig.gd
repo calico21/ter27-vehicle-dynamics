@@ -67,10 +67,15 @@ var toe_table_rear: Array = []
 @export var drive_mode: DriveMode = DriveMode.FOUR_WD
 @export var power_limit_watts: float = 80000.0
 @export var motor_peak_torque: float = 100.0
+@export var motor_max_rpm: float = 12000.0
+@export var motor_taper_ratio: float = 0.85
 @export var gear_ratio: float = 5.0
 @export var drivetrain_efficiency: float = 0.92
 @export var front_drive_torque_ratio: float = 0.50
 @export var max_steer_angle: float = 0.35
+@export var tv_rate_hz: float = 200.0
+@export var tv_allow_regen: bool = false
+@export var regen_peak_torque: float = 0.0
 
 # --- Brakes ---
 @export var brake_mu: float = 1.30
@@ -90,6 +95,10 @@ var toe_table_rear: Array = []
 @export var air_density: float = 1.225
 @export var cd_a: float = 2.75
 @export var cl_a: float = 4.554
+@export var aero_balance_front: float = 0.45
+var _has_explicit_axle_cl: bool = false
+var _cl_a_front_explicit: float = 0.0
+var _cl_a_rear_explicit: float = 0.0
 
 func _init() -> void:
 	load_configs()
@@ -210,10 +219,15 @@ func _load_drivetrain_json(file_path: String) -> void:
 		return
 	power_limit_watts = float(d.get("power_limit_watts", power_limit_watts))
 	motor_peak_torque = float(d.get("motor_peak_torque", motor_peak_torque))
+	motor_max_rpm = float(d.get("motor_max_rpm", motor_max_rpm))
+	motor_taper_ratio = float(d.get("motor_taper_ratio", motor_taper_ratio))
 	gear_ratio = float(d.get("gear_ratio", gear_ratio))
 	drivetrain_efficiency = float(d.get("drivetrain_efficiency", drivetrain_efficiency))
 	front_drive_torque_ratio = float(d.get("front_drive_torque_ratio", front_drive_torque_ratio))
 	max_steer_angle = float(d.get("max_steer_angle", max_steer_angle))
+	tv_rate_hz = float(d.get("tv_rate_hz", tv_rate_hz))
+	tv_allow_regen = bool(d.get("tv_allow_regen", tv_allow_regen))
+	regen_peak_torque = float(d.get("regen_peak_torque", regen_peak_torque))
 	
 	var dm_str = str(d.get("drive_mode", "FOUR_WD"))
 	match dm_str:
@@ -236,6 +250,28 @@ func _load_aero_json(file_path: String) -> void:
 	air_density = float(d.get("air_density", air_density))
 	cd_a = float(d.get("cd_a", cd_a))
 	cl_a = float(d.get("cl_a", cl_a))
+	aero_balance_front = clampf(float(d.get("aero_balance_front", aero_balance_front)), 0.0, 1.0)
+	if d.has("cl_a_front") and d.has("cl_a_rear"):
+		_has_explicit_axle_cl = true
+		_cl_a_front_explicit = float(d.get("cl_a_front", 0.0))
+		_cl_a_rear_explicit = float(d.get("cl_a_rear", 0.0))
+		cl_a = _cl_a_front_explicit + _cl_a_rear_explicit
+		if cl_a > 1e-6:
+			aero_balance_front = _cl_a_front_explicit / cl_a
+	else:
+		_has_explicit_axle_cl = false
+
+## Front-axle downforce area coefficient C_L,f * A.
+func get_cl_a_front() -> float:
+	if _has_explicit_axle_cl:
+		return _cl_a_front_explicit
+	return cl_a * clampf(aero_balance_front, 0.0, 1.0)
+
+## Rear-axle downforce area coefficient C_L,r * A.
+func get_cl_a_rear() -> float:
+	if _has_explicit_axle_cl:
+		return _cl_a_rear_explicit
+	return cl_a * (1.0 - clampf(aero_balance_front, 0.0, 1.0))
 
 ## Recalculates longitudinal CoG distances based on wheelbase and weight distribution.
 func update_derived_geometry() -> void:

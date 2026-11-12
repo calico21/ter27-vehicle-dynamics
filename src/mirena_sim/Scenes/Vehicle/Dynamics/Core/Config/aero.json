@@ -1,5 +1,15 @@
 {
+  "_parameter_provenance": {
+    "estimated_configurable_placeholders": [
+      "air_density",
+      "cd_a",
+      "cl_a",
+      "aero_balance_front"
+    ],
+    "notes": "Downforce splits across front and rear axles via aero_balance_front (or optional explicit cl_a_front / cl_a_rear): cl_a_front = cl_a * aero_balance_front, cl_a_rear = cl_a * (1 - aero_balance_front), producing real aerodynamic pitching moment around CoG."
+  },
   "air_density": 1.225,
   "cd_a": 2.75,
-  "cl_a": 4.554
+  "cl_a": 4.554,
+  "aero_balance_front": 0.45
 }

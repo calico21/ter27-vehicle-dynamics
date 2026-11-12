@@ -11,6 +11,7 @@ const VehicleConfig = preload("VehicleConfig.gd")
 const VehicleInputs = preload("VehicleInputs.gd")
 const WheelDynamics = preload("../Tires/WheelDynamics.gd")
 const DrivetrainModel = preload("../Drivetrain/DrivetrainModel.gd")
+const TorqueVectoring = preload("../Drivetrain/TorqueVectoring.gd")
 const SuspensionModel = preload("../Suspension/SuspensionModel.gd")
 const SuspensionCorner = preload("../Suspension/SuspensionCorner.gd")
 const SuspensionSystem = preload("../Suspension/SuspensionSystem.gd")
@@ -20,6 +21,7 @@ const ChassisDynamics = preload("../Chassis/ChassisDynamics.gd")
 var config: VehicleConfig
 var wheels: Array[WheelDynamics] = []
 var suspension: SuspensionSystem
+var torque_vectoring: TorqueVectoring
 var chassis_state: ChassisDynamics.State6DOF
 var inputs: VehicleInputs
 
@@ -43,6 +45,7 @@ func _init(cfg: VehicleConfig = null) -> void:
 	
 	inputs = VehicleInputs.new()
 	suspension = SuspensionSystem.new()
+	torque_vectoring = TorqueVectoring.new()
 	chassis_state = ChassisDynamics.State6DOF.new(config.h_cog)
 	_init_wheels()
 
@@ -58,8 +61,19 @@ func get_wheel_pos_ros(index: int) -> Vector3:
 	return ChassisDynamics.get_wheel_pos_ros(index, config)
 
 ## Computes 4WD motor drive torques and friction brake torques per wheel.
-func compute_drivetrain_torques(in_inputs: VehicleInputs, u_speed: float) -> Dictionary:
-	return DrivetrainModel.compute_torques(in_inputs, u_speed, config)
+func compute_drivetrain_torques(
+	in_inputs: VehicleInputs,
+	u_speed: float,
+	dt: float = 0.0,
+	advance_tv: bool = false
+) -> Dictionary:
+	var wheel_omegas: Array[float] = [
+		wheels[0].omega,
+		wheels[1].omega,
+		wheels[2].omega,
+		wheels[3].omega
+	]
+	return DrivetrainModel.compute_torques(in_inputs, u_speed, config, wheel_omegas, torque_vectoring, dt, advance_tv)
 
 ## Computes aerodynamic drag and downforce forces in ISO/ROS frame.
 func compute_aerodynamics(v_ros: Vector3) -> Dictionary:
@@ -77,7 +91,7 @@ func step(
 	ground_contacts: Array = [],
 	dt: float = 0.0025
 ) -> Dictionary:
-	return step_forces(in_inputs, local_v_ros, local_w_ros, ground_contacts, dt)
+	return step_forces(in_inputs, local_v_ros, local_w_ros, ground_contacts, dt, true)
 
 ## Shared force, suspension, slip, tire & aero evaluation path used by both
 ## MirenaCarDynamics (Godot RigidBody3D) and step_standalone (14-DOF headless).
@@ -86,7 +100,8 @@ func step_forces(
 	local_v_ros: Vector3,
 	local_w_ros: Vector3,
 	ground_contacts: Array = [],
-	dt: float = 0.0025
+	dt: float = 0.0025,
+	advance_tv: bool = true
 ) -> Dictionary:
 	linear_velocity_ros = local_v_ros
 	angular_velocity_ros = local_w_ros
@@ -96,8 +111,8 @@ func step_forces(
 	var v = local_v_ros.y
 	var r = local_w_ros.z
 	
-	# 1. Drivetrain & Brakes
-	var torques = compute_drivetrain_torques(in_inputs, u)
+	# 1. Drivetrain, 200 Hz Torque Vectoring & Brakes
+	var torques = compute_drivetrain_torques(in_inputs, u, dt, advance_tv)
 	var drive_trqs: Array[float] = torques["drive"]
 	var brake_trqs: Array[float] = torques["brake"]
 	
@@ -230,15 +245,15 @@ func step_standalone(in_inputs: VehicleInputs, dt: float, ground_height: float =
 		wheels[3].get_integrator_state()
 	]
 
-	# RK2 Stage 1 (evaluate at t_n)
+	# RK2 Stage 1 (evaluate at t_n; advance 200 Hz TV accumulator once per physical step)
 	var contacts_1: Array = ChassisDynamics.compute_ground_contacts_6dof(s0, config, ground_height)
-	var res_1: Dictionary = step_forces(in_inputs, s0.linear_velocity, s0.angular_velocity, contacts_1, dt)
+	var res_1: Dictionary = step_forces(in_inputs, s0.linear_velocity, s0.angular_velocity, contacts_1, dt, true)
 	var k1: ChassisDynamics.Derivatives6DOF = ChassisDynamics.compute_derivatives(s0, res_1["net_force_ros"], res_1["net_torque_ros"], config)
 	var s_pred: ChassisDynamics.State6DOF = ChassisDynamics.advance_euler(s0, k1, dt)
 
-	# RK2 Stage 2 (evaluate at predictor t_n + dt; wheels advance from w1 -> w0 + dt*(k1_w + k2_w))
+	# RK2 Stage 2 (evaluate at predictor t_n + dt; reuse latched TV command)
 	var contacts_2: Array = ChassisDynamics.compute_ground_contacts_6dof(s_pred, config, ground_height)
-	var res_2: Dictionary = step_forces(in_inputs, s_pred.linear_velocity, s_pred.angular_velocity, contacts_2, dt)
+	var res_2: Dictionary = step_forces(in_inputs, s_pred.linear_velocity, s_pred.angular_velocity, contacts_2, dt, false)
 	var k2: ChassisDynamics.Derivatives6DOF = ChassisDynamics.compute_derivatives(s_pred, res_2["net_force_ros"], res_2["net_torque_ros"], config)
 
 	# Heun update for 6-DOF chassis and 4 wheels
@@ -275,6 +290,7 @@ func reset() -> void:
 	for w in wheels:
 		w.reset()
 	suspension.reset()
+	torque_vectoring.reset()
 	chassis_state.reset(config.h_cog)
 	inputs.reset()
 	net_force_chassis_ros = Vector3.ZERO

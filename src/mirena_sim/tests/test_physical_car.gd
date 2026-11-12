@@ -93,9 +93,9 @@ class PhysicalTestRunner extends Node:
 				print("   [FAIL] 4WD Acceleration failed: speed=%.2f m/s, dist=%.2f m" % [speed, dist])
 				failed += 1
 			
-			# Begin Phase 3: Steering (1200 to 1600 ticks = 1.0 s)
-			print("\n>> Phase 3: Testing steering step response (steer left 0.25 rad)...")
-			car.set_control(0.3, 0.25, 0.0)
+			# Begin Phase 3: High-speed Steering Step Response (1200 to 1600 ticks = 1.0 s)
+			print("\n>> Phase 3: Testing steering step response (steer left 0.08 rad at ~21 m/s)...")
+			car.set_control(0.3, 0.08, 0.0)
 			initial_yaw = car.global_rotation.y
 		
 		# --- Phase 3 Check ---
@@ -114,7 +114,7 @@ class PhysicalTestRunner extends Node:
 			
 			# Begin Phase 4: Braking to Standstill (1600 to 3200 ticks = 4.0 s)
 			print("\n>> Phase 4: Testing friction braking to standstill (4.0 s)...")
-			car.set_control(0.0, 0.0, 20.0) # full friction brake
+			car.set_control(0.0, 0.0, 1.0) # full normalized friction brake
 		
 		# --- Phase 4 Check ---
 		if ticks == 3200 and not p4_done:

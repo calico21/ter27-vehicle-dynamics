@@ -158,45 +158,47 @@ func compute_forces(normal_force: float, config: VehicleConfig) -> void:
 
 ## Integrates the rotational equation of motion for this wheel:
 ## I_w * d(omega)/dt = T_drive - T_brake * sgn(omega) - F_x * R_w - F_rr * R_w
+## Guarantees clean zero-crossing hold without chatter or spurious reversal when T_drive == 0.
 func integrate_wheel_spin(T_drive: float, T_brake: float, dt: float, config: VehicleConfig) -> void:
 	if dt <= 0.0:
 		return
 	
 	var r = config.wheel_radius
 	var I_w = maxf(config.wheel_inertia, 1e-4)
+	var no_drive: bool = absf(T_drive) <= 1e-6
 	
 	# Rolling resistance torque opposing rotation
 	var F_rr = config.rolling_resistance_coeff * F_z
-	var T_rr = F_rr * r * (1.0 if omega > 0.0 else (-1.0 if omega < 0.0 else 0.0))
+	var sign_w = 1.0 if omega > 0.0 else (-1.0 if omega < 0.0 else 0.0)
+	var T_rr = F_rr * r * sign_w
 	
 	# Net tyre reaction torque on wheel
 	var T_tyre = F_x * r
 	
-	# Handle braking torque (opposes motion)
-	var T_brk_applied = 0.0
-	var sign_w = 1.0 if omega > 0.0 else (-1.0 if omega < 0.0 else 0.0)
-	
 	if absf(omega) > 0.1:
-		T_brk_applied = T_brake * sign_w
+		var T_brk_applied = T_brake * sign_w
 		var net_torque = T_drive - T_brk_applied - T_tyre - T_rr
 		var d_omega = (net_torque / I_w) * dt
 		
-		# Zero-crossing prevention when braking heavily to standstill
-		if sign_w > 0.0 and (omega + d_omega) < 0.0 and T_drive == 0.0:
-			omega = 0.0
-		elif sign_w < 0.0 and (omega + d_omega) > 0.0 and T_drive == 0.0:
+		# Clean zero-crossing prevention when braking without drive torque
+		if no_drive and T_brake > 0.0 and ((sign_w > 0.0 and (omega + d_omega) <= 0.0) or (sign_w < 0.0 and (omega + d_omega) >= 0.0)):
 			omega = 0.0
 		else:
 			omega += d_omega
 	else:
-		# Low-speed / static friction logic to prevent chatter
-		var hold_torque = absf(T_drive - T_tyre)
-		if T_brake >= hold_torque and T_drive == 0.0:
+		# Standstill / low-speed caliper hold: prevent residual-torque chatter or reverse creep
+		var hold_capacity: float = T_brake + F_rr * r
+		var disturbing_torque: float = absf(T_drive - T_tyre)
+		if no_drive and T_brake > 0.0 and (hold_capacity >= disturbing_torque or omega * (omega + ((T_drive - T_brake * sign_w - T_tyre - T_rr) / I_w) * dt) <= 0.0):
 			omega = 0.0
 		else:
-			T_brk_applied = T_brake * sign_w
+			var T_brk_applied = T_brake * sign_w
 			var net_torque = T_drive - T_brk_applied - T_tyre - T_rr
-			omega += (net_torque / I_w) * dt
+			var next_omega = omega + (net_torque / I_w) * dt
+			if no_drive and T_brake > 0.0 and sign_w != 0.0 and (sign_w * next_omega) <= 0.0:
+				omega = 0.0
+			else:
+				omega = next_omega
 	
 	# Update accumulated roll angle
 	rotation_angle += omega * dt

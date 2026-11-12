@@ -1,9 +1,33 @@
 {
+  "_parameter_provenance": {
+    "ter27_design_measured": [
+      "power_limit_watts",
+      "gear_ratio",
+      "front_drive_torque_ratio"
+    ],
+    "estimated_configurable_placeholders": [
+      "drive_mode",
+      "motor_peak_torque",
+      "motor_max_rpm",
+      "motor_taper_ratio",
+      "drivetrain_efficiency",
+      "max_steer_angle",
+      "tv_rate_hz",
+      "tv_allow_regen",
+      "regen_peak_torque"
+    ],
+    "notes": "power_limit_watts = 80000 W is the Formula Student EV limit. motor_max_rpm cuts tractive drive torque smoothly above motor_taper_ratio * motor_max_rpm down to 0 at motor_max_rpm while keeping braking/regen functional."
+  },
   "drive_mode": "FOUR_WD",
   "power_limit_watts": 80000.0,
   "motor_peak_torque": 100.0,
+  "motor_max_rpm": 12000.0,
+  "motor_taper_ratio": 0.85,
   "gear_ratio": 5.0,
   "drivetrain_efficiency": 0.92,
   "front_drive_torque_ratio": 0.50,
-  "max_steer_angle": 0.35
+  "max_steer_angle": 0.35,
+  "tv_rate_hz": 200.0,
+  "tv_allow_regen": false,
+  "regen_peak_torque": 0.0
 }

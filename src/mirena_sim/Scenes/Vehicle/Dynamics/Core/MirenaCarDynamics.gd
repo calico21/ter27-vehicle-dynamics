@@ -32,6 +32,8 @@ var telemetry: VehicleTelemetryScript
 
 @export var pilot: PilotMode = PilotMode.NO_PILOT
 @export var drive_mode: VehicleConfigScript.DriveMode = VehicleConfigScript.DriveMode.FOUR_WD
+@export var tv_mode: int = 0
+var tv_yaw_moment_req: float = 0.0
 @export var rail_speed: float = 10.0
 @export var rail_look_ahead: float = 3.0
 var _rail_progress: float = 0.0
@@ -75,6 +77,7 @@ var _as_status_sub = null
 
 var _ros_gas: float = 0.0
 var _ros_steer: float = 0.0
+var _ros_brake: float = 0.0
 var _wheel_decim_n: int = 0
 var _wheel_rpm_acc: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var _wheel_rpm_lpf: Array[float] = [0.0, 0.0, 0.0, 0.0]
@@ -250,11 +253,11 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	if dt <= 0.0:
 		return
 	
-	# 1. Update inputs
+	# 1. Update inputs (unified longitudinal mapping + normalized [0, 1] brake + TV command)
 	inputs.drive_mode = drive_mode
-	inputs.set_from_ros_control(self.gas, self.steering, config.max_steer_angle)
-	if self.brake > 0.0:
-		inputs.brake = maxf(inputs.brake, clampf(self.brake / 20.0, 0.0, 1.0))
+	inputs.tv_mode = tv_mode
+	inputs.tv_yaw_moment_req = tv_yaw_moment_req
+	inputs.set_unified_control(self.gas, self.steering, self.brake, config.max_steer_angle)
 	
 	# 2. Local chassis velocities in ISO/ROS frame (+X fwd, +Y left, +Z up)
 	var inv_basis: Basis = state.transform.basis.inverse()
@@ -362,7 +365,7 @@ func _update_wheel_visual(index: int, ray: RayCast3D, delta_w: float, roll_angle
 func _process_no_pilot() -> void:
 	self.gas = 0.0
 	self.steering = 0.0
-	self.brake = 20.0
+	self.brake = 1.0
 
 func _process_manual_pilot(delta: float) -> void:
 	var steer_input = Input.get_action_strength("manual_steer_l") - Input.get_action_strength("manual_steer_r")
@@ -370,19 +373,21 @@ func _process_manual_pilot(delta: float) -> void:
 	
 	self.gas = Input.get_action_strength("manual_gas_pos") - Input.get_action_strength("manual_gas_neg")
 	self.steering = _steer_smoothed * config.max_steer_angle
-	self.brake = Input.get_action_strength("EBS") * 20.0
+	self.brake = clampf(Input.get_action_strength("EBS"), 0.0, 1.0)
 
 func _process_ros_pilot() -> void:
 	self.gas = _ros_gas
 	self.steering = clampf(_ros_steer, -config.max_steer_angle, config.max_steer_angle)
+	self.brake = _ros_brake
 
 ## Helper for programmatic and test driving
 func set_control(gas_val: float, steer_val: float, brake_val: float = 0.0) -> void:
 	self.gas = gas_val
 	self.steering = steer_val
-	self.brake = brake_val
+	self.brake = clampf(brake_val, 0.0, 1.0)
 	_ros_gas = gas_val
 	_ros_steer = steer_val
+	_ros_brake = self.brake
 
 func _process_track_rail(delta: float) -> void:
 	if not path or not path.curve:
@@ -417,6 +422,7 @@ func _smooth_steer(current: float, target: float, delta: float, speed: float) ->
 func _on_control(msg) -> void:
 	_ros_gas = msg.gas
 	_ros_steer = msg.steer_angle
+	_ros_brake = 0.0
 
 func _on_mission_info(msg) -> void:
 	_mission_info = msg

@@ -48,13 +48,14 @@ static func compute_analytic_normal_forces(ax_ros: float, ay_ros: float, speed: 
 	var dFz_lat_f = (m * ay_ros * h * (b / L)) / wf
 	var dFz_lat_r = (m * ay_ros * h * (a / L)) / wr
 	
-	# Aero downforce
-	var aero_fz = 0.5 * config.air_density * speed * speed * config.cl_a
-	var aero_fz_each = aero_fz * 0.25
+	# Aero downforce split by axle balance
+	var q = 0.5 * config.air_density * speed * speed
+	var aero_fz_f_each = q * config.get_cl_a_front() * 0.5
+	var aero_fz_r_each = q * config.get_cl_a_rear() * 0.5
 	
-	var fz_fl = maxf(0.0, fz_f_long * 0.5 - dFz_lat_f + aero_fz_each)
-	var fz_fr = maxf(0.0, fz_f_long * 0.5 + dFz_lat_f + aero_fz_each)
-	var fz_rl = maxf(0.0, fz_r_long * 0.5 - dFz_lat_r + aero_fz_each)
-	var fz_rr = maxf(0.0, fz_r_long * 0.5 + dFz_lat_r + aero_fz_each)
+	var fz_fl = maxf(0.0, fz_f_long * 0.5 - dFz_lat_f + aero_fz_f_each)
+	var fz_fr = maxf(0.0, fz_f_long * 0.5 + dFz_lat_f + aero_fz_f_each)
+	var fz_rl = maxf(0.0, fz_r_long * 0.5 - dFz_lat_r + aero_fz_r_each)
+	var fz_rr = maxf(0.0, fz_r_long * 0.5 + dFz_lat_r + aero_fz_r_each)
 	
 	return [fz_fl, fz_fr, fz_rl, fz_rr]
