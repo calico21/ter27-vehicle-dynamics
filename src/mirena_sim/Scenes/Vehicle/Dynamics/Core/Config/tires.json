@@ -1,5 +1,5 @@
 {
-  "wheel_radius": 0.20,
+  "wheel_radius": 0.2032,
   "wheel_inertia": 0.35,
   "tyre_mu_x": 1.6,
   "tyre_mu_y": 1.5,

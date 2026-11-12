@@ -15,7 +15,7 @@ static func run() -> Dictionary:
 	
 	# Test 1: Linear regime for small longitudinal slip (kappa = 0.01)
 	wheel.reset()
-	wheel.omega = 10.1
+	wheel.omega = (2.0 * 1.01) / config.wheel_radius
 	for step in range(50):
 		wheel.compute_slip(2.0, 0.0, 0.0, config.slip_regularization_speed, config.wheel_radius, 0.0025)
 		wheel.compute_forces(F_z_nominal, config)

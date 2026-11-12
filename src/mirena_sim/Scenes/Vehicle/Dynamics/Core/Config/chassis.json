@@ -1,16 +1,16 @@
 {
-  "mass": 270.0,
+  "mass": 290.0,
   "gravity": 9.81,
-  "wheelbase": 1.530,
-  "track_width_front": 1.200,
-  "track_width_rear": 1.180,
-  "cg_height": 0.260,
+  "wheelbase": 1.540,
+  "track_width_front": 1.230,
+  "track_width_rear": 1.230,
+  "cg_height": 0.290,
   "weight_distribution_rear": 0.55,
   "max_steer_angle": 0.38,
   "ackermann_factor": 0.60,
   "inertia": {
-    "ixx": 50.0,
-    "iyy": 98.0,
-    "izz": 117.0
+    "ixx": 54.0,
+    "iyy": 105.0,
+    "izz": 125.0
   }
 }

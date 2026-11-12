@@ -31,9 +31,9 @@ static func compute_forces_ros(v_ros: Vector3, config: VehicleConfig) -> Diction
 	var f_down_rear: float = q * config.get_cl_a_rear()
 	var f_downforce_vec: Vector3 = Vector3(0.0, 0.0, -(f_down_front + f_down_rear))
 	
-	# Pitching moment around CoG from front (+a_cog) and rear (-b_cog) downforce:
-	# (r x F)_y = -x * F_z = +a_cog * F_down_front - b_cog * F_down_rear
-	var pitch_moment_y: float = config.a_cog * f_down_front - config.b_cog * f_down_rear
+	# Pitching moment around CoG from front (+a_cog), rear (-b_cog) downforce and drag at cp_height:
+	# (r x F)_y = r_z * F_x - r_x * F_z = (cp_height - h_cog) * F_drag_x + a_cog * F_down_front - b_cog * F_down_rear
+	var pitch_moment_y: float = config.a_cog * f_down_front - config.b_cog * f_down_rear + (config.cp_height - config.h_cog) * f_drag.x
 	var torque_ros: Vector3 = Vector3(0.0, pitch_moment_y, 0.0)
 	
 	return {

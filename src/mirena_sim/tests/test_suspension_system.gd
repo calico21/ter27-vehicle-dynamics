@@ -40,11 +40,11 @@ static func run() -> Dictionary:
 		failed += 1
 		errors.append("Non-zero bumpstop or ARB force at static design height")
 
-	# 2. Motion Ratio conversion: k_wheel = k_spring * MR^2 (TeR27 design values)
+	# 2. Motion Ratio conversion: k_wheel = k_spring * MR^2 (TeR27 design values: MR = 1 / 1.13)
 	var kw_f: float = SuspensionSystemScript.get_wheel_spring_stiffness(true, config)
 	var kw_r: float = SuspensionSystemScript.get_wheel_spring_stiffness(false, config)
-	var exp_kw_f: float = 35000.0 * 1.0862 * 1.0862
-	var exp_kw_r: float = 48000.0 * 1.0951 * 1.0951
+	var exp_kw_f: float = 35000.0 * 0.884956 * 0.884956
+	var exp_kw_r: float = 48000.0 * 0.884956 * 0.884956
 	if absf(kw_f - exp_kw_f) < 1e-2 and absf(kw_r - exp_kw_r) < 1e-2:
 		passed += 1
 	else:

@@ -51,11 +51,11 @@ static func run() -> Dictionary:
 	var total_brake = front_brake_sum + rear_brake_sum
 	
 	var front_ratio = front_brake_sum / maxf(total_brake, 1e-4)
-	if absf(front_ratio - 0.60) < 1e-3:
+	if absf(front_ratio - config.brake_bias_front) < 1e-3:
 		passed += 1
 	else:
 		failed += 1
-		errors.append("Brake bias failed: front ratio is %.3f, expected 0.60" % front_ratio)
+		errors.append("Brake bias failed: front ratio is %.4f, expected %.4f" % [front_ratio, config.brake_bias_front])
 	
 	# Test 4: Torque override for Torque Vectoring
 	inputs.reset()

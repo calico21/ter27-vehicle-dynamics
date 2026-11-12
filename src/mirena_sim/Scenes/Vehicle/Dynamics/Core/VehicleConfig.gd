@@ -20,35 +20,35 @@ enum WheelIndex {
 }
 
 # --- Chassis & Mass Geometry ---
-@export var mass: float = 270.0
+@export var mass: float = 290.0
 @export var gravity: float = 9.81
-@export var wheelbase: float = 1.530
-@export var track_width_f: float = 1.200
-@export var track_width_r: float = 1.180
-@export var h_cog: float = 0.260
+@export var wheelbase: float = 1.540
+@export var track_width_f: float = 1.230
+@export var track_width_r: float = 1.230
+@export var h_cog: float = 0.290
 @export var weight_dist_r: float = 0.55
 @export var ackermann_factor: float = 0.60
 
-@export var ixx: float = 50.0
-@export var iyy: float = 98.0
-@export var izz: float = 117.0
+@export var ixx: float = 54.0
+@export var iyy: float = 105.0
+@export var izz: float = 125.0
 
-var a_cog: float = 0.8415
-var b_cog: float = 0.6885
+var a_cog: float = 0.847
+var b_cog: float = 0.693
 
 # --- Suspension & Raycast ---
-# TeR27 design values: spring stiffness & constant motion ratios (MR = dx_spring / dz_wheel)
+# TeR27 design values: spring stiffness & constant motion ratios (MR = dx_spring / dz_wheel = 1 / 1.13)
 @export var spring_stiffness_front: float = 35000.0
 @export var spring_stiffness_rear: float = 48000.0
-@export var motion_ratio_front: float = 1.0862
-@export var motion_ratio_rear: float = 1.0951
+@export var motion_ratio_front: float = 0.884956
+@export var motion_ratio_rear: float = 0.884956
 # Estimated / configurable damper, ARB, bumpstop & geometry parameters
-@export var damping_compression_front: float = 2400.0
-@export var damping_relaxation_front: float = 3600.0
-@export var damping_compression_rear: float = 2800.0
-@export var damping_relaxation_rear: float = 4200.0
-@export var arb_stiffness_front: float = 9000.0
-@export var arb_stiffness_rear: float = 1000.0
+@export var damping_compression_front: float = 2000.0
+@export var damping_relaxation_front: float = 3000.0
+@export var damping_compression_rear: float = 2000.0
+@export var damping_relaxation_rear: float = 3000.0
+@export var arb_stiffness_front: float = 4500.0
+@export var arb_stiffness_rear: float = 5500.0
 @export var bumpstop_start_front: float = 0.025
 @export var bumpstop_start_rear: float = 0.025
 @export var bumpstop_stiffness_front: float = 120000.0
@@ -72,7 +72,7 @@ var toe_table_rear: Array = []
 @export var motor_taper_ratio: float = 0.85
 @export var gear_ratio: float = 5.0
 @export var drivetrain_efficiency: float = 0.92
-@export var front_drive_torque_ratio: float = 0.50
+@export var front_drive_torque_ratio: float = 0.35
 @export var max_steer_angle: float = 0.38
 @export var tv_rate_hz: float = 200.0
 @export var tv_allow_regen: bool = false
@@ -80,10 +80,10 @@ var toe_table_rear: Array = []
 
 # --- Brakes ---
 @export var brake_mu: float = 1.30
-@export var brake_bias_front: float = 0.60
+@export var brake_bias_front: float = 0.7659
 
 # --- Tires ---
-@export var wheel_radius: float = 0.20
+@export var wheel_radius: float = 0.2032
 @export var wheel_inertia: float = 0.35
 @export var tyre_mu_x: float = 1.6
 @export var tyre_mu_y: float = 1.5
@@ -96,9 +96,10 @@ var toe_table_rear: Array = []
 
 # --- Aerodynamics ---
 @export var air_density: float = 1.225
-@export var cd_a: float = 2.75
-@export var cl_a: float = 4.554
-@export var aero_balance_front: float = 0.45
+@export var cd_a: float = 1.5
+@export var cl_a: float = 6.0
+@export var aero_balance_front: float = 0.48
+@export var cp_height: float = 0.144
 var _has_explicit_axle_cl: bool = false
 var _cl_a_front_explicit: float = 0.0
 var _cl_a_rear_explicit: float = 0.0
@@ -230,7 +231,10 @@ func _load_drivetrain_json(file_path: String) -> void:
 	motor_taper_ratio = float(d.get("motor_taper_ratio", motor_taper_ratio))
 	gear_ratio = float(d.get("gear_ratio", gear_ratio))
 	drivetrain_efficiency = float(d.get("drivetrain_efficiency", drivetrain_efficiency))
-	front_drive_torque_ratio = float(d.get("front_drive_torque_ratio", front_drive_torque_ratio))
+	if d.has("front_torque_split"):
+		front_drive_torque_ratio = clampf(float(d.get("front_torque_split", front_drive_torque_ratio)), 0.0, 1.0)
+	else:
+		front_drive_torque_ratio = clampf(float(d.get("front_drive_torque_ratio", front_drive_torque_ratio)), 0.0, 1.0)
 	max_steer_angle = float(d.get("max_steer_angle", max_steer_angle))
 	tv_rate_hz = float(d.get("tv_rate_hz", tv_rate_hz))
 	tv_allow_regen = bool(d.get("tv_allow_regen", tv_allow_regen))
@@ -258,6 +262,7 @@ func _load_aero_json(file_path: String) -> void:
 	cd_a = float(d.get("cd_a", cd_a))
 	cl_a = float(d.get("cl_a", cl_a))
 	aero_balance_front = clampf(float(d.get("aero_balance_front", aero_balance_front)), 0.0, 1.0)
+	cp_height = float(d.get("cp_height", cp_height))
 	if d.has("cl_a_front") and d.has("cl_a_rear"):
 		_has_explicit_axle_cl = true
 		_cl_a_front_explicit = float(d.get("cl_a_front", 0.0))

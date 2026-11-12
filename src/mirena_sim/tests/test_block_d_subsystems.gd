@@ -144,7 +144,7 @@ static func run() -> Dictionary:
 	cfg_a_rear.aero_balance_front = 0.30
 	var aero_r: Dictionary = AeroModelScript.compute_forces_ros(Vector3(30.0, 0.0, 0.0), cfg_a_rear)
 
-	var exp_pitch_f: float = cfg_a_front.a_cog * float(aero_f["downforce_front"]) - cfg_a_front.b_cog * float(aero_f["downforce_rear"])
+	var exp_pitch_f: float = cfg_a_front.a_cog * float(aero_f["downforce_front"]) - cfg_a_front.b_cog * float(aero_f["downforce_rear"]) + (cfg_a_front.cp_height - cfg_a_front.h_cog) * float(aero_f["drag"].x)
 	if absf(float(aero_f["torque"].y) - exp_pitch_f) < 1e-3 and float(aero_f["torque"].y) > 10.0 and float(aero_r["torque"].y) < -10.0:
 		passed += 1
 	else:
