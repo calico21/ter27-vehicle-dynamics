@@ -6,5 +6,6 @@
   "slip_stiffness": 80000.0,
   "cornering_stiffness": 45000.0,
   "rolling_resistance_coeff": 0.015,
-  "slip_regularization_speed": 0.5
+  "slip_regularization_speed": 0.5,
+  "surface_grip_scale": 0.78
 }

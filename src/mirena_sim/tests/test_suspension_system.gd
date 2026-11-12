@@ -106,6 +106,7 @@ static func run() -> Dictionary:
 
 	# 6. 1D piecewise-linear kinematic interpolation + L/R sign conventions + end-to-end model integration
 	var cfg_kin = VehicleConfigScript.new()
+	cfg_kin.ackermann_factor = 0.0
 	cfg_kin.camber_table_front = [[-0.02, deg_to_rad(-1.0)], [0.00, deg_to_rad(-2.0)], [0.02, deg_to_rad(-3.0)]]
 	cfg_kin.toe_table_front = [[-0.02, deg_to_rad(0.0)], [0.00, deg_to_rad(0.5)], [0.02, deg_to_rad(1.0)]]
 

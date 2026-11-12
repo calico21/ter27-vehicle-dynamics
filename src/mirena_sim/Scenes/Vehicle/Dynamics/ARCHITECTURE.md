@@ -25,17 +25,17 @@
 All JSON configurations reside under `Core/Config/`:
 
 1. **TeR27 Design / Measured Parameters:**
-   - [chassis.json](Core/Config/chassis.json): `mass = 300.0 kg`, `wheelbase = 1.530 m`, `track_width_front = 1.200 m`, `track_width_rear = 1.180 m`, `weight_distribution_rear = 0.55` (`45%` F / `55%` R static split).
+   - [chassis.json](Core/Config/chassis.json): `mass = 270.0 kg` (car + driver target), `cg_height = 0.260 m` (`SSF = 2.288 g`), `wheelbase = 1.530 m`, `track_width_front = 1.200 m`, `track_width_rear = 1.180 m`, `weight_distribution_rear = 0.55` (`45%` F / `55%` R static split), `max_steer_angle = 0.38 rad`, `ackermann_factor = 0.60`.
    - [suspension.json](Core/Config/suspension.json): `spring_stiffness_front = 35000.0 N/m`, `motion_ratio_front = 1.0862` ($k_{\text{wheel},f} \approx 41{,}294\text{ N/m}$); `spring_stiffness_rear = 48000.0 N/m`, `motion_ratio_rear = 1.0951` ($k_{\text{wheel},r} \approx 57{,}564\text{ N/m}$).
    - [drivetrain.json](Core/Config/drivetrain.json): `power_limit_watts = 80000.0 W` (Formula Student rule), `gear_ratio = 5.0`, `front_drive_torque_ratio = 0.50`.
 
-2. **TTC Calibrated Tires (`Tires/MF62/`):**
+2. **TTC Calibrated Tires (`Tires/MF62/` & [tires.json](Core/Config/tires.json)):**
    - Production compounds: `hoosier_16x7.5_10_r25b_mf62.json` (Round 8, Run 6/7) and `hoosier_16x7.5_10_r20_mf62.json` (Round 9, Run 8/9).
-   - Default closed-loop setting uses pure MF 6.2 (`TireModel.enable_neural_correction = false`).
+   - Default closed-loop setting uses pure MF 6.2 (`TireModel.enable_neural_correction = false`) with `surface_grip_scale = 0.78` smooth road-friction envelope in `WheelDynamics` to scale raw Calspan belt friction ($\mu \approx 2.5$) to track asphalt ($\mu < \text{SSF}$) while preserving low-slip stiffness.
    - Longitudinal $F_x$ and combined slip ($G_{x\alpha}, G_{y\kappa}$) use surrogate calibration from TTC Round 9 `Hoosier 18.0x6.0-10 R20` (`alpha in {-3, -6} deg`).
 
 3. **Estimated / Configurable Placeholders** (tagged in each JSON `_parameter_provenance` block):
-   - Damper compression/rebound rates (`2400/3600` F, `2800/4200` R N·s/m), ARB wheel rates (`2000/1000` N/m), bumpstop onset/stiffness, and 1D Optimum Kinematics `camber_table_*_deg` / `toe_table_*_deg` (empty => `0.0`).
+   - Damper compression/rebound rates (`2400/3600` F, `2800/4200` R N·s/m), ARB wheel rates (`9000` F / `1000` R N/m), bumpstop onset/stiffness, and 1D Optimum Kinematics camber tables (`-1.8°` F / `-1.2°` R static + bump camber gain; `toe_table_*_deg` empty => `0.0`).
    - `motor_peak_torque`, `motor_max_rpm = 12000.0`, `motor_taper_ratio = 0.85`, `drivetrain_efficiency = 0.92`, `brake_mu = 1.30`, `brake_bias_front = 0.60`, `cd_a = 2.75`, `cl_a = 4.554`, `aero_balance_front = 0.45`.
 
 ---

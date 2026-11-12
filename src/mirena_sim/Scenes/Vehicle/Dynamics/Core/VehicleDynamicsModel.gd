@@ -56,6 +56,19 @@ func _init_wheels() -> void:
 	wheels.append(WheelDynamics.new(VehicleConfig.WheelIndex.RL, "RL", false))
 	wheels.append(WheelDynamics.new(VehicleConfig.WheelIndex.RR, "RR", true))
 
+## Computes front wheel steer angle (ISO +Z CCW left) with configurable Ackermann geometry.
+static func compute_ackermann_steer(steer_angle: float, is_left: bool, config: VehicleConfig) -> float:
+	var abs_s: float = absf(steer_angle)
+	var ack: float = clampf(config.ackermann_factor, 0.0, 1.0)
+	if abs_s < 1e-6 or ack <= 0.0 or config.wheelbase <= 1e-3:
+		return steer_angle
+	var half_t: float = 0.5 * config.track_width_f
+	var r_turn: float = config.wheelbase / tan(abs_s)
+	var is_inner: bool = (steer_angle > 0.0 and is_left) or (steer_angle < 0.0 and not is_left)
+	var r_wheel: float = maxf(r_turn - half_t, 0.25 * config.wheelbase) if is_inner else (r_turn + half_t)
+	var ack_mag: float = atan2(config.wheelbase, r_wheel)
+	return signf(steer_angle) * lerpf(abs_s, ack_mag, ack)
+
 ## Returns wheel position relative to CoG in ISO/ROS frame:
 func get_wheel_pos_ros(index: int) -> Vector3:
 	return ChassisDynamics.get_wheel_pos_ros(index, config)
@@ -168,7 +181,11 @@ func step_forces(
 		var v_hub = local_v_ros + local_w_ros.cross(r_pos)
 		w.v_hub_chassis = v_hub
 		
-		var base_steer = steer_angle if (i == VehicleConfig.WheelIndex.FL or i == VehicleConfig.WheelIndex.FR) else 0.0
+		var base_steer: float = 0.0
+		if i == VehicleConfig.WheelIndex.FL:
+			base_steer = compute_ackermann_steer(steer_angle, true, config)
+		elif i == VehicleConfig.WheelIndex.FR:
+			base_steer = compute_ackermann_steer(steer_angle, false, config)
 		var delta_w = base_steer + toe_offsets[i]
 		wheel_steer_angles.append(delta_w)
 		

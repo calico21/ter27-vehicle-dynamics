@@ -111,8 +111,10 @@ func compute_slip(
 	
 	# First-order transient carcass relaxation integration
 	if TireModel.enable_transient_relaxation and dt > 0.0:
+		# Allow longitudinal slip to relax during standstill launch when wheel spins while v_x == 0
+		var v_kappa_rel: float = v_longitudinal if absf(v_longitudinal) >= absf(omega * wheel_radius) else (omega * wheel_radius)
 		alpha_transient = TransientRelaxation.integrate_alpha_relaxation(alpha_transient, alpha, v_longitudinal, dt, F_z)
-		kappa_transient = TransientRelaxation.integrate_kappa_relaxation(kappa_transient, kappa, v_longitudinal, dt, F_z)
+		kappa_transient = TransientRelaxation.integrate_kappa_relaxation(kappa_transient, kappa, v_kappa_rel, dt, F_z)
 	else:
 		alpha_transient = alpha
 		kappa_transient = kappa
@@ -147,14 +149,31 @@ func compute_forces(normal_force: float, config: VehicleConfig) -> void:
 		is_right_side
 	)
 	
-	F_x = tire_res["Fx"]
-	F_y = tire_res["Fy"]
-	M_z = tire_res["Mz"]
-	M_x = tire_res.get("Mx", 0.0)
+	var grip_scale: float = clampf(config.surface_grip_scale, 0.1, 1.5) if config != null else 1.0
+	var fx_raw: float = tire_res["Fx"]
+	var fy_raw: float = tire_res["Fy"]
+	var mz_raw: float = tire_res["Mz"]
+	var mx_raw: float = tire_res.get("Mx", 0.0)
+	var dfx_raw: float = tire_res.get("delta_Fx", 0.0)
+	var dfy_raw: float = tire_res.get("delta_Fy", 0.0)
+	var dmz_raw: float = tire_res.get("delta_Mz", 0.0)
+	var out_scale: float = grip_scale
+	if grip_scale < 0.9999:
+		# Smooth C-inf isotropic road friction envelope (preserves low-slip carcass stiffness
+		# in the 1-5 deg linear range while scaling Calspan belt peak mu (~2.5) down to asphalt).
+		var f_cap: float = maxf(2.50 * grip_scale * F_z, 1e-3)
+		var f_mag: float = sqrt(fx_raw * fx_raw + fy_raw * fy_raw)
+		var r: float = f_mag / f_cap
+		var r2: float = r * r
+		out_scale = 1.0 / pow(1.0 + r2 * r2, 0.25)
+	F_x = fx_raw * out_scale
+	F_y = fy_raw * out_scale
+	M_z = mz_raw * out_scale
+	M_x = mx_raw * out_scale
 	M_y = tire_res.get("My", 0.0)
-	delta_Fx = tire_res.get("delta_Fx", 0.0)
-	delta_Fy = tire_res.get("delta_Fy", 0.0)
-	delta_Mz = tire_res.get("delta_Mz", 0.0)
+	delta_Fx = dfx_raw * out_scale
+	delta_Fy = dfy_raw * out_scale
+	delta_Mz = dmz_raw * out_scale
 
 ## Integrates the rotational equation of motion for this wheel:
 ## I_w * d(omega)/dt = T_drive - T_brake * sgn(omega) - F_x * R_w - F_rr * R_w

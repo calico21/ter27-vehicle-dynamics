@@ -36,7 +36,7 @@
   "damping_relaxation_front": 3600.0,
   "damping_compression_rear": 2800.0,
   "damping_relaxation_rear": 4200.0,
-  "arb_stiffness_front": 2000.0,
+  "arb_stiffness_front": 9000.0,
   "arb_stiffness_rear": 1000.0,
   "bumpstop_start_front": 0.025,
   "bumpstop_start_rear": 0.025,
@@ -46,8 +46,20 @@
   "bumpstop_quadratic_rear": 2500000.0,
   "ray_rest_length": 0.32,
   "ray_cast_length": 0.45,
-  "camber_table_front_deg": [],
-  "camber_table_rear_deg": [],
+  "camber_table_front_deg": [
+    [-0.04, -0.6],
+    [-0.02, -1.2],
+    [0.0, -1.8],
+    [0.02, -2.4],
+    [0.04, -3.0]
+  ],
+  "camber_table_rear_deg": [
+    [-0.04, -0.4],
+    [-0.02, -0.8],
+    [0.0, -1.2],
+    [0.02, -1.6],
+    [0.04, -2.0]
+  ],
   "toe_table_front_deg": [],
   "toe_table_rear_deg": []
 }

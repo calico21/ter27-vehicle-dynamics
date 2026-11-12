@@ -277,8 +277,61 @@ static func run(verbose: bool = false) -> Dictionary:
 		print("     Slalom: r in [%.2f, %.2f] rad/s | Peak |ay| = %.2f g | Steer-to-Yaw phase lag = %.1f ms\n" % [
 			min_r_slalom, max_r_slalom, peak_ay_slalom_g, phase_lag_ms
 		])
+
+	# -----------------------------------------------------------------
+	# MANEUVER 5: High-Speed Max-Steer Rollover Stability (22 m/s)
+	# -----------------------------------------------------------------
+	model.reset()
+	var u_lim: float = 22.0
+	model.chassis_state.linear_velocity = Vector3(u_lim, 0.0, 0.0)
+	for w in model.wheels:
+		w.omega = u_lim / cfg.wheel_radius
+	inp.reset()
+	inp.drive_mode = VehicleConfigScript.DriveMode.FOUR_WD
+	inp.throttle = 0.20
+
+	var max_roll_lim_deg: float = 0.0
+	var max_pitch_lim_deg: float = 0.0
+	var peak_ay_lim_g: float = 0.0
+	var min_grounded_lim: int = 4
+	var min_z_lim: float = cfg.h_cog
+
+	for k in range(800): # 2.0 s @ 400 Hz
+		if k >= 40:
+			inp.steer_angle = cfg.max_steer_angle
+		var res_lim: Dictionary = model.step_standalone(inp, dt, 0.0)
+		max_roll_lim_deg = maxf(max_roll_lim_deg, absf(rad_to_deg(model.chassis_state.roll)))
+		max_pitch_lim_deg = maxf(max_pitch_lim_deg, absf(rad_to_deg(model.chassis_state.pitch)))
+		min_z_lim = minf(min_z_lim, model.chassis_state.position.z)
+		var ay_lim: float = absf(model.chassis_state.linear_velocity.x * model.chassis_state.angular_velocity.z) / g
+		peak_ay_lim_g = maxf(peak_ay_lim_g, ay_lim)
+		var fz_lim: Array = res_lim["normal_forces"]
+		var grounded_now: int = 0
+		for corner_fz in fz_lim:
+			if float(corner_fz) > 1.0:
+				grounded_now += 1
+		min_grounded_lim = mini(min_grounded_lim, grounded_now)
+
+	var ssf: float = (0.5 * (cfg.track_width_f + cfg.track_width_r)) / (2.0 * cfg.h_cog)
+	var m5_ok: bool = (ssf > 2.25 and max_roll_lim_deg < 15.0 and max_pitch_lim_deg < 10.0 \
+			and peak_ay_lim_g > 1.3 and min_grounded_lim >= 3 and min_z_lim > 0.15)
+	if m5_ok:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("M5 Rollover Stability failed: SSF=%.3f, max_roll=%.2f deg, max_pitch=%.2f deg, min_grounded=%d/4, peak_ay=%.2f g" % [
+			ssf, max_roll_lim_deg, max_pitch_lim_deg, min_grounded_lim, peak_ay_lim_g
+		])
+
+	if verbose:
+		print("[M5] Limit Step-Steer Rollover Stability (delta = %.2f rad / %.1f deg @ 22 m/s)" % [
+			cfg.max_steer_angle, rad_to_deg(cfg.max_steer_angle)
+		])
+		print("     SSF = %.3f g | max|roll| = %.2f deg | max|pitch| = %.2f deg | Peak |ay| = %.2f g | Min grounded = %d/4\n" % [
+			ssf, max_roll_lim_deg, max_pitch_lim_deg, peak_ay_lim_g, min_grounded_lim
+		])
 		print("-----------------------------------------------------------------")
-		print("Acceptance Summary: %d/4 maneuvers PASSED." % passed)
+		print("Acceptance Summary: %d/5 maneuvers PASSED." % passed)
 		print("=================================================================\n")
 
 	return {

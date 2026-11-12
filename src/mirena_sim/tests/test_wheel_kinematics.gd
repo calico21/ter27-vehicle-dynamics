@@ -64,7 +64,8 @@ static func run() -> Dictionary:
 	else:
 		failed += 1
 	
-	# Test 3: Steered front wheels (delta = 0.2 rad, u = 10 m/s)
+	# Test 3: Steered front wheels (parallel steer check, ackermann_factor = 0.0, delta = 0.2 rad, u = 10 m/s)
+	config.ackermann_factor = 0.0
 	model.reset()
 	inputs.steer_angle = 0.2
 	model.step(inputs, Vector3(10.0, 0.0, 0.0), Vector3.ZERO, [], 0.0025)
@@ -79,5 +80,16 @@ static func run() -> Dictionary:
 		errors.append("Steered FL kinematics failed: got (%.3f, %.3f), expected (%.3f, %.3f)" % [
 			w_fl.v_longitudinal, w_fl.v_lateral, expected_vx_steer, expected_vy_steer
 		])
+	
+	# Test 4: Ackermann geometry (left turn +0.2 rad -> inner FL steers more than center, outer FR less)
+	config.ackermann_factor = 0.60
+	model.reset()
+	inputs.steer_angle = 0.2
+	model.step(inputs, Vector3(10.0, 0.0, 0.0), Vector3.ZERO, [], 0.0025)
+	if w_fl.steer_angle > 0.2 and w_fr.steer_angle < 0.2 and w_fr.steer_angle > 0.0:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("Ackermann geometry failed: FL=%.4f, FR=%.4f" % [w_fl.steer_angle, w_fr.steer_angle])
 	
 	return {"name": "test_wheel_kinematics", "passed": passed, "failed": failed, "errors": errors}

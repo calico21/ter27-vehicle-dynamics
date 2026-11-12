@@ -34,6 +34,8 @@ var telemetry: VehicleTelemetryScript
 @export var drive_mode: VehicleConfigScript.DriveMode = VehicleConfigScript.DriveMode.FOUR_WD
 @export var tv_mode: int = 0
 var tv_yaw_moment_req: float = 0.0
+@export var manual_steer_rate: float = 8.0
+@export var manual_steer_return_rate: float = 12.0
 @export var rail_speed: float = 10.0
 @export var rail_look_ahead: float = 3.0
 var _rail_progress: float = 0.0
@@ -369,7 +371,8 @@ func _process_no_pilot() -> void:
 
 func _process_manual_pilot(delta: float) -> void:
 	var steer_input = Input.get_action_strength("manual_steer_l") - Input.get_action_strength("manual_steer_r")
-	_steer_smoothed = _smooth_steer(_steer_smoothed, steer_input, delta, 2.0)
+	var steer_rate = manual_steer_return_rate if (absf(steer_input) < absf(_steer_smoothed) or steer_input * _steer_smoothed < 0.0) else manual_steer_rate
+	_steer_smoothed = _smooth_steer(_steer_smoothed, steer_input, delta, steer_rate)
 	
 	self.gas = Input.get_action_strength("manual_gas_pos") - Input.get_action_strength("manual_gas_neg")
 	self.steering = _steer_smoothed * config.max_steer_angle
@@ -410,13 +413,9 @@ func _process_track_rail(delta: float) -> void:
 	global_transform.basis = global_transform.basis.slerp(look_global.basis.orthonormalized(), 5.0 * delta).orthonormalized()
 
 func _smooth_steer(current: float, target: float, delta: float, speed: float) -> float:
-	var diff = target - current
-	var t = clampf(absf(diff), 0.0, 1.0)
-	var ease_val = t * t * (3.0 - 2.0 * t)
-	current += signf(diff) * ease_val * speed * delta
-	if signf(target - current) != signf(diff):
-		current = target
-	return clampf(current, -1.0, 1.0)
+	if delta <= 0.0:
+		return current
+	return clampf(move_toward(current, clampf(target, -1.0, 1.0), speed * delta), -1.0, 1.0)
 
 # --- ROS Callbacks and Publishing ---
 func _on_control(msg) -> void:
@@ -586,6 +585,7 @@ func reset_position() -> void:
 	self.gas = 0.0
 	self.steering = 0.0
 	self.brake = 0.0
+	_steer_smoothed = 0.0
 	_ros_gas = 0.0
 	_ros_steer = 0.0
 	_ros_brake = 0.0

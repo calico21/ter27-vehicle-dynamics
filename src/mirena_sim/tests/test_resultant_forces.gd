@@ -50,7 +50,7 @@ static func run() -> Dictionary:
 	var wheel_force_sum = Vector3.ZERO
 	for i in range(4):
 		var w = model.wheels[i]
-		var delta_w = inputs.steer_angle if (i == 0 or i == 1) else 0.0
+		var delta_w = w.steer_angle
 		var fx_c = w.F_x * cos(delta_w) - w.F_y * sin(delta_w)
 		var fy_c = w.F_x * sin(delta_w) + w.F_y * cos(delta_w)
 		wheel_force_sum += Vector3(fx_c, fy_c, w.F_z)

@@ -20,20 +20,21 @@ enum WheelIndex {
 }
 
 # --- Chassis & Mass Geometry ---
-@export var mass: float = 300.0
+@export var mass: float = 270.0
 @export var gravity: float = 9.81
 @export var wheelbase: float = 1.530
 @export var track_width_f: float = 1.200
 @export var track_width_r: float = 1.180
-@export var h_cog: float = 0.33
+@export var h_cog: float = 0.260
 @export var weight_dist_r: float = 0.55
+@export var ackermann_factor: float = 0.60
 
-@export var ixx: float = 60.0
-@export var iyy: float = 110.0
-@export var izz: float = 130.0
+@export var ixx: float = 50.0
+@export var iyy: float = 98.0
+@export var izz: float = 117.0
 
-var a_cog: float = 0.8262
-var b_cog: float = 0.7038
+var a_cog: float = 0.8415
+var b_cog: float = 0.6885
 
 # --- Suspension & Raycast ---
 # TeR27 design values: spring stiffness & constant motion ratios (MR = dx_spring / dz_wheel)
@@ -46,7 +47,7 @@ var b_cog: float = 0.7038
 @export var damping_relaxation_front: float = 3600.0
 @export var damping_compression_rear: float = 2800.0
 @export var damping_relaxation_rear: float = 4200.0
-@export var arb_stiffness_front: float = 2000.0
+@export var arb_stiffness_front: float = 9000.0
 @export var arb_stiffness_rear: float = 1000.0
 @export var bumpstop_start_front: float = 0.025
 @export var bumpstop_start_rear: float = 0.025
@@ -72,7 +73,7 @@ var toe_table_rear: Array = []
 @export var gear_ratio: float = 5.0
 @export var drivetrain_efficiency: float = 0.92
 @export var front_drive_torque_ratio: float = 0.50
-@export var max_steer_angle: float = 0.35
+@export var max_steer_angle: float = 0.38
 @export var tv_rate_hz: float = 200.0
 @export var tv_allow_regen: bool = false
 @export var regen_peak_torque: float = 0.0
@@ -90,6 +91,8 @@ var toe_table_rear: Array = []
 @export var cornering_stiffness: float = 45000.0
 @export var rolling_resistance_coeff: float = 0.015
 @export var slip_regularization_speed: float = 0.5
+## Scales raw Calspan TTC belt friction down to real asphalt track grip (<= 1.0 preserves SSF > mu_y).
+@export var surface_grip_scale: float = 0.78
 
 # --- Aerodynamics ---
 @export var air_density: float = 1.225
@@ -156,6 +159,9 @@ func _load_chassis_json(file_path: String) -> void:
 	track_width_r = float(d.get("track_width_rear", track_width_r))
 	h_cog = float(d.get("cg_height", h_cog))
 	weight_dist_r = float(d.get("weight_distribution_rear", weight_dist_r))
+	ackermann_factor = clampf(float(d.get("ackermann_factor", ackermann_factor)), 0.0, 1.0)
+	if d.has("max_steer_angle"):
+		max_steer_angle = float(d.get("max_steer_angle", max_steer_angle))
 	
 	var inertia = d.get("inertia", {})
 	if inertia is Dictionary:
@@ -212,6 +218,7 @@ func _load_tires_json(file_path: String) -> void:
 	cornering_stiffness = float(d.get("cornering_stiffness", cornering_stiffness))
 	rolling_resistance_coeff = float(d.get("rolling_resistance_coeff", rolling_resistance_coeff))
 	slip_regularization_speed = float(d.get("slip_regularization_speed", slip_regularization_speed))
+	surface_grip_scale = clampf(float(d.get("surface_grip_scale", surface_grip_scale)), 0.1, 1.5)
 
 func _load_drivetrain_json(file_path: String) -> void:
 	var d = _read_json_file(file_path)

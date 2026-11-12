@@ -99,9 +99,17 @@ func _apply_axle_arb(left_idx: int, right_idx: int, is_front: bool, config: Vehi
 		c_l.arb_force = 0.0
 		c_r.arb_force = 0.0
 		return
+	var f_pre_l: float = c_l.static_preload + c_l.spring_force + c_l.damper_force + c_l.bumpstop_force
+	var f_pre_r: float = c_r.static_preload + c_r.spring_force + c_r.damper_force + c_r.bumpstop_force
 	var arb_pair: Vector2 = compute_arb_axle_forces(c_l.delta_z, c_r.delta_z, is_front, config)
-	c_l.arb_force = arb_pair.x
-	c_r.arb_force = arb_pair.y
+	var f_arb_l: float = arb_pair.x
+	# Clamp lateral ARB load transfer to available inside-wheel vertical force so liftoff cannot create net vertical jacking
+	if f_pre_l + f_arb_l < 0.0:
+		f_arb_l = -maxf(0.0, f_pre_l)
+	if f_pre_r - f_arb_l < 0.0:
+		f_arb_l = maxf(0.0, f_pre_r)
+	c_l.arb_force = f_arb_l
+	c_r.arb_force = -f_arb_l
 
 ## Computes static vertical preload F_{0,i} (N) from chassis mass distribution.
 static func compute_static_preload(index: int, config: VehicleConfig) -> float:
