@@ -586,6 +586,9 @@ func reset_position() -> void:
 	self.gas = 0.0
 	self.steering = 0.0
 	self.brake = 0.0
+	_ros_gas = 0.0
+	_ros_steer = 0.0
+	_ros_brake = 0.0
 	_rail_progress = 0.0
 	slam_cones.clear()
 	hit_cones.clear()
@@ -598,6 +601,7 @@ func reset_position() -> void:
 		_wheel_rpm_acc[i] = 0.0
 		_wheel_rpm_lpf[i] = 0.0
 		_prev_compressions[i] = 0.0
+		_was_grounded[i] = false
 	_wheel_decim_n = 0
 	
 	if has_node("INS") and get_node("INS").has_method("reset"):

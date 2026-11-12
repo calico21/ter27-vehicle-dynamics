@@ -258,13 +258,25 @@ func step_standalone(in_inputs: VehicleInputs, dt: float, ground_height: float =
 
 	# Heun update for 6-DOF chassis and 4 wheels
 	chassis_state = ChassisDynamics.advance_heun(s0, k1, k2, dt)
+	var all_wheels_stopped: bool = true
 	for i in range(4):
 		var w2_step: Vector4 = wheels[i].get_integrator_state()
 		var w_heun: Vector4 = 0.5 * (w0[i] + w2_step)
 		# Preserve crisp zero-crossing brake hold at standstill
 		if is_zero_approx(w2_step.x) and in_inputs.brake > 0.0 and in_inputs.throttle == 0.0:
 			w_heun.x = 0.0
+		if absf(w_heun.x) > 1e-3:
+			all_wheels_stopped = false
 		wheels[i].set_integrator_state(w_heun)
+
+	# Prevent transient tire carcass deflection from rebounding the car backward past zero under brakes
+	if in_inputs.brake > 0.0 and in_inputs.throttle == 0.0:
+		if s0.linear_velocity.x >= 0.0 and chassis_state.linear_velocity.x <= 0.0:
+			chassis_state.linear_velocity.x = 0.0
+			if all_wheels_stopped:
+				for i in range(4):
+					wheels[i].kappa = 0.0
+					wheels[i].kappa_transient = 0.0
 
 	linear_velocity_ros = chassis_state.linear_velocity
 	angular_velocity_ros = chassis_state.angular_velocity

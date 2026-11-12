@@ -13,6 +13,8 @@ const TestResultantForces = preload("test_resultant_forces.gd")
 const TestTireMF62 = preload("test_tire_mf62_suite.gd")
 const TestTireParity = preload("test_tire_parity.gd")
 const TestTransientDynamics = preload("test_transient_dynamics.gd")
+const TestRosContracts = preload("test_ros_contracts.gd")
+const AcceptanceManeuversSuite = preload("acceptance_maneuvers_suite.gd")
 
 func _init() -> void:
 	print("\n========================================================")
@@ -32,7 +34,9 @@ func _init() -> void:
 		TestSuspensionSystem,
 		TestChassis14DOF,
 		TestBlockDSubsystems,
-		TestResultantForces
+		TestResultantForces,
+		TestRosContracts,
+		AcceptanceManeuversSuite
 	]
 	
 	var total_passed = 0
