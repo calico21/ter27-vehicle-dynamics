@@ -37,9 +37,10 @@ if VAL_DIR not in sys.path:
 
 TIRES_DIR = os.path.abspath(os.path.join(VAL_DIR, ".."))
 PROCESSED_DIR = os.path.join(TIRES_DIR, "Data", "Hoosier_16x7.5-10", "Processed")
+DRIVE_BRAKE_PROCESSED_DIR = os.path.join(TIRES_DIR, "Data", "Hoosier_18\u00d76.0-10", "Processed")
 PLOTS_DIR = os.path.join(VAL_DIR, "Plots")
 TREE_DIR = os.path.join(VAL_DIR, "Tire_Model_Validation")
-ARTIFACT_DIR = "/home/alexr/.gemini/antigravity/brain/c5c97b01-25de-4bd1-b6e1-31c6c789a36b"
+ARTIFACT_DIR = "/home/alexr/.gemini/antigravity/brain/57522ed7-23f4-4417-9681-4c6bda726199"
 
 from core.evaluator import TireModelEvaluator
 from core.metrics import compute_metrics, decompose_error, bootstrap_confidence_interval
@@ -62,7 +63,8 @@ MODULE_DIRS = {
     "11": "11_Hybrid_MLP",
     "12": "12_Transient_Dynamics",
     "13": "13_Python_Godot_Parity",
-    "14": "14_Vehicle_Dynamics_Relevance"
+    "14": "14_Vehicle_Dynamics_Relevance",
+    "15": "15_Real_Telemetry_TeR26"
 }
 
 
@@ -212,12 +214,64 @@ def run_compound_validation(compound: str, tree_paths: dict):
     # 5. Sliced Domain Metrics (Validation Set)
     sliced_val_metrics = compute_comprehensive_sliced_metrics(eval_val)
 
+    # 5b. Load & Evaluate Longitudinal / Combined-Slip Drive/Brake Validation Data (TTC Round 9 R20)
+    pure_db_csv = os.path.join(DRIVE_BRAKE_PROCESSED_DIR, "R20_18x6_pure_longitudinal.csv")
+    comb_db_csv = os.path.join(DRIVE_BRAKE_PROCESSED_DIR, "R20_18x6_combined_slip.csv")
+    df_pure_db = pd.read_csv(pure_db_csv, low_memory=False)
+    df_comb_db = pd.read_csv(comb_db_csv, low_memory=False)
+    df_pure_tr = df_pure_db[df_pure_db["split"] == "train"].copy()
+    df_pure_va = df_pure_db[df_pure_db["split"] == "val"].copy()
+    df_comb_tr = df_comb_db[df_comb_db["split"] == "train"].copy()
+    df_comb_va = df_comb_db[df_comb_db["split"] == "val"].copy()
+
+    ev_p_tr = evaluator.eval_longitudinal_dataset(df_pure_tr)
+    ev_p_va = evaluator.eval_longitudinal_dataset(df_pure_va)
+    res_c_va = evaluator.eval_combined(
+        df_comb_va["kappa"].values, df_comb_va["alpha"].values,
+        df_comb_va["f_z"].values, df_comb_va["gamma"].values, df_comb_va["p_kpa"].values,
+    )
+    refs_c_va = {
+        sw: float((s.loc[s["kappa"].abs() < 0.015, "f_y"] / s.loc[s["kappa"].abs() < 0.015, "f_z"]).mean())
+        for sw, s in df_comb_va.groupby("global_sweep_id") if (s["kappa"].abs() < 0.015).sum() >= 3
+    }
+    fy0_sw_va = df_comb_va["global_sweep_id"].map(refs_c_va).values * df_comb_va["f_z"].values
+
+    sliced_pure_val = {}
+    for s_lbl, mask_s in [
+        ("~220 N", (df_pure_va["f_z"] <= 330.0).values),
+        ("~660 N", ((df_pure_va["f_z"] > 550.0) & (df_pure_va["f_z"] <= 770.0)).values),
+        ("~880 N", ((df_pure_va["f_z"] > 770.0) & (df_pure_va["f_z"] <= 990.0)).values),
+        ("~1100 N", (df_pure_va["f_z"] > 990.0).values),
+        ("24 kph", (df_pure_va["v_x"] * 3.6 < 32.0).values),
+        ("72 kph", (df_pure_va["v_x"] * 3.6 > 55.0).values),
+    ]:
+        if np.sum(mask_s) >= 10:
+            sliced_pure_val[s_lbl] = {
+                "m1": compute_metrics(ev_p_va["fx_exp"][mask_s], ev_p_va["fx_m1"][mask_s]),
+                "m2": compute_metrics(ev_p_va["fx_exp"][mask_s], ev_p_va["fx_m2"][mask_s]),
+            }
+
+    long_metrics = {
+        "source_dataset": "TTC_Round9_Hoosier_18x6.0-10_R20_Runs69_70_72_73",
+        "is_surrogate_geometry": True,
+        "compound_longitudinal_role": "Direct R20 Drive/Brake fit" if c_upper == "R20" else "R20 Drive/Brake surrogate (No R25B Drive/Brake data)",
+        "pure_train_m1": compute_metrics(ev_p_tr["fx_exp"], ev_p_tr["fx_m1"]),
+        "pure_train_m2": compute_metrics(ev_p_tr["fx_exp"], ev_p_tr["fx_m2"]),
+        "pure_val_m1": compute_metrics(ev_p_va["fx_exp"], ev_p_va["fx_m1"]),
+        "pure_val_m2": compute_metrics(ev_p_va["fx_exp"], ev_p_va["fx_m2"]),
+        "comb_val_fx_m1": compute_metrics(df_comb_va["f_x"].values, res_c_va["fx_m1"]),
+        "comb_val_fx_m2": compute_metrics(df_comb_va["f_x"].values, res_c_va["fx_m2"]),
+        "comb_val_fy_gyk_m1": compute_metrics(df_comb_va["f_y"].values, res_c_va["gyk_m1"] * fy0_sw_va),
+        "comb_val_fy_gyk_m2": compute_metrics(df_comb_va["f_y"].values, res_c_va["gyk_m2"] * fy0_sw_va),
+        "sliced_pure_val": sliced_pure_val,
+    }
+
     # 6. Generate Figures Across All Modules
     generated_figures = {}
 
     print("\n>> Generating Module Figures...")
     # Mod 00: Overview
-    f00 = mods.generate_overview_dashboard(eval_val, global_metrics_3way, sliced_val_metrics, c_upper, tree_paths["00"])
+    f00 = mods.generate_overview_dashboard(eval_val, global_metrics_3way, sliced_val_metrics, c_upper, tree_paths["00"], long_metrics=long_metrics)
     generated_figures["00_Overview"] = [f00]
 
     # Mod 01: Experimental Data
@@ -241,12 +295,13 @@ def run_compound_validation(compound: str, tree_paths: dict):
     f04_b = mods.generate_pneumatic_trail_and_steering(evaluator, df_val, c_upper, tree_paths["04"])
     generated_figures["04_Aligning_Moment_Mz"] = [f04_a, f04_b]
 
-    # Mod 05: Longitudinal Fx
-    f05 = mods.generate_longitudinal_characterization(evaluator, c_upper, tree_paths["05"])
-    generated_figures["05_Longitudinal_Fx"] = [f05]
+    # Mod 05: Longitudinal Fx (Real TTC Round 9 Drive/Brake Validation)
+    f05_a = mods.generate_longitudinal_characterization(evaluator, c_upper, tree_paths["05"], df_pure_tr, df_pure_va)
+    f05_b = mods.generate_longitudinal_pressure_and_residuals(evaluator, df_pure_tr, df_pure_va, c_upper, tree_paths["05"])
+    generated_figures["05_Longitudinal_Fx"] = [f05_a, f05_b]
 
-    # Mod 06: Combined Slip
-    f06 = mods.generate_combined_slip_suite(evaluator, c_upper, tree_paths["06"])
+    # Mod 06: Combined Slip (Real TTC Round 9 Drive/Brake Validation + Unified Friction Envelope)
+    f06 = mods.generate_combined_slip_suite(evaluator, c_upper, tree_paths["06"], df_comb_tr, df_comb_va, df_pure_va)
     generated_figures["06_Combined_Slip"] = [f06]
 
     # Mod 07: Other Forces & Moments
@@ -293,6 +348,9 @@ def run_compound_validation(compound: str, tree_paths: dict):
         f"fig3_pneumatic_trail_{c_lower}.png": f04_b,
         f"fig4_camber_sensitivity_{c_lower}.png": f03_a,
         f"fig5_pressure_sensitivity_{c_lower}.png": f08,
+        f"fig5b_longitudinal_validation_{c_lower}.png": f05_a,
+        f"fig5c_longitudinal_pressure_residuals_{c_lower}.png": f05_b,
+        f"fig6_combined_slip_validation_{c_lower}.png": f06,
         f"fig6_error_distributions_{c_lower}.png": f10_a,
         f"fig7_mx_vs_camber_{c_lower}.png": f07,
         f"fig8_vertical_stiffness_{c_lower}.png": f07,
@@ -337,6 +395,7 @@ def run_compound_validation(compound: str, tree_paths: dict):
             "model3_hybrid": boot_m3
         },
         "domain_sliced_metrics_validation_3way": sliced_val_metrics,
+        "longitudinal_and_combined_metrics": long_metrics,
         "module_figures": {k: [os.path.basename(p) for p in v if p] for k, v in generated_figures.items()}
     }
 
@@ -349,7 +408,7 @@ def run_compound_validation(compound: str, tree_paths: dict):
     return report_dict
 
 
-def generate_automated_markdown_report(rep_r25b: dict, rep_r20: dict, out_md_path: str):
+def generate_automated_markdown_report(rep_r25b: dict, rep_r20: dict, out_md_path: str, rep_real: dict = None):
     """
     Generates the comprehensive human-readable automated validation report.
     """
@@ -361,27 +420,34 @@ def generate_automated_markdown_report(rep_r25b: dict, rep_r20: dict, out_md_pat
     m3_val_20 = rep_r20["overall_metrics_3way"]["validation"]["model3_hybrid_pinn"]["fy"]
     m1_val_20 = rep_r20["overall_metrics_3way"]["validation"]["model1_baseline_mf62"]["fy"]
 
+    lm_25 = rep_r25b.get("longitudinal_and_combined_metrics", {})
+    lm_20 = rep_r20.get("longitudinal_and_combined_metrics", {})
+
     md = f"""# Mirena Dynamics — Automated Tire Model Validation Report
 
-**Generated:** 2026-11-10  
-**Tire Specifications:** Hoosier 16.0x7.5-10, 8.0-inch rim (Calspan TTC Round 8 R25B & Round 9 R20)  
+**Generated:** {pd.Timestamp.now().strftime('%Y-%m-%d')}  
+**Tire Specifications:** Hoosier 16.0x7.5-10, 8.0-inch rim (TTC Round 8 R25B & Round 9 R20 Cornering) + TTC Round 9 R20 Drive/Brake (18.0x6.0-10, 6-in & 7-in rims)  
 **Models Evaluated:**
-1. **Model 1 (Baseline MF 6.2):** Previous staged calibration prior to camber sensitivity overhaul.
-2. **Model 2 (Optimized MF 6.2):** Canonical MF 6.2 with multi-start quasi-random search, soft-L1 loss, coupled contact patch lateral shift ($S_{{hy}}$), and cornering stiffness camber reduction ($PKY3$).
-3. **Model 3 (Hybrid MF 6.2 + PINN):** Model 2 augmented with a 16x16 Tanh Physics-Informed Neural Network featuring zero-slip passivity, airborne suppression, and domain falloff envelopes.
+1. **Model 1 (Baseline MF 6.2):** Historical cornering prior with literature-default longitudinal & combined-slip coefficients.
+2. **Model 2 (Unified Calibrated MF 6.2):** Canonical schema v2 MF 6.2 combining TTC Cornering/Mz/Mx calibration with TTC Round 9 Drive/Brake pure longitudinal (`PDX1..3, PKX1..2, PEX1, PPX1/3/4`) and combined-slip (`RBX1..2, RBY1..2, RHY1`) calibration (`R25B` uses `R20` Drive/Brake priors as documented surrogate).
+3. **Model 3 (Hybrid MF 6.2 + PINN):** Model 2 augmented with the 16x16 Tanh Physics-Informed Neural Network (`Gyk`-attenuated under combined slip).
 
 ---
 
 ## 1. Executive Summary & Status
 
-| Compound | Metric | Model 1: Baseline | Model 2: Optimized MF | Model 3: Hybrid PINN | Status |
+| Compound | Metric | Model 1: Baseline | Model 2: Unified MF | Model 3: Hybrid PINN | Status |
 | :--- | :--- | :---: | :---: | :---: | :---: |
-| **Hoosier R25B** | **$F_y$ Val RMSE (Global)** | {m1_val_25['rmse']:.2f} N | **{m2_val_25['rmse']:.2f} N ({(1-m2_val_25['rmse']/m1_val_25['rmse'])*100:+.1f}%)** | **{m3_val_25['rmse']:.2f} N ({(1-m3_val_25['rmse']/m1_val_25['rmse'])*100:+.1f}%)** | **BENCHMARK PASS** |
-| | **$F_y$ High Camber (4°) RMSE** | {rep_r25b['domain_sliced_metrics_validation_3way'].get('Camber_4deg', {}).get('model1_baseline_mf62', {}).get('fy', {}).get('rmse', 0):.2f} N | **{rep_r25b['domain_sliced_metrics_validation_3way'].get('Camber_4deg', {}).get('model2_optimized_mf62', {}).get('fy', {}).get('rmse', 0):.2f} N** | **{rep_r25b['domain_sliced_metrics_validation_3way'].get('Camber_4deg', {}).get('model3_hybrid_pinn', {}).get('fy', {}).get('rmse', 0):.2f} N** | **RESOLVED (-54.9%)** |
-| | **$M_z$ Val RMSE (Global)** | {rep_r25b['overall_metrics_3way']['validation']['model1_baseline_mf62']['mz']['rmse']:.2f} Nm | {rep_r25b['overall_metrics_3way']['validation']['model2_optimized_mf62']['mz']['rmse']:.2f} Nm | **{rep_r25b['overall_metrics_3way']['validation']['model3_hybrid_pinn']['mz']['rmse']:.2f} Nm (-9.4%)** | **PASS** |
-| **Hoosier R20** | **$F_y$ Val RMSE (Global)** | {m1_val_20['rmse']:.2f} N | **{m2_val_20['rmse']:.2f} N ({(1-m2_val_20['rmse']/m1_val_20['rmse'])*100:+.1f}%)** | **{m3_val_20['rmse']:.2f} N ({(1-m3_val_20['rmse']/m1_val_20['rmse'])*100:+.1f}%)** | **BENCHMARK PASS** |
-| | **$F_y$ High Camber (4°) RMSE** | {rep_r20['domain_sliced_metrics_validation_3way'].get('Camber_4deg', {}).get('model1_baseline_mf62', {}).get('fy', {}).get('rmse', 0):.2f} N | **{rep_r20['domain_sliced_metrics_validation_3way'].get('Camber_4deg', {}).get('model2_optimized_mf62', {}).get('fy', {}).get('rmse', 0):.2f} N** | **{rep_r20['domain_sliced_metrics_validation_3way'].get('Camber_4deg', {}).get('model3_hybrid_pinn', {}).get('fy', {}).get('rmse', 0):.2f} N** | **RESOLVED (-52.8%)** |
-| | **$M_z$ Val RMSE (Global)** | {rep_r20['overall_metrics_3way']['validation']['model1_baseline_mf62']['mz']['rmse']:.2f} Nm | {rep_r20['overall_metrics_3way']['validation']['model2_optimized_mf62']['mz']['rmse']:.2f} Nm | **{rep_r20['overall_metrics_3way']['validation']['model3_hybrid_pinn']['mz']['rmse']:.2f} Nm (-23.5%)** | **PASS** |
+| **Hoosier R25B** | **$F_y$ Val RMSE (Global Cornering)** | {m1_val_25['rmse']:.2f} N | **{m2_val_25['rmse']:.2f} N ({(1-m2_val_25['rmse']/m1_val_25['rmse'])*100:+.1f}%)** | **{m3_val_25['rmse']:.2f} N ({(1-m3_val_25['rmse']/m1_val_25['rmse'])*100:+.1f}%)** | **BENCHMARK PASS** |
+| | **$F_y$ High Camber (4°) RMSE** | {rep_r25b['domain_sliced_metrics_validation_3way'].get('Camber_4deg', {}).get('model1_baseline_mf62', {}).get('fy', {}).get('rmse', 0):.2f} N | **{rep_r25b['domain_sliced_metrics_validation_3way'].get('Camber_4deg', {}).get('model2_optimized_mf62', {}).get('fy', {}).get('rmse', 0):.2f} N** | **{rep_r25b['domain_sliced_metrics_validation_3way'].get('Camber_4deg', {}).get('model3_hybrid_pinn', {}).get('fy', {}).get('rmse', 0):.2f} N** | **RESOLVED** |
+| | **$M_z$ Val RMSE (Global Cornering)** | {rep_r25b['overall_metrics_3way']['validation']['model1_baseline_mf62']['mz']['rmse']:.2f} Nm | {rep_r25b['overall_metrics_3way']['validation']['model2_optimized_mf62']['mz']['rmse']:.2f} Nm | **{rep_r25b['overall_metrics_3way']['validation']['model3_hybrid_pinn']['mz']['rmse']:.2f} Nm** | **PASS** |
+| | **$F_x$ Pure Val RMSE *(R20 Surrogate)*** | {lm_25['pure_val_m1']['rmse']:.2f} N | **{lm_25['pure_val_m2']['rmse']:.2f} N ({(1-lm_25['pure_val_m2']['rmse']/lm_25['pure_val_m1']['rmse'])*100:+.1f}%)** | *(MF6.2 $F_x$)* | **SURROGATE INTEGRATED** |
+| | **Combined $G_{{y\\kappa}} F_y$ RMSE *(R20 Surrogate)*** | {lm_25['comb_val_fy_gyk_m1']['rmse']:.2f} N | **{lm_25['comb_val_fy_gyk_m2']['rmse']:.2f} N ({(1-lm_25['comb_val_fy_gyk_m2']['rmse']/lm_25['comb_val_fy_gyk_m1']['rmse'])*100:+.1f}%)** | *(PINN $G_{{y\\kappa}}$ scaled)* | **SURROGATE INTEGRATED** |
+| **Hoosier R20** | **$F_y$ Val RMSE (Global Cornering)** | {m1_val_20['rmse']:.2f} N | **{m2_val_20['rmse']:.2f} N ({(1-m2_val_20['rmse']/m1_val_20['rmse'])*100:+.1f}%)** | **{m3_val_20['rmse']:.2f} N ({(1-m3_val_20['rmse']/m1_val_20['rmse'])*100:+.1f}%)** | **BENCHMARK PASS** |
+| | **$F_y$ High Camber (4°) RMSE** | {rep_r20['domain_sliced_metrics_validation_3way'].get('Camber_4deg', {}).get('model1_baseline_mf62', {}).get('fy', {}).get('rmse', 0):.2f} N | **{rep_r20['domain_sliced_metrics_validation_3way'].get('Camber_4deg', {}).get('model2_optimized_mf62', {}).get('fy', {}).get('rmse', 0):.2f} N** | **{rep_r20['domain_sliced_metrics_validation_3way'].get('Camber_4deg', {}).get('model3_hybrid_pinn', {}).get('fy', {}).get('rmse', 0):.2f} N** | **RESOLVED** |
+| | **$M_z$ Val RMSE (Global Cornering)** | {rep_r20['overall_metrics_3way']['validation']['model1_baseline_mf62']['mz']['rmse']:.2f} Nm | {rep_r20['overall_metrics_3way']['validation']['model2_optimized_mf62']['mz']['rmse']:.2f} Nm | **{rep_r20['overall_metrics_3way']['validation']['model3_hybrid_pinn']['mz']['rmse']:.2f} Nm** | **PASS** |
+| | **$F_x$ Pure Val RMSE *(Round 9 D/B)*** | {lm_20['pure_val_m1']['rmse']:.2f} N | **{lm_20['pure_val_m2']['rmse']:.2f} N ({(1-lm_20['pure_val_m2']['rmse']/lm_20['pure_val_m1']['rmse'])*100:+.1f}%)** | *(MF6.2 $F_x$)* | **VALIDATED (R20 18x6)** |
+| | **Combined $F_x$ / $G_{{y\\kappa}} F_y$ Val RMSE** | {lm_20['comb_val_fx_m1']['rmse']:.1f} / {lm_20['comb_val_fy_gyk_m1']['rmse']:.1f} N | **{lm_20['comb_val_fx_m2']['rmse']:.1f} / {lm_20['comb_val_fy_gyk_m2']['rmse']:.1f} N** | *(PINN $G_{{y\\kappa}}$ scaled)* | **VALIDATED ($\\alpha\\in\\{{-3,-6\\}}^\\circ$)** |
 
 ---
 
@@ -419,9 +485,10 @@ def generate_automated_markdown_report(rep_r25b: dict, rep_r20: dict, out_md_pat
 
 ## 4. Model Limitations & Unsupported Operating Domains
 
-1. **Longitudinal ($F_x$) and Combined Slip ($F_x-F_y$):**
-   - The Calspan TTC Round 8 and Round 9 datasets were purely free-rolling cornering tests ($F_x \approx -20$ N spindle drag, slip ratio $\kappa = 0$).
-   - Driven and braked traction data is unavailable. Longitudinal parameters ($PCX1, PDX1, PKX1$) and combined-slip factors ($RBX, RCX, RBY, RCY$) are literature-reference defaults and labeled as **MODEL CHARACTERIZATION ONLY**.
+1. **Longitudinal ($F_x$) and Combined Slip ($F_x-F_y$) Geometry & Compound Scope:**
+   - Pure longitudinal (`PDX1..3, PKX1..2, PEX1, PPX1/3/4`) and combined-slip (`RBX1..2, RBY1..2, RHY1`) parameters are calibrated against Calspan TTC Round 9 Drive/Brake data (`Hoosier 18.0×6.0-10 R20`, 6-in & 7-in rims, Runs `69, 70, 72, 73`, `kappa = SL` free-rolling referenced) after excluding warmup (`Runs 68, 71`), anomalies, and break-in sweeps.
+   - Combined-slip experimental data covers only $\alpha \in \{-3^\circ, -6^\circ\}$ (no positive slip angles or $|\alpha| > 6^\circ$); sign/load/camber/`RVY*` terms remain provisional.
+   - Because no R25B Drive/Brake TTC dataset exists in the repository, **Hoosier R25B** integrates the R20 Drive/Brake parameters as a documented surrogate; longitudinal parameters reflect the `18×6.0-10` carcass geometry rather than a dedicated `16×7.5-10` Drive/Brake test.
 2. **Carcass Relaxation Dynamics:**
    - The canonical MF 6.2 equations are purely steady-state. Carcass lag ($\sigma = 180$ mm) is modeled dynamically in Godot via `TransientRelaxation.gd`.
 3. **Airborne and Low-Load Extrapolation:**
@@ -448,9 +515,35 @@ Tire_Model_Validation/
 ├── 11_Hybrid_MLP/
 ├── 12_Transient_Dynamics/
 ├── 13_Python_Godot_Parity/
-└── 14_Vehicle_Dynamics_Relevance/
+├── 14_Vehicle_Dynamics_Relevance/
+└── 15_Real_Telemetry_TeR26/
 ```
 All figures are saved in high resolution (150 DPI) with embedded validation metrics boxes.
+"""
+
+    if rep_real:
+        la = rep_real.get("level_a_inverse_tire_dynamics", {})
+        lb = rep_real.get("level_b_open_loop_rwd_replay", {})
+        r25_g = la.get("R25B", {}).get("regimes", {}).get("Global", {})
+        r20_g = la.get("R20", {}).get("regimes", {}).get("Global", {})
+        md += f"""
+---
+
+## 6. Real Track Telemetry Validation — TeR26 (RWD) (`15_Real_Telemetry_TeR26`)
+
+- **Source:** 3 `candump` logs in `bags/real_bags/` (`N = {rep_real.get('total_valid_samples', 0):,}` samples, `{rep_real.get('total_valid_duration_s', 0.0):.1f} s` with $v_x \\ge 3\\text{{ m/s}}$).
+- **Vehicle Setup:** Explicit RWD (`front_drive_torque_ratio = 0.0`), $m = 290\\text{{ kg}}$, $R_w = 0.2005\\text{{ m}}$, SO(2) IMU yaw alignment.
+
+| Compound | Variant | $F_y$ RMSE | $F_y$ MAE | $F_y$ $R^2$ | $\\lambda_{{\\mu,\\text{{track}}}}$ | Lag (ms) |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **R25B** | TTC ($\\lambda_\\mu = 1.0$) | {r25_g.get('fy_ttc_1_0', {}).get('rmse', 0):.1f} N | {r25_g.get('fy_ttc_1_0', {}).get('mae', 0):.1f} N | {r25_g.get('fy_ttc_1_0', {}).get('r2', 0):.3f} | 1.000 | {r25_g.get('fy_ttc_1_0', {}).get('lag_ms', 0):+.0f} |
+| **R25B** | Asphalt (`0.78`) | {r25_g.get('fy_asphalt_0_78', {}).get('rmse', 0):.1f} N | {r25_g.get('fy_asphalt_0_78', {}).get('mae', 0):.1f} N | {r25_g.get('fy_asphalt_0_78', {}).get('r2', 0):.3f} | 0.780 | {r25_g.get('fy_asphalt_0_78', {}).get('lag_ms', 0):+.0f} |
+| **R25B** | Track Fit ($\\lambda_{{\\mu,\\text{{opt}}}}$) | **{r25_g.get('fy_track_opt', {}).get('rmse', 0):.1f} N** | **{r25_g.get('fy_track_opt', {}).get('mae', 0):.1f} N** | **{r25_g.get('fy_track_opt', {}).get('r2', 0):.3f}** | **{la.get('R25B', {}).get('lambda_mu_track', 0):.3f}** | {r25_g.get('fy_track_opt', {}).get('lag_ms', 0):+.0f} |
+| **R20** | TTC ($\\lambda_\\mu = 1.0$) | {r20_g.get('fy_ttc_1_0', {}).get('rmse', 0):.1f} N | {r20_g.get('fy_ttc_1_0', {}).get('mae', 0):.1f} N | {r20_g.get('fy_ttc_1_0', {}).get('r2', 0):.3f} | 1.000 | {r20_g.get('fy_ttc_1_0', {}).get('lag_ms', 0):+.0f} |
+| **R20** | Asphalt (`0.78`) | {r20_g.get('fy_asphalt_0_78', {}).get('rmse', 0):.1f} N | {r20_g.get('fy_asphalt_0_78', {}).get('mae', 0):.1f} N | {r20_g.get('fy_asphalt_0_78', {}).get('r2', 0):.3f} | 0.780 | {r20_g.get('fy_asphalt_0_78', {}).get('lag_ms', 0):+.0f} |
+| **R20** | Track Fit ($\\lambda_{{\\mu,\\text{{opt}}}}$) | **{r20_g.get('fy_track_opt', {}).get('rmse', 0):.1f} N** | **{r20_g.get('fy_track_opt', {}).get('mae', 0):.1f} N** | **{r20_g.get('fy_track_opt', {}).get('r2', 0):.3f}** | **{la.get('R20', {}).get('lambda_mu_track', 0):.3f}** | {r20_g.get('fy_track_opt', {}).get('lag_ms', 0):+.0f} |
+
+- **Level B Open-Loop RWD Replay (`{lb.get('log', '')}`, {lb.get('window_s', 0):.1f} s):** Yaw rate Pearson $r = {lb.get('yaw_rate_metrics', {}).get('pearson_r', 0):.3f}$, RMSE $= {np.degrees(lb.get('yaw_rate_metrics', {}).get('rmse', 0)):.1f}^\\circ/\\text{{s}}$.
 """
 
     with open(out_md_path, "w") as fp:
@@ -474,12 +567,19 @@ def main():
     if args.compound in ["R20", "ALL"]:
         rep_r20 = run_compound_validation("R20", tree_paths)
 
+    # Phase 15: Real Track Telemetry Validation (TeR26 RWD)
+    rep_real = mods.generate_real_telemetry_validation(
+        tree_paths["15"], plots_dir=PLOTS_DIR, report_dir=VAL_DIR
+    )
+
     # Combined JSON report
     combined_rep = {}
     if rep_r25b:
         combined_rep["R25B"] = rep_r25b
     if rep_r20:
         combined_rep["R20"] = rep_r20
+    if rep_real:
+        combined_rep["TeR26_Real_Telemetry"] = rep_real
 
     combined_json_path = os.path.join(VAL_DIR, "automated_validation_report.json")
     with open(combined_json_path, "w") as fp:
@@ -489,8 +589,9 @@ def main():
 
     # Generate Markdown report
     if rep_r25b and rep_r20:
-        md_path = os.path.join(ARTIFACT_DIR, "automated_validation_report.md")
-        generate_automated_markdown_report(rep_r25b, rep_r20, md_path)
+        repo_md = os.path.join(VAL_DIR, "automated_validation_report.md")
+        generate_automated_markdown_report(rep_r25b, rep_r20, repo_md, rep_real=rep_real)
+        shutil.copy(repo_md, ARTIFACT_DIR)
 
     print("\n" + "=" * 82)
     print("   COMPLETE TIRE MODEL VALIDATION FRAMEWORK EXECUTED SUCCESSFULLY!")
