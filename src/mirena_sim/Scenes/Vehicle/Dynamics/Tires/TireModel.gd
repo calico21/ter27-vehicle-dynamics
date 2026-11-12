@@ -19,7 +19,8 @@ static var _mf62: Pacejka62 = null
 static var _neural: NeuralTireCorrection = null
 
 ## Flag to enable/disable neural residual correction at runtime (e.g., for benchmarking).
-static var enable_neural_correction: bool = true
+## Default false: start closed-loop vehicle integration with deterministic pure MF 6.2.
+static var enable_neural_correction: bool = false
 
 ## Flag to enable/disable transient relaxation integration.
 static var enable_transient_relaxation: bool = true

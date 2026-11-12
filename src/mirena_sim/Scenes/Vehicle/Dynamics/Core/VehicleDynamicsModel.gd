@@ -101,10 +101,14 @@ func step(
 	var steer_angle = in_inputs.steer_angle
 	var total_wheel_force_ros = Vector3.ZERO
 	var total_wheel_torque_ros = Vector3.ZERO
+	var wheel_forces_ros: Array[Vector3] = []
+	var wheel_moments_ros: Array[Vector3] = []
 	
 	for i in range(4):
 		var w = wheels[i]
-		var r_pos = get_wheel_pos_ros(i)
+		var r_pos: Vector3 = get_wheel_pos_ros(i)
+		if ground_contacts.size() >= 4 and ground_contacts[i] is Dictionary:
+			r_pos = ground_contacts[i].get("r_pos_ros", r_pos)
 		var v_hub = local_v_ros + local_w_ros.cross(r_pos)
 		w.v_hub_chassis = v_hub
 		
@@ -120,9 +124,12 @@ func step(
 		var F_chassis_y = w.F_x * sin_d + w.F_y * cos_d
 		var F_chassis_z = w.F_z
 		var F_wheel_chassis = Vector3(F_chassis_x, F_chassis_y, F_chassis_z)
+		var M_tire_chassis = Vector3(w.M_x * cos_d, w.M_x * sin_d, w.M_z)
 		
+		wheel_forces_ros.append(F_wheel_chassis)
+		wheel_moments_ros.append(M_tire_chassis)
 		total_wheel_force_ros += F_wheel_chassis
-		var tau_wheel = r_pos.cross(F_wheel_chassis) + Vector3(0.0, 0.0, w.M_z)
+		var tau_wheel = r_pos.cross(F_wheel_chassis) + M_tire_chassis
 		total_wheel_torque_ros += tau_wheel
 	
 	# 4. Aerodynamics
@@ -143,6 +150,10 @@ func step(
 		"net_torque_ros": net_torque_chassis_ros,
 		"net_force_godot": net_force_chassis_godot,
 		"net_torque_godot": net_torque_chassis_godot,
+		"wheel_forces_ros": wheel_forces_ros,
+		"wheel_moments_ros": wheel_moments_ros,
+		"aero_force_ros": f_aero_ros,
+		"aero_torque_ros": tau_aero_ros,
 		"drive_torques": drive_trqs,
 		"brake_torques": brake_trqs,
 		"normal_forces": normal_forces

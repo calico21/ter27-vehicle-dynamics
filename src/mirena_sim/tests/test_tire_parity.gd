@@ -43,6 +43,8 @@ static func run() -> Dictionary:
 	var max_err_mz_total: float = 0.0
 	
 	const TOLERANCE: float = 1e-3 # 0.1% or 0.05 N
+	var prev_neural_flag: bool = TireModelScript.enable_neural_correction
+	TireModelScript.enable_neural_correction = true
 	
 	for idx in range(total_cases):
 		var c: Dictionary = cases[idx]
@@ -80,7 +82,9 @@ static func run() -> Dictionary:
 			failed += 1
 			if failed <= 2:
 				errors.append("Case %d discrepancy: Fy err=%.6f, Mz err=%.6f" % [idx, err_fy_tot, err_mz_tot])
-				
+	
+	TireModelScript.enable_neural_correction = prev_neural_flag
+	
 	return {
 		"name": "test_tire_parity",
 		"passed": passed,

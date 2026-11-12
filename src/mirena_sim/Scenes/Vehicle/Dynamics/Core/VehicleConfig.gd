@@ -26,7 +26,7 @@ enum WheelIndex {
 @export var track_width_f: float = 1.200
 @export var track_width_r: float = 1.180
 @export var h_cog: float = 0.33
-@export var weight_dist_r: float = 0.54
+@export var weight_dist_r: float = 0.55
 
 @export var ixx: float = 60.0
 @export var iyy: float = 110.0

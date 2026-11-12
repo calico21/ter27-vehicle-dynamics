@@ -102,10 +102,10 @@ class PhysicalTestRunner extends Node:
 		if ticks == 1600 and not p3_done:
 			p3_done = true
 			var yaw_rate = car.angular_velocity.y
-			var delta_yaw = car.global_rotation.y - initial_yaw
+			var delta_yaw = wrapf(car.global_rotation.y - initial_yaw, -PI, PI)
 			print("   Yaw rate: %.3f rad/s | Heading change: %.2f deg" % [yaw_rate, rad_to_deg(delta_yaw)])
-			# In Godot, turning left corresponds to negative rotation around +Y (yaw)
-			if absf(yaw_rate) > 0.05 and delta_yaw < -0.01:
+			# In Godot (+X right, +Y up, -Z forward), turning left (CCW) is positive rotation around +Y (yaw)
+			if yaw_rate > 0.05 and delta_yaw > 0.01:
 				print("   [PASS] Steering confirmed: vehicle generates lateral cornering force and turns left.")
 				passed += 1
 			else:

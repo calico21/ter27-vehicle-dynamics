@@ -18,6 +18,7 @@ const DrivetrainModelScript = preload("../Drivetrain/DrivetrainModel.gd")
 const BrakeModelScript = preload("../Brakes/BrakeModel.gd")
 const SuspensionModelScript = preload("../Suspension/SuspensionModel.gd")
 const AeroModelScript = preload("../Aerodynamics/AeroModel.gd")
+const ChassisDynamicsScript = preload("../Chassis/ChassisDynamics.gd")
 const VehicleTelemetryScript = preload("../Telemetry/VehicleTelemetry.gd")
 
 signal cone_hit(count: int)
@@ -50,6 +51,7 @@ var ray_cast_length: float = 0.45
 
 var raycasts: Array[RayCast3D] = []
 var wheel_mesh_nodes: Array[Node3D] = []
+var _wheel_base_yaws: Array[float] = [PI, PI, PI, PI]
 
 # --- ROS Configuration & Variables ---
 @export var frame_id: String = "car/cog"
@@ -100,24 +102,27 @@ var lap_status_msg = null
 var _prev_compressions: Array[float] = [0.0, 0.0, 0.0, 0.0]
 
 func _ready() -> void:
-	# Configure RigidBody3D properties
-	mass = 300.0
-	center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
-	center_of_mass = Vector3(0.0, 0.33, -0.117)
-	
 	contact_monitor = true
 	max_contacts_reported = 10
 	body_entered.connect(_on_body_entered)
 	add_to_group("vehicle")
 	add_to_group("Car")
 	
-	# Instantiate Dynamics Subsystems
+	# Instantiate Dynamics Subsystems (single source of truth from Core/Config/*.json)
 	config = VehicleConfigScript.new()
 	config.drive_mode = drive_mode
+	TireModelScript.enable_neural_correction = false
 	model = VehicleDynamicsModelScript.new(config)
 	inputs = VehicleInputsScript.new()
 	telemetry = VehicleTelemetryScript.new()
 	
+	# Configure RigidBody3D properties from VehicleConfig
+	mass = config.mass
+	inertia = Vector3(config.iyy, config.izz, config.ixx)
+	center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
+	center_of_mass = Vector3(0.0, config.h_cog, -0.117)
+	
+	_sync_geometry_from_config()
 	_setup_raycasts_and_wheels()
 	cone_collision_set(true)
 	_connect_to_initial_gate()
@@ -131,6 +136,22 @@ func _ready() -> void:
 		if has_node("FPCam"):
 			sim_node.register_camera($FPCam)
 
+func _sync_geometry_from_config() -> void:
+	ray_rest_lengths = [
+		config.ray_rest_length,
+		config.ray_rest_length,
+		config.ray_rest_length,
+		config.ray_rest_length
+	]
+	ray_cast_length = config.ray_cast_length
+	ray_mount_positions.clear()
+	for i in range(4):
+		var r_ros: Vector3 = ChassisDynamicsScript.get_wheel_pos_ros(i, config)
+		# Convert ISO/ROS horizontal offsets from CoG (+X fwd, +Y left) to Godot local (+X right, -Z fwd)
+		var x_godot: float = center_of_mass.x - r_ros.y
+		var z_godot: float = center_of_mass.z - r_ros.x
+		ray_mount_positions.append(Vector3(x_godot, config.ray_rest_length, z_godot))
+
 func _setup_raycasts_and_wheels() -> void:
 	raycasts.clear()
 	wheel_mesh_nodes.clear()
@@ -139,7 +160,7 @@ func _setup_raycasts_and_wheels() -> void:
 	var ray_names = ["FL_RAY", "FR_RAY", "RL_RAY", "RR_RAY"]
 	
 	for i in range(4):
-		# Look for or create RayCast3D
+		# Look for or create RayCast3D and align dynamically to VehicleConfig geometry
 		var ray: RayCast3D = null
 		if has_node(ray_names[i]):
 			ray = get_node(ray_names[i]) as RayCast3D
@@ -147,17 +168,21 @@ func _setup_raycasts_and_wheels() -> void:
 			ray = RayCast3D.new()
 			ray.name = ray_names[i]
 			add_child(ray)
-			ray.position = ray_mount_positions[i]
-			ray.target_position = Vector3(0.0, -ray_cast_length, 0.0)
-			ray.collision_mask = 1 # Ground / Track surface
-			ray.add_exception(self)
-			ray.enabled = true
+		ray.position = ray_mount_positions[i]
+		ray.target_position = Vector3(0.0, -ray_cast_length, 0.0)
+		ray.collision_mask = 1 # Ground / Track surface
+		ray.add_exception(self)
+		ray.enabled = true
 		raycasts.append(ray)
 		
-		# Look for wheel mesh node
+		# Look for wheel mesh node and align horizontally without altering .tscn
 		var w_node: Node3D = null
 		if has_node(wheel_names[i]):
 			w_node = get_node(wheel_names[i]) as Node3D
+			_wheel_base_yaws[i] = w_node.rotation.y
+			w_node.position.x = ray_mount_positions[i].x
+			w_node.position.z = ray_mount_positions[i].z
+			w_node.position.y = ray_mount_positions[i].y - ray_rest_lengths[i] + config.wheel_radius
 		wheel_mesh_nodes.append(w_node)
 
 func _init_ros() -> void:
@@ -218,7 +243,7 @@ func _physics_process(delta: float) -> void:
 
 # --- Physics Integration (Forces & Moments) ---
 ## Native Godot RigidBody3D force integration callback.
-## Executed every physics tick (400 Hz) directly inside physics solver step.
+## Executed every physics tick using actual physics step delta (dt = state.step).
 func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	var dt = state.step
 	if dt <= 0.0:
@@ -230,107 +255,94 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	if self.brake > 0.0:
 		inputs.brake = maxf(inputs.brake, clampf(self.brake / 20.0, 0.0, 1.0))
 	
-	# 2. Drivetrain torques
-	var local_v_godot = state.transform.basis.inverse() * state.linear_velocity
-	var u_speed = -local_v_godot.z
-	var torques = DrivetrainModelScript.compute_torques(inputs, u_speed, config)
-	var drive_trqs: Array[float] = torques["drive"]
-	var brake_trqs: Array[float] = torques["brake"]
+	# 2. Local chassis velocities in ISO/ROS frame (+X fwd, +Y left, +Z up)
+	var inv_basis: Basis = state.transform.basis.inverse()
+	var local_v_ros: Vector3 = VehicleConfigScript.godot_to_ros_vec(inv_basis * state.linear_velocity)
+	var local_w_ros: Vector3 = VehicleConfigScript.godot_to_ros_vec(inv_basis * state.angular_velocity)
 	
 	# 3. Raycast Suspension & Contact Dynamics
 	var current_compressions: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	var normal_forces: Array[float] = [0.0, 0.0, 0.0, 0.0]
+	var hit_pts: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+	var hit_norms: Array[Vector3] = [Vector3.UP, Vector3.UP, Vector3.UP, Vector3.UP]
+	var grounded: Array[bool] = [false, false, false, false]
 	
-	# First pass: calculate suspension compression and spring forces
 	for i in range(4):
 		var ray = raycasts[i]
 		ray.force_raycast_update()
 		
 		if ray.is_colliding():
+			grounded[i] = true
 			var hit_pt = ray.get_collision_point()
+			hit_pts[i] = hit_pt
+			hit_norms[i] = ray.get_collision_normal()
 			var hit_dist = ray.global_position.distance_to(hit_pt)
 			var comp = maxf(0.0, ray_rest_lengths[i] - hit_dist)
 			current_compressions[i] = comp
 			
-			var k_spring = config.spring_stiffness_front if (i == 0 or i == 1) else config.spring_stiffness_rear
-			var c_damper = config.damping_compression_front if (i == 0 or i == 1) else config.damping_compression_rear
-			
-			# Damping velocity
 			var comp_vel = (comp - _prev_compressions[i]) / dt
 			_prev_compressions[i] = comp
 			
-			var f_spring = k_spring * comp
-			var f_damper = c_damper * comp_vel
-			normal_forces[i] = maxf(0.0, f_spring + f_damper)
+			normal_forces[i] = SuspensionModelScript.compute_corner_force(comp, comp_vel, i < 2, config)
 		else:
 			_prev_compressions[i] = 0.0
 			normal_forces[i] = 0.0
 	
-	# Anti-roll bar coupling
+	# Anti-roll bar coupling: F_ARB_L = +k_arb*(dz_L - dz_R), F_ARB_R = -k_arb*(dz_L - dz_R)
 	var arb_f = config.arb_stiffness_front * (current_compressions[0] - current_compressions[1])
 	var arb_r = config.arb_stiffness_rear * (current_compressions[2] - current_compressions[3])
-	normal_forces[0] = maxf(0.0, normal_forces[0] - arb_f)
-	normal_forces[1] = maxf(0.0, normal_forces[1] + arb_f)
-	normal_forces[2] = maxf(0.0, normal_forces[2] - arb_r)
-	normal_forces[3] = maxf(0.0, normal_forces[3] + arb_r)
+	normal_forces[0] = maxf(0.0, normal_forces[0] + arb_f)
+	normal_forces[1] = maxf(0.0, normal_forces[1] - arb_f)
+	normal_forces[2] = maxf(0.0, normal_forces[2] + arb_r)
+	normal_forces[3] = maxf(0.0, normal_forces[3] - arb_r)
 	
-	# 4. Wheel Kinematics, Tire Forces and Force Application
-	var steer_rad = inputs.steer_angle
+	# 4. Build ground contacts in ISO/ROS frame and delegate physics to VehicleDynamicsModel
+	var ground_contacts: Array = []
+	for i in range(4):
+		var r_pos_ros: Vector3 = model.get_wheel_pos_ros(i)
+		if grounded[i]:
+			var r_from_com_world: Vector3 = hit_pts[i] - (state.transform.origin + state.center_of_mass)
+			r_pos_ros = VehicleConfigScript.godot_to_ros_vec(inv_basis * r_from_com_world)
+		ground_contacts.append({
+			"grounded": grounded[i],
+			"fz": normal_forces[i],
+			"r_pos_ros": r_pos_ros
+		})
 	
+	var step_res: Dictionary = model.step(inputs, local_v_ros, local_w_ros, ground_contacts, dt)
+	var wheel_forces_ros: Array = step_res["wheel_forces_ros"]
+	var wheel_moments_ros: Array = step_res["wheel_moments_ros"]
+	var steer_rad: float = inputs.steer_angle
+	
+	# 5. Apply wheel tire forces, ground normal forces, and tire moments (Mz, Mx) to RigidBody3D
 	for i in range(4):
 		var ray = raycasts[i]
 		var w = model.wheels[i]
 		var delta_w = steer_rad if (i == 0 or i == 1) else 0.0
-		w.is_grounded = ray.is_colliding()
 		
-		if ray.is_colliding():
-			var hit_pt = ray.get_collision_point()
-			var hit_norm = ray.get_collision_normal()
-			var r_contact_cg = hit_pt - state.transform.origin
+		if grounded[i]:
+			var f_ros: Vector3 = wheel_forces_ros[i]
+			var f_planar_godot_local: Vector3 = VehicleConfigScript.ros_to_godot_vec(Vector3(f_ros.x, f_ros.y, 0.0))
+			var f_wheel_world: Vector3 = state.transform.basis * f_planar_godot_local + normal_forces[i] * hit_norms[i]
+			var r_from_origin_world: Vector3 = hit_pts[i] - state.transform.origin
+			state.apply_force(f_wheel_world, r_from_origin_world)
 			
-			# Contact patch velocity in world
-			var v_contact_world = state.linear_velocity + state.angular_velocity.cross(r_contact_cg)
-			
-			# Steered wheel heading unit vectors in Godot frame
-			# (+X right, +Y up, -Z forward)
-			var fwd_local = Vector3(sin(delta_w), 0.0, -cos(delta_w))
-			var lat_local = Vector3(cos(delta_w), 0.0, sin(delta_w)) # Rightward
-			
-			var fwd_world = state.transform.basis * fwd_local
-			var lat_world = state.transform.basis * lat_local
-			
-			var vx_w = v_contact_world.dot(fwd_world)
-			var vy_w = -v_contact_world.dot(lat_world) # In ROS: +vy is left
-			
-			w.compute_slip(vx_w, vy_w, delta_w, config.slip_regularization_speed, config.wheel_radius, dt)
-			w.compute_forces(normal_forces[i], config)
-			w.integrate_wheel_spin(drive_trqs[i], brake_trqs[i], dt, config)
-			
-			# Total force on chassis at contact point:
-			# Fx along wheel heading, Fy along left (so -Fy along lat_world), Fz along ground normal
-			var F_wheel_world = w.F_x * fwd_world - w.F_y * lat_world + normal_forces[i] * hit_norm
-			
-			# Apply force at contact point relative to CoG
-			state.apply_force(F_wheel_world, r_contact_cg)
-		else:
-			w.compute_forces(0.0, config)
-			w.integrate_wheel_spin(drive_trqs[i], brake_trqs[i], dt, config)
+			var m_godot_local: Vector3 = VehicleConfigScript.ros_to_godot_vec(wheel_moments_ros[i])
+			state.apply_torque(state.transform.basis * m_godot_local)
 		
-		# 5. Visual Wheel Mesh Transform Update
+		# Visual Wheel Mesh Transform Update
 		_update_wheel_visual(i, ray, delta_w, w.rotation_angle)
 	
 	# 6. Aerodynamic Drag & Downforce
-	var speed = state.linear_velocity.length()
-	if speed > 0.1:
-		var q = 0.5 * config.air_density * speed * speed
-		# Drag opposes velocity
-		state.apply_central_force(-q * config.cd_a * state.linear_velocity / speed)
-		# Downforce acts downward along vehicle local Y
-		state.apply_central_force(-q * config.cl_a * state.transform.basis.y)
+	var f_aero_godot_local: Vector3 = VehicleConfigScript.ros_to_godot_vec(step_res["aero_force_ros"])
+	var tau_aero_godot_local: Vector3 = VehicleConfigScript.ros_to_godot_vec(step_res["aero_torque_ros"])
+	state.apply_central_force(state.transform.basis * f_aero_godot_local)
+	if not tau_aero_godot_local.is_zero_approx():
+		state.apply_torque(state.transform.basis * tau_aero_godot_local)
 	
 	# 7. Low-speed brake hold to prevent chatter / creeping when stopped
 	if inputs.brake > 0.1 and inputs.throttle == 0.0:
-		if speed < 0.2:
+		if state.linear_velocity.length() < 0.2:
 			state.linear_velocity = Vector3.ZERO
 			state.angular_velocity = Vector3.ZERO
 
@@ -347,9 +359,9 @@ func _update_wheel_visual(index: int, ray: RayCast3D, delta_w: float, roll_angle
 	else:
 		w_node.position.y = ray_mount_positions[index].y - ray_cast_length + config.wheel_radius
 	
-	# Steering yaw rotation for front wheels
+	# Steering yaw rotation for front wheels (+delta_w = CCW / left turn)
 	if index == 0 or index == 1:
-		w_node.rotation.y = delta_w
+		w_node.rotation.y = _wheel_base_yaws[index] + delta_w
 
 # --- Pilot Logic ---
 func _process_no_pilot() -> void:
