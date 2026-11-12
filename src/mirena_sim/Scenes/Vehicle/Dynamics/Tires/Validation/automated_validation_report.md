@@ -97,11 +97,11 @@ All figures are saved in high resolution (150 DPI) with embedded validation metr
 
 | Compound | Variant | $F_y$ RMSE | $F_y$ MAE | $F_y$ $R^2$ | $\lambda_{\mu,\text{track}}$ | Lag (ms) |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| **R25B** | TTC ($\lambda_\mu = 1.0$) | 3423.7 N | 2942.7 N | -2.671 | 1.000 | -250 |
-| **R25B** | Asphalt (`0.78`) | 2608.4 N | 2267.8 N | -1.131 | 0.780 | -260 |
-| **R25B** | Track Fit ($\lambda_{\mu,\text{opt}}$) | **1045.0 N** | **810.1 N** | **0.658** | **0.310** | -250 |
-| **R20** | TTC ($\lambda_\mu = 1.0$) | 3306.2 N | 2844.1 N | -2.423 | 1.000 | -250 |
-| **R20** | Asphalt (`0.78`) | 2569.6 N | 2230.9 N | -1.068 | 0.780 | -260 |
-| **R20** | Track Fit ($\lambda_{\mu,\text{opt}}$) | **1044.8 N** | **810.1 N** | **0.658** | **0.319** | -250 |
+| **R25B** | TTC ($\lambda_\mu = 1.0$) | 2140.9 N | 1663.7 N | -0.435 | 1.000 | -300 |
+| **R25B** | Asphalt (`0.78`) | 2060.7 N | 1678.9 N | -0.330 | 0.780 | -300 |
+| **R25B** | Track Fit ($\lambda_{\mu,\text{opt}}$) | **1636.1 N** | **1397.4 N** | **0.162** | **0.352** | -300 |
+| **R20** | TTC ($\lambda_\mu = 1.0$) | 2111.0 N | 1642.0 N | -0.396 | 1.000 | -300 |
+| **R20** | Asphalt (`0.78`) | 2048.8 N | 1669.8 N | -0.315 | 0.780 | -300 |
+| **R20** | Track Fit ($\lambda_{\mu,\text{opt}}$) | **1632.4 N** | **1396.3 N** | **0.165** | **0.362** | -300 |
 
-- **Level B Open-Loop RWD Replay (`20261004T095356.855Z.log`, 35.0 s):** Yaw rate Pearson $r = 0.458$, RMSE $= 82.5^\circ/\text{s}$.
+- **Level B Open-Loop RWD Replay (`20261004T095356.855Z.log`, 35.0 s):** Yaw rate Pearson $r = 0.238$, RMSE $= 86.9^\circ/\text{s}$.

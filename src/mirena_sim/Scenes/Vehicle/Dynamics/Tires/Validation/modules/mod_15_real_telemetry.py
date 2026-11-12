@@ -25,6 +25,8 @@ from core.style import (
 # =============================================================================
 # TeR26 (RWD) Vehicle Parameters — Explicitly Documented Provenance
 # =============================================================================
+STEERING_RATIO = 4.0  # Real Narrco steering rack ratio (TeR26/TeR27): delta_wheel = delta_steer / 4.0
+
 TER26_PARAMS = {
     "vehicle": "TeR26 (RWD)",
     "provenance": {
@@ -34,6 +36,7 @@ TER26_PARAMS = {
             "imu_mounting_yaw_deg = ~-108 deg (SO(2) Procrustes alignment to body frame)"
         ],
         "from_ter_chassis_and_estimates": [
+            "steering_ratio = 4.0 (Narrco rack geometry, TeR26/TeR27)",
             "mass = 290.0 kg (car + driver)",
             "wheelbase = 1.540 m, track_front = 1.230 m, track_rear = 1.230 m",
             "weight_dist_rear = 0.55 (45% F / 55% R -> a_cog = 0.847 m, b_cog = 0.693 m)",
@@ -52,6 +55,7 @@ TER26_PARAMS = {
     "h_cog": 0.290,
     "tlltd_front": 0.45,
     "wheel_radius": 0.2005,
+    "steering_ratio": STEERING_RATIO,
     "front_drive_torque_ratio": 0.0,  # TeR26 is RWD
     "air_density": 1.225,
     "cd_a": 1.5,
@@ -224,17 +228,9 @@ def _load_and_preprocess_log(log_path: str, dbc_msgs: dict, cfg: dict) -> dict:
     if np.sum(straight) > 20:
         st_f = st_f - float(np.median(st_f[straight]))
 
-    # Estimate steering lag (steer -> yaw rate) and effective steering ratio in linear regime
+    # Estimate steering lag (steer -> yaw rate) and apply known Narrco rack ratio (4.0)
     lag_ms = _estimate_cross_corr_lag_ms(st_f[mov], r_f[mov], dt)
-    lin_turn = mov & (np.abs(ay_iso) < 0.65 * cfg["gravity"]) & (np.abs(st_f) > np.deg2rad(3.0))
-    delta_kin = np.arctan2(cfg["wheelbase"] * r_f, np.maximum(vx_f, 3.0))
-    if np.sum(lin_turn) > 30:
-        steer_ratio = float(np.clip(
-            np.dot(delta_kin[lin_turn], st_f[lin_turn]) / max(np.dot(delta_kin[lin_turn], delta_kin[lin_turn]), 1e-6),
-            1.0, 4.0
-        ))
-    else:
-        steer_ratio = 1.35
+    steer_ratio = float(cfg.get("steering_ratio", STEERING_RATIO))
     delta_wheel = st_f / steer_ratio
 
     # Leaky integration of lateral velocity dv_y/dt = a_y - r * v_x (tau=0.12 s prevents drift)
