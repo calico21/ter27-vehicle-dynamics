@@ -205,6 +205,17 @@ func integrate_wheel_spin(T_drive: float, T_brake: float, dt: float, config: Veh
 func get_rpm() -> float:
 	return (omega * 60.0) / (2.0 * PI)
 
+## Snapshots dynamic integrator state for multi-stage ODE integration (RK2).
+func get_integrator_state() -> Vector4:
+	return Vector4(omega, rotation_angle, alpha_transient, kappa_transient)
+
+## Restores dynamic integrator state from a Vector4 snapshot.
+func set_integrator_state(s: Vector4) -> void:
+	omega = s.x
+	rotation_angle = s.y
+	alpha_transient = s.z
+	kappa_transient = s.w
+
 ## Resets dynamic states to zero.
 func reset() -> void:
 	omega = 0.0

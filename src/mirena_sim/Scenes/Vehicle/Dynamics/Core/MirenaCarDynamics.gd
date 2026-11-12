@@ -303,7 +303,7 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 			"r_pos_ros": r_pos_ros
 		})
 	
-	var step_res: Dictionary = model.step(inputs, local_v_ros, local_w_ros, ground_contacts, dt)
+	var step_res: Dictionary = model.step_forces(inputs, local_v_ros, local_w_ros, ground_contacts, dt)
 	var normal_forces: Array = step_res["normal_forces"]
 	var wheel_forces_ros: Array = step_res["wheel_forces_ros"]
 	var wheel_moments_ros: Array = step_res["wheel_moments_ros"]

@@ -20,6 +20,7 @@ const ChassisDynamics = preload("../Chassis/ChassisDynamics.gd")
 var config: VehicleConfig
 var wheels: Array[WheelDynamics] = []
 var suspension: SuspensionSystem
+var chassis_state: ChassisDynamics.State6DOF
 var inputs: VehicleInputs
 
 # --- Output Net Quantities (in ISO/ROS chassis frame around CoG) ---
@@ -42,6 +43,7 @@ func _init(cfg: VehicleConfig = null) -> void:
 	
 	inputs = VehicleInputs.new()
 	suspension = SuspensionSystem.new()
+	chassis_state = ChassisDynamics.State6DOF.new(config.h_cog)
 	_init_wheels()
 
 func _init_wheels() -> void:
@@ -67,8 +69,19 @@ func compute_aerodynamics(v_ros: Vector3) -> Dictionary:
 func compute_analytic_normal_forces(ax_ros: float, ay_ros: float, speed: float) -> Array[float]:
 	return SuspensionModel.compute_analytic_normal_forces(ax_ros, ay_ros, speed, config)
 
-## Main simulation step for the vehicle dynamics model.
+## Backward-compatible wrapper around step_forces() for external callers & tests.
 func step(
+	in_inputs: VehicleInputs,
+	local_v_ros: Vector3,
+	local_w_ros: Vector3,
+	ground_contacts: Array = [],
+	dt: float = 0.0025
+) -> Dictionary:
+	return step_forces(in_inputs, local_v_ros, local_w_ros, ground_contacts, dt)
+
+## Shared force, suspension, slip, tire & aero evaluation path used by both
+## MirenaCarDynamics (Godot RigidBody3D) and step_standalone (14-DOF headless).
+func step_forces(
 	in_inputs: VehicleInputs,
 	local_v_ros: Vector3,
 	local_w_ros: Vector3,
@@ -190,10 +203,79 @@ func step(
 		"wheel_steer_angles": wheel_steer_angles
 	}
 
+## Unified 14-DOF standalone step (6-DOF Rigid-Body Chassis via RK2 Heun + 4 Wheels + 4 Suspension Corners).
+## Shares the exact same step_forces() evaluation path used by MirenaCarDynamics.gd.
+func step_standalone(in_inputs: VehicleInputs, dt: float, ground_height: float = 0.0) -> Dictionary:
+	if dt <= 0.0:
+		var contacts_idle: Array = ChassisDynamics.compute_ground_contacts_6dof(chassis_state, config, ground_height)
+		var res_idle: Dictionary = step_forces(in_inputs, chassis_state.linear_velocity, chassis_state.angular_velocity, contacts_idle, 0.0)
+		return {
+			"state_6dof": chassis_state,
+			"position_ros": chassis_state.position,
+			"euler_ros": Vector3(chassis_state.roll, chassis_state.pitch, chassis_state.yaw),
+			"linear_velocity_ros": chassis_state.linear_velocity,
+			"angular_velocity_ros": chassis_state.angular_velocity,
+			"normal_forces": res_idle["normal_forces"],
+			"net_force_ros": res_idle["net_force_ros"],
+			"net_torque_ros": res_idle["net_torque_ros"],
+			"forces": res_idle,
+			"ground_contacts": contacts_idle
+		}
+
+	var s0: ChassisDynamics.State6DOF = chassis_state.clone()
+	var w0: Array[Vector4] = [
+		wheels[0].get_integrator_state(),
+		wheels[1].get_integrator_state(),
+		wheels[2].get_integrator_state(),
+		wheels[3].get_integrator_state()
+	]
+
+	# RK2 Stage 1 (evaluate at t_n)
+	var contacts_1: Array = ChassisDynamics.compute_ground_contacts_6dof(s0, config, ground_height)
+	var res_1: Dictionary = step_forces(in_inputs, s0.linear_velocity, s0.angular_velocity, contacts_1, dt)
+	var k1: ChassisDynamics.Derivatives6DOF = ChassisDynamics.compute_derivatives(s0, res_1["net_force_ros"], res_1["net_torque_ros"], config)
+	var s_pred: ChassisDynamics.State6DOF = ChassisDynamics.advance_euler(s0, k1, dt)
+
+	# RK2 Stage 2 (evaluate at predictor t_n + dt; wheels advance from w1 -> w0 + dt*(k1_w + k2_w))
+	var contacts_2: Array = ChassisDynamics.compute_ground_contacts_6dof(s_pred, config, ground_height)
+	var res_2: Dictionary = step_forces(in_inputs, s_pred.linear_velocity, s_pred.angular_velocity, contacts_2, dt)
+	var k2: ChassisDynamics.Derivatives6DOF = ChassisDynamics.compute_derivatives(s_pred, res_2["net_force_ros"], res_2["net_torque_ros"], config)
+
+	# Heun update for 6-DOF chassis and 4 wheels
+	chassis_state = ChassisDynamics.advance_heun(s0, k1, k2, dt)
+	for i in range(4):
+		var w2_step: Vector4 = wheels[i].get_integrator_state()
+		var w_heun: Vector4 = 0.5 * (w0[i] + w2_step)
+		# Preserve crisp zero-crossing brake hold at standstill
+		if is_zero_approx(w2_step.x) and in_inputs.brake > 0.0 and in_inputs.throttle == 0.0:
+			w_heun.x = 0.0
+		wheels[i].set_integrator_state(w_heun)
+
+	linear_velocity_ros = chassis_state.linear_velocity
+	angular_velocity_ros = chassis_state.angular_velocity
+	net_force_chassis_ros = 0.5 * (res_1["net_force_ros"] + res_2["net_force_ros"])
+	net_torque_chassis_ros = 0.5 * (res_1["net_torque_ros"] + res_2["net_torque_ros"])
+	net_force_chassis_godot = VehicleConfig.ros_to_godot_vec(net_force_chassis_ros)
+	net_torque_chassis_godot = VehicleConfig.ros_to_godot_vec(net_torque_chassis_ros)
+
+	return {
+		"state_6dof": chassis_state,
+		"position_ros": chassis_state.position,
+		"euler_ros": Vector3(chassis_state.roll, chassis_state.pitch, chassis_state.yaw),
+		"linear_velocity_ros": chassis_state.linear_velocity,
+		"angular_velocity_ros": chassis_state.angular_velocity,
+		"normal_forces": res_2["normal_forces"],
+		"net_force_ros": net_force_chassis_ros,
+		"net_torque_ros": net_torque_chassis_ros,
+		"forces": res_2,
+		"ground_contacts": contacts_2
+	}
+
 func reset() -> void:
 	for w in wheels:
 		w.reset()
 	suspension.reset()
+	chassis_state.reset(config.h_cog)
 	inputs.reset()
 	net_force_chassis_ros = Vector3.ZERO
 	net_torque_chassis_ros = Vector3.ZERO
