@@ -90,6 +90,7 @@ var gas: float = 0.0
 var steering: float = 0.0
 var brake: float = 0.0
 var _steer_smoothed: float = 0.0
+var _joy_vibrating: bool = false
 
 var slam_cones: Array = []
 var hit_cones: Array = []
@@ -191,43 +192,51 @@ func _setup_raycasts_and_wheels() -> void:
 			w_node.position.y = ray_mount_positions[i].y - ray_rest_lengths[i] + config.wheel_radius
 		wheel_mesh_nodes.append(w_node)
 
+static func _new_ros_msg(msg_name: String) -> Object:
+	var s = load("res://addons/rclgd/gen/%s.gd" % msg_name)
+	return s.new() if s != null else null
+
 func _init_ros() -> void:
-	if not ClassDB.class_exists("RosNode"):
-		print("MirenaCar: RosNode GDExtension not loaded, running in standalone mode.")
+	if not Engine.has_singleton("rclgd") or not ClassDB.class_exists("RosNode"):
+		print("MirenaCar: RosNode GDExtension not loaded, running in standalone Manual mode.")
 		_as_info = {"status": 0, "mission": 0}
 		_mission_info = {"status": 0}
+		pilot = PilotMode.MANUAL
 		return
 	
-	car_state = RosMirenaCommonCar.new()
-	wheel_speeds = RosMirenaCommonWheelSpeeds.new()
-	lap_status_msg = RosMirenaCommonLapStatus.new()
-	_as_info = RosMirenaCommonAsInfo.new()
-	_as_info.status = 0
-	_mission_info = RosMirenaCommonMissionInfo.new()
-	_mission_info.status = 0
+	car_state = _new_ros_msg("RosMirenaCommonCar")
+	wheel_speeds = _new_ros_msg("RosMirenaCommonWheelSpeeds")
+	lap_status_msg = _new_ros_msg("RosMirenaCommonLapStatus")
+	_as_info = _new_ros_msg("RosMirenaCommonAsInfo")
+	if _as_info:
+		_as_info.set("status", 0)
+	_mission_info = _new_ros_msg("RosMirenaCommonMissionInfo")
+	if _mission_info:
+		_mission_info.set("status", 0)
 	
-	_node = RosNode.new()
-	_node.init("mirena_car", "")
+	_node = ClassDB.instantiate("RosNode")
+	_node.call("init", "mirena_car", "")
 	
-	_as_info_pub          = _node.create_publisher("/as_status",        "mirena_common/msg/AsInfo")
-	_state_pub            = _node.create_publisher("/debug/state/car", "mirena_common/msg/Car")
-	_perception_pub       = _node.create_publisher("/debug/perception",  "mirena_common/msg/EntityList")
-	_slam_pub             = _node.create_publisher("/debug/slam",        "mirena_common/msg/EntityList")
-	_inferred_control_pub = _node.create_publisher("/inferred_control",  "mirena_common/msg/CarControl")
-	_lap_status_pub       = _node.create_publisher("/lap_status",        "mirena_common/msg/LapStatus")
+	_as_info_pub          = _node.call("create_publisher", "/as_status",        "mirena_common/msg/AsInfo")
+	_state_pub            = _node.call("create_publisher", "/debug/state/car", "mirena_common/msg/Car")
+	_perception_pub       = _node.call("create_publisher", "/debug/perception",  "mirena_common/msg/EntityList")
+	_slam_pub             = _node.call("create_publisher", "/debug/slam",        "mirena_common/msg/EntityList")
+	_inferred_control_pub = _node.call("create_publisher", "/inferred_control",  "mirena_common/msg/CarControl")
+	_lap_status_pub       = _node.call("create_publisher", "/lap_status",        "mirena_common/msg/LapStatus")
 	
-	var wheel_qos := RosQoS.new()
-	wheel_qos.history = RosQoS.KEEP_LAST
-	wheel_qos.depth = 5
-	wheel_qos.reliability = RosQoS.BEST_EFFORT
-	wheel_qos.durability = RosQoS.VOLATILE
-	_wheel_speeds_pub = _node.create_publisher("/sensors/wheel_speeds", "mirena_common/msg/WheelSpeeds", wheel_qos)
+	var wheel_qos: Object = ClassDB.instantiate("RosQoS")
+	if wheel_qos:
+		wheel_qos.set("history", ClassDB.class_get_integer_constant("RosQoS", "KEEP_LAST"))
+		wheel_qos.set("depth", 5)
+		wheel_qos.set("reliability", ClassDB.class_get_integer_constant("RosQoS", "BEST_EFFORT"))
+		wheel_qos.set("durability", ClassDB.class_get_integer_constant("RosQoS", "VOLATILE"))
+	_wheel_speeds_pub = _node.call("create_publisher", "/sensors/wheel_speeds", "mirena_common/msg/WheelSpeeds", wheel_qos)
 	
-	_debug_tim = _node.create_timer(0.1, _debug_publish)
+	_debug_tim = _node.call("create_timer", 0.1, _debug_publish)
 	
-	_control_sub = _node.create_subscription("/control", "mirena_common/msg/CarControl", _on_control)
-	_mission_info_sub = _node.create_subscription("/system/mission_status", "mirena_common/msg/MissionInfo", _on_mission_info)
-	_as_status_sub = _node.create_subscription("/as_status", "mirena_common/msg/AsInfo", _on_as_status)
+	_control_sub = _node.call("create_subscription", "/control", "mirena_common/msg/CarControl", _on_control)
+	_mission_info_sub = _node.call("create_subscription", "/system/mission_status", "mirena_common/msg/MissionInfo", _on_mission_info)
+	_as_status_sub = _node.call("create_subscription", "/as_status", "mirena_common/msg/AsInfo", _on_as_status)
 
 # --- Physics Process (Piloting & Telemetry) ---
 func _physics_process(delta: float) -> void:
@@ -370,13 +379,48 @@ func _process_no_pilot() -> void:
 	self.brake = 1.0
 
 func _process_manual_pilot(delta: float) -> void:
-	var steer_input = Input.get_action_strength("manual_steer_l") - Input.get_action_strength("manual_steer_r")
-	var steer_rate = manual_steer_return_rate if (absf(steer_input) < absf(_steer_smoothed) or steer_input * _steer_smoothed < 0.0) else manual_steer_rate
-	_steer_smoothed = _smooth_steer(_steer_smoothed, steer_input, delta, steer_rate)
-	
-	self.gas = Input.get_action_strength("manual_gas_pos") - Input.get_action_strength("manual_gas_neg")
+	var joypads: Array[int] = Input.get_connected_joypads()
+	var has_joypad: bool = joypads.size() > 0
+	var kb_steer: float = Input.get_action_strength("manual_steer_l") - Input.get_action_strength("manual_steer_r")
+
+	if has_joypad:
+		var joy_id: int = joypads[0]
+		var raw_x: float = -Input.get_joy_axis(joy_id, JOY_AXIS_LEFT_X)
+		var joy_steer: float = 0.0
+		if absf(raw_x) >= 0.05:
+			var norm_x: float = clampf((absf(raw_x) - 0.05) / 0.95, 0.0, 1.0)
+			joy_steer = signf(raw_x) * pow(norm_x, 1.35)
+		if absf(joy_steer) > 0.0 or is_zero_approx(kb_steer):
+			# Direct immediate response for analog stick (no keyboard ramp lag)
+			_steer_smoothed = joy_steer
+		else:
+			var steer_rate = manual_steer_return_rate if (absf(kb_steer) < absf(_steer_smoothed) or kb_steer * _steer_smoothed < 0.0) else manual_steer_rate
+			_steer_smoothed = _smooth_steer(_steer_smoothed, kb_steer, delta, steer_rate)
+	else:
+		var steer_rate = manual_steer_return_rate if (absf(kb_steer) < absf(_steer_smoothed) or kb_steer * _steer_smoothed < 0.0) else manual_steer_rate
+		_steer_smoothed = _smooth_steer(_steer_smoothed, kb_steer, delta, steer_rate)
+
+	var throttle_in: float = clampf(Input.get_action_strength("manual_gas_pos"), 0.0, 1.0)
+	var brake_in: float = clampf(Input.get_action_strength("manual_gas_neg"), 0.0, 1.0)
+	self.gas = throttle_in - brake_in
 	self.steering = _steer_smoothed * config.max_steer_angle
 	self.brake = clampf(Input.get_action_strength("EBS"), 0.0, 1.0)
+
+	# Subtle haptic feedback on PS4 controller proportional to longitudinal tire slip/lockup
+	if has_joypad and model != null:
+		var joy_id: int = joypads[0]
+		var max_kappa: float = 0.0
+		if linear_velocity.length() > 1.0:
+			for w in model.wheels:
+				if w.is_grounded:
+					max_kappa = maxf(max_kappa, absf(w.kappa))
+		if max_kappa > 0.12:
+			var vib: float = clampf((max_kappa - 0.12) / 0.45, 0.0, 0.6)
+			Input.start_joy_vibration(joy_id, vib * 0.4, vib * 0.8, 0.05)
+			_joy_vibrating = true
+		elif _joy_vibrating:
+			Input.stop_joy_vibration(joy_id)
+			_joy_vibrating = false
 
 func _process_ros_pilot() -> void:
 	self.gas = _ros_gas
@@ -493,40 +537,55 @@ func _debug_publish() -> void:
 	_publish_control()
 
 func _publish_perception() -> void:
+	if not _node or not _perception_pub:
+		return
 	var cones = get_cones_in_sight(12.0)
 	for cone in cones:
 		if not slam_cones.has(cone):
 			slam_cones.append(cone)
 	
-	var msg = RosMirenaCommonEntityList.new()
-	msg.header.stamp = _node.now()
-	msg.header.frame_id = frame_id
-	msg.entities = cones.map(func(c): return _to_ent(c))
-	_perception_pub.publish(msg)
+	var msg: Object = _new_ros_msg("RosMirenaCommonEntityList")
+	if not msg:
+		return
+	msg.get("header").set("stamp", _node.call("now"))
+	msg.get("header").set("frame_id", frame_id)
+	msg.set("entities", cones.map(func(c): return _to_ent(c)))
+	_perception_pub.call("publish", msg)
 
 func _publish_slam() -> void:
-	var msg = RosMirenaCommonEntityList.new()
-	msg.header.stamp = _node.now()
-	msg.header.frame_id = "map"
+	if not _node or not _slam_pub:
+		return
+	var msg: Object = _new_ros_msg("RosMirenaCommonEntityList")
+	if not msg:
+		return
+	msg.get("header").set("stamp", _node.call("now"))
+	msg.get("header").set("frame_id", "map")
 	slam_cones = slam_cones.filter(func(c): return is_instance_valid(c))
-	msg.entities = slam_cones.map(func(c): return _to_ent(c, true))
-	_slam_pub.publish(msg)
+	msg.set("entities", slam_cones.map(func(c): return _to_ent(c, true)))
+	_slam_pub.call("publish", msg)
 
 func _publish_control() -> void:
-	var msg = RosMirenaCommonCarControl.new()
-	msg.header.stamp = _node.now()
-	msg.header.frame_id = "map"
-	msg.gas = self.gas
-	msg.steer_angle = self.steering
-	_inferred_control_pub.publish(msg)
+	if not _node or not _inferred_control_pub:
+		return
+	var msg: Object = _new_ros_msg("RosMirenaCommonCarControl")
+	if not msg:
+		return
+	msg.get("header").set("stamp", _node.call("now"))
+	msg.get("header").set("frame_id", "map")
+	msg.set("gas", self.gas)
+	msg.set("steer_angle", self.steering)
+	_inferred_control_pub.call("publish", msg)
 
-func _to_ent(cone: Node3D, global: bool = false) -> RosMirenaCommonEntity:
-	var ent = RosMirenaCommonEntity.new()
+func _to_ent(cone: Node3D, global: bool = false) -> Object:
+	var ent: Object = _new_ros_msg("RosMirenaCommonEntity")
+	if not ent:
+		return null
 	var pos = cone.global_position if global else to_local(cone.global_position)
-	ent.type = cone.get_type_as_string()
-	ent.position.x = -pos.z
-	ent.position.y = -pos.x
-	ent.position.z = pos.y
+	ent.set("type", cone.get_type_as_string())
+	var ent_pos = ent.get("position")
+	ent_pos.set("x", -pos.z)
+	ent_pos.set("y", -pos.x)
+	ent_pos.set("z", pos.y)
 	return ent
 
 # --- Gate Crossing & Cone Timing ---
