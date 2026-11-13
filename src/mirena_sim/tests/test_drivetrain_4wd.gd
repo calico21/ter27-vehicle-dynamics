@@ -71,5 +71,28 @@ static func run() -> Dictionary:
 	else:
 		failed += 1
 		errors.append("Torque Vectoring direct override failed to pass through torques accurately")
+
+	# Test 5: Effective reflected wheel inertia I_eff = I_wheel + G^2 * I_rotor
+	var exp_i_eff: float = config.wheel_assembly_inertia + config.gear_ratio * config.gear_ratio * config.motor_rotor_inertia
+	if absf(config.get_effective_wheel_inertia() - exp_i_eff) < 1e-6 and absf(exp_i_eff - 0.5075) < 1e-4:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("Effective wheel inertia mismatch: got %.5f, expected %.5f" % [config.get_effective_wheel_inertia(), exp_i_eff])
+
+	# Test 6: Field weakening & strict 80 kW DC bus electrical power ceiling
+	inputs.reset()
+	inputs.throttle = 1.0
+	inputs.drive_mode = VehicleConfigScript.DriveMode.FOUR_WD
+	var w_fw: float = (12000.0 * TAU / 60.0) / config.gear_ratio
+	var trq_fw = model.DrivetrainModel.compute_drive_torques(inputs, 20.0, config, [w_fw, w_fw, w_fw, w_fw])
+	var p_elec_dc: float = 0.0
+	for t in trq_fw:
+		p_elec_dc += maxf(0.0, t * w_fw) / config.drivetrain_efficiency
+	if p_elec_dc <= config.max_dc_power_w + 1e-2 and trq_fw[0] > 0.0:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("80 kW DC bus ceiling violated: P_elec=%.2f W (limit %.2f W)" % [p_elec_dc, config.max_dc_power_w])
 	
 	return {"name": "test_drivetrain_4wd", "passed": passed, "failed": failed, "errors": errors}

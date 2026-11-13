@@ -18,7 +18,8 @@ static func run() -> Dictionary:
 	# 1. Motor angular speed limiter (taper + cutoff at motor_max_rpm)
 	# ---------------------------------------------------------
 	var omega_wheel_low: float = (8000.0 * TAU / 60.0) / cfg.gear_ratio
-	var omega_wheel_mid: float = (11100.0 * TAU / 60.0) / cfg.gear_ratio # midpoint between 10200 and 12000 RPM
+	var mid_rpm: float = 0.5 * (cfg.motor_taper_ratio + 1.0) * cfg.motor_max_rpm
+	var omega_wheel_mid: float = (mid_rpm * TAU / 60.0) / cfg.gear_ratio
 	var omega_wheel_max: float = (cfg.motor_max_rpm * TAU / 60.0) / cfg.gear_ratio
 
 	var sc_low: float = TorqueVectoringScript.compute_motor_speed_scale(omega_wheel_low, true, cfg)

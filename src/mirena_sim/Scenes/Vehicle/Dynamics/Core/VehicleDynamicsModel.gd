@@ -193,7 +193,8 @@ func step_forces(
 			base_steer = compute_ackermann_steer(steer_angle, true, config)
 		elif i == VehicleConfig.WheelIndex.FR:
 			base_steer = compute_ackermann_steer(steer_angle, false, config)
-		var delta_w = base_steer + toe_offsets[i]
+		var delta_comp: float = SuspensionSystem.compute_steering_compliance(w.M_z, w.F_y, config) if i < 2 else 0.0
+		var delta_w = base_steer + toe_offsets[i] + delta_comp
 		wheel_steer_angles.append(delta_w)
 		
 		w.camber_angle = SuspensionSystem.compute_ground_camber_iso(
@@ -218,6 +219,16 @@ func step_forces(
 		var tau_wheel = r_pos.cross(F_wheel_chassis) + M_tire_chassis
 		total_wheel_torque_ros += tau_wheel
 	
+	# 3b. 3D Wishbone Anti-Dive / Anti-Squat geometric pitch reaction (preserves sum(Fz))
+	var fx_corners: Array = [
+		wheel_forces_ros[0].x,
+		wheel_forces_ros[1].x,
+		wheel_forces_ros[2].x,
+		wheel_forces_ros[3].x
+	]
+	var anti_pitch: Dictionary = SuspensionSystem.compute_anti_pitch_forces(fx_corners, config)
+	total_wheel_torque_ros.y += float(anti_pitch["pitch_torque_ros"])
+
 	# 4. Aerodynamics
 	var aero = compute_aerodynamics(local_v_ros)
 	var f_aero_ros: Vector3 = aero["force"]

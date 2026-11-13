@@ -68,13 +68,32 @@ static func compute_drive_torques(
 				drive_torques[VehicleConfig.WheelIndex.RL] = requested_total_trq * s_rear * 0.5
 				drive_torques[VehicleConfig.WheelIndex.RR] = requested_total_trq * s_rear * 0.5
 
-		# Apply per-wheel motor angular speed limiter (taper near cutoff, 0 beyond motor_max_rpm)
+		# Apply per-wheel field-weakening envelope + motor angular speed limiter
 		var fallback_omega: float = absf(speed) / r
+		var omega_base_motor: float = maxf(config.base_speed_rpm, 0.0) * (TAU / 60.0)
+		var p_motor_peak: float = config.motor_peak_torque * omega_base_motor
 		for i in range(4):
 			var w_i: float = float(wheel_omegas[i]) if i < wheel_omegas.size() else fallback_omega
 			if drive_torques[i] > 0.0:
+				var omega_motor: float = absf(w_i) * maxf(G, 1e-3)
+				var t_motor_env: float = config.motor_peak_torque
+				if omega_base_motor > 0.0 and omega_motor > omega_base_motor:
+					t_motor_env = minf(config.motor_peak_torque, p_motor_peak / omega_motor)
 				var speed_scale: float = TorqueVectoring.compute_motor_speed_scale(w_i, true, config)
-				drive_torques[i] = minf(drive_torques[i], max_wheel_trq * speed_scale)
+				var max_trq_i: float = t_motor_env * G * eff * speed_scale
+				drive_torques[i] = minf(drive_torques[i], max_trq_i)
+
+		# Enforce strict 80 kW DC bus electrical power ceiling: sum(max(0, T_i * w_i) / eff) <= P_max_dc
+		var p_dc_limit: float = maxf(config.max_dc_power_w, 0.0)
+		if p_dc_limit > 0.0:
+			var p_elec_total: float = 0.0
+			for i in range(4):
+				var w_i: float = float(wheel_omegas[i]) if i < wheel_omegas.size() else fallback_omega
+				p_elec_total += maxf(0.0, drive_torques[i] * absf(w_i)) / maxf(eff, 1e-3)
+			if p_elec_total > p_dc_limit:
+				var p_scale: float = p_dc_limit / p_elec_total
+				for i in range(4):
+					drive_torques[i] *= p_scale
 	
 	return drive_torques
 

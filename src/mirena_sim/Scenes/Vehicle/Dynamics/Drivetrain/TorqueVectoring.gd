@@ -80,7 +80,7 @@ static func compute_motor_speed_scale(wheel_omega: float, is_tractive: bool, con
 	var omega_motor: float = absf(wheel_omega) * maxf(config.gear_ratio, 1e-3)
 	if omega_motor <= omega_taper_start:
 		return 1.0
-	if omega_motor >= omega_max:
+	if omega_motor >= omega_max - 1e-6:
 		return 0.0
 	return 1.0 - (omega_motor - omega_taper_start) / maxf(omega_max - omega_taper_start, 1e-5)
 

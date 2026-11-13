@@ -54,8 +54,20 @@ var h_roll_arm: float = 0.269168
 @export var damping_relaxation_front: float = 3000.0
 @export var damping_compression_rear: float = 2000.0
 @export var damping_relaxation_rear: float = 3000.0
+@export var damper_knee_velocity: float = 0.05
+@export var damper_comp_low: float = 2600.0
+@export var damper_reb_low: float = 3800.0
+@export var damper_comp_high: float = 1100.0
+@export var damper_reb_high: float = 1600.0
+var use_digressive_damper: bool = true
 @export var arb_stiffness_front: float = 4500.0
 @export var arb_stiffness_rear: float = 5500.0
+@export var anti_dive_ratio_front: float = 0.1388
+@export var anti_squat_ratio_rear: float = 0.1154
+@export var jacking_coeff_front: float = 0.0323
+@export var jacking_coeff_rear: float = 0.0651
+@export var mechanical_trail_front: float = 0.013
+@export var steering_compliance_stiffness_nm_rad: float = 9500.0
 @export var bumpstop_start_front: float = 0.025
 @export var bumpstop_start_rear: float = 0.025
 @export var bumpstop_stiffness_front: float = 120000.0
@@ -76,11 +88,15 @@ var toe_table_rear: Array = []
 # --- Powertrain & Drivetrain ---
 @export var drive_mode: DriveMode = DriveMode.FOUR_WD
 @export var power_limit_watts: float = 80000.0
-@export var motor_peak_torque: float = 100.0
-@export var motor_max_rpm: float = 12000.0
+@export var max_dc_power_w: float = 80000.0
+@export var motor_peak_torque: float = 25.0
+@export var motor_max_rpm: float = 22000.0
+@export var base_speed_rpm: float = 6500.0
 @export var motor_taper_ratio: float = 0.85
-@export var gear_ratio: float = 5.0
-@export var drivetrain_efficiency: float = 0.92
+@export var gear_ratio: float = 12.5
+@export var drivetrain_efficiency: float = 0.90
+@export var wheel_assembly_inertia: float = 0.32
+@export var motor_rotor_inertia: float = 0.0012
 @export var front_drive_torque_ratio: float = 0.35
 @export var max_steer_angle: float = 0.38
 @export var tv_rate_hz: float = 200.0
@@ -200,8 +216,23 @@ func _load_suspension_json(file_path: String) -> void:
 	damping_relaxation_front = float(d.get("damping_relaxation_front", damping_relaxation_front))
 	damping_compression_rear = float(d.get("damping_compression_rear", damping_compression_rear))
 	damping_relaxation_rear = float(d.get("damping_relaxation_rear", damping_relaxation_rear))
+	if d.has("damper_knee_velocity") and d.has("damper_comp_low") and d.has("damper_reb_low") and d.has("damper_comp_high") and d.has("damper_reb_high"):
+		use_digressive_damper = true
+		damper_knee_velocity = float(d.get("damper_knee_velocity", damper_knee_velocity))
+		damper_comp_low = float(d.get("damper_comp_low", damper_comp_low))
+		damper_reb_low = float(d.get("damper_reb_low", damper_reb_low))
+		damper_comp_high = float(d.get("damper_comp_high", damper_comp_high))
+		damper_reb_high = float(d.get("damper_reb_high", damper_reb_high))
+	else:
+		use_digressive_damper = false
 	arb_stiffness_front = float(d.get("arb_stiffness_front", arb_stiffness_front))
 	arb_stiffness_rear = float(d.get("arb_stiffness_rear", arb_stiffness_rear))
+	anti_dive_ratio_front = float(d.get("anti_dive_ratio_front", anti_dive_ratio_front))
+	anti_squat_ratio_rear = float(d.get("anti_squat_ratio_rear", anti_squat_ratio_rear))
+	jacking_coeff_front = float(d.get("jacking_coeff_front", jacking_coeff_front))
+	jacking_coeff_rear = float(d.get("jacking_coeff_rear", jacking_coeff_rear))
+	mechanical_trail_front = float(d.get("mechanical_trail_front", mechanical_trail_front))
+	steering_compliance_stiffness_nm_rad = maxf(1.0, float(d.get("steering_compliance_stiffness_nm_rad", steering_compliance_stiffness_nm_rad)))
 	bumpstop_start_front = float(d.get("bumpstop_start_front", bumpstop_start_front))
 	bumpstop_start_rear = float(d.get("bumpstop_start_rear", bumpstop_start_rear))
 	bumpstop_stiffness_front = float(d.get("bumpstop_stiffness_front", bumpstop_stiffness_front))
@@ -250,11 +281,16 @@ func _load_drivetrain_json(file_path: String) -> void:
 	if d.is_empty():
 		return
 	power_limit_watts = float(d.get("power_limit_watts", power_limit_watts))
+	max_dc_power_w = float(d.get("max_dc_power_w", power_limit_watts))
+	power_limit_watts = max_dc_power_w
 	motor_peak_torque = float(d.get("motor_peak_torque", motor_peak_torque))
 	motor_max_rpm = float(d.get("motor_max_rpm", motor_max_rpm))
+	base_speed_rpm = float(d.get("base_speed_rpm", base_speed_rpm))
 	motor_taper_ratio = float(d.get("motor_taper_ratio", motor_taper_ratio))
 	gear_ratio = float(d.get("gear_ratio", gear_ratio))
 	drivetrain_efficiency = float(d.get("drivetrain_efficiency", drivetrain_efficiency))
+	wheel_assembly_inertia = float(d.get("wheel_assembly_inertia", wheel_assembly_inertia))
+	motor_rotor_inertia = float(d.get("motor_rotor_inertia", motor_rotor_inertia))
 	if d.has("front_torque_split"):
 		front_drive_torque_ratio = clampf(float(d.get("front_torque_split", front_drive_torque_ratio)), 0.0, 1.0)
 	else:
@@ -309,12 +345,17 @@ func get_cl_a_rear() -> float:
 		return _cl_a_rear_explicit
 	return cl_a * (1.0 - clampf(aero_balance_front, 0.0, 1.0))
 
-## Recalculates longitudinal CoG distances and roll-center geometry.
+## Returns effective reflected wheel rotational inertia: I_eff = I_wheel + G^2 * I_rotor (kg*m^2).
+func get_effective_wheel_inertia() -> float:
+	return maxf(wheel_assembly_inertia + gear_ratio * gear_ratio * motor_rotor_inertia, 1e-4)
+
+## Recalculates longitudinal CoG distances, roll-center geometry, and effective wheel inertia.
 func update_derived_geometry() -> void:
 	a_cog = wheelbase * weight_dist_r
 	b_cog = wheelbase * (1.0 - weight_dist_r)
 	roll_center_height_cg = (1.0 - weight_dist_r) * roll_center_height_front + weight_dist_r * roll_center_height_rear
 	h_roll_arm = maxf(0.0, h_sprung_cog - roll_center_height_cg)
+	wheel_inertia = get_effective_wheel_inertia()
 
 ## Convert vector from Godot (+X Right, +Y Up, -Z Forward) to ROS (+X Forward, +Y Left, +Z Up).
 static func godot_to_ros_vec(v: Vector3) -> Vector3:

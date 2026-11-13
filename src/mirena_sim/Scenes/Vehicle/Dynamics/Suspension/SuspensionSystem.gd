@@ -72,10 +72,9 @@ func evaluate_from_corners(
 			continue
 
 		var k_wheel: float = get_wheel_spring_stiffness(is_front, config)
-		var c_wheel: float = get_wheel_damping(is_front, dz_dot, config)
 
 		c.spring_force = k_wheel * dz
-		c.damper_force = c_wheel * dz_dot
+		c.damper_force = compute_damper_force_wheel(is_front, dz_dot, config)
 		c.bumpstop_force = compute_bumpstop_force(dz, is_front, config)
 
 	# Axle Anti-Roll Bar coupling (pure roll moment: F_ARB_L + F_ARB_R = 0)
@@ -185,14 +184,77 @@ func apply_non_elastic_lateral_load_transfer(
 		c_r.fz += dfz
 
 ## Wheel-referred asymmetric vertical damping: c_wheel = c_damper * MR^2 (N*s/m).
+## Uses digressive low/high-speed slopes when use_digressive_damper is enabled.
 static func get_wheel_damping(is_front: bool, comp_vel: float, config: VehicleConfig) -> float:
 	var mr: float = config.motion_ratio_front if is_front else config.motion_ratio_rear
 	var c_damper: float = 0.0
-	if comp_vel >= 0.0:
-		c_damper = config.damping_compression_front if is_front else config.damping_compression_rear
+	if config.use_digressive_damper and config.damper_knee_velocity > 0.0:
+		var v_damper: float = absf(comp_vel) * mr
+		if comp_vel >= 0.0:
+			c_damper = config.damper_comp_low if v_damper <= config.damper_knee_velocity else config.damper_comp_high
+		else:
+			c_damper = config.damper_reb_low if v_damper <= config.damper_knee_velocity else config.damper_reb_high
 	else:
-		c_damper = config.damping_relaxation_front if is_front else config.damping_relaxation_rear
+		if comp_vel >= 0.0:
+			c_damper = config.damping_compression_front if is_front else config.damping_compression_rear
+		else:
+			c_damper = config.damping_relaxation_front if is_front else config.damping_relaxation_rear
 	return c_damper * mr * mr
+
+## Continuous 2-stage digressive damper force referred to wheel (N).
+## Evaluates shaft force at v_damper = MR * dz_dot and projects to wheel by * MR.
+static func compute_damper_force_wheel(is_front: bool, comp_vel: float, config: VehicleConfig) -> float:
+	if not config.use_digressive_damper or config.damper_knee_velocity <= 0.0:
+		return get_wheel_damping(is_front, comp_vel, config) * comp_vel
+	var mr: float = config.motion_ratio_front if is_front else config.motion_ratio_rear
+	var v_d: float = comp_vel * mr
+	var v_knee: float = config.damper_knee_velocity
+	var abs_vd: float = absf(v_d)
+	var f_shaft: float = 0.0
+	if v_d >= 0.0:
+		if abs_vd <= v_knee:
+			f_shaft = config.damper_comp_low * v_d
+		else:
+			f_shaft = config.damper_comp_low * v_knee + config.damper_comp_high * (abs_vd - v_knee)
+	else:
+		if abs_vd <= v_knee:
+			f_shaft = -config.damper_reb_low * abs_vd
+		else:
+			f_shaft = -(config.damper_reb_low * v_knee + config.damper_reb_high * (abs_vd - v_knee))
+	return f_shaft * mr
+
+## 3D M^-1 wishbone anti-dive / anti-squat geometric reaction forces and net pitch torque (Nm).
+## Sustains the chassis against braking dive (front) and acceleration squat (rear) without altering total sum(Fz).
+static func compute_anti_pitch_forces(fx_corners: Array, config: VehicleConfig) -> Dictionary:
+	var fx0: float = float(fx_corners[0]) if fx_corners.size() > 0 else 0.0
+	var fx1: float = float(fx_corners[1]) if fx_corners.size() > 1 else 0.0
+	var fx2: float = float(fx_corners[2]) if fx_corners.size() > 2 else 0.0
+	var fx3: float = float(fx_corners[3]) if fx_corners.size() > 3 else 0.0
+	var dfz0: float = -config.anti_dive_ratio_front * fx0
+	var dfz1: float = -config.anti_dive_ratio_front * fx1
+	var dfz2: float = config.anti_squat_ratio_rear * fx2
+	var dfz3: float = config.anti_squat_ratio_rear * fx3
+	var pitch_torque_ros: float = -config.a_cog * (dfz0 + dfz1) + config.b_cog * (dfz2 + dfz3)
+	return {
+		"corner_forces": [dfz0, dfz1, dfz2, dfz3],
+		"pitch_torque_ros": pitch_torque_ros
+	}
+
+## 3D M^-1 lateral jacking forces per corner [FL, FR, RL, RR] (N), zero-sum per axle.
+static func compute_jacking_forces(fy_corners: Array, config: VehicleConfig) -> Array[float]:
+	var fy_f: float = (float(fy_corners[0]) + float(fy_corners[1])) if fy_corners.size() >= 2 else 0.0
+	var fy_r: float = (float(fy_corners[2]) + float(fy_corners[3])) if fy_corners.size() >= 4 else 0.0
+	var dfz_f: float = 0.5 * config.jacking_coeff_front * fy_f
+	var dfz_r: float = 0.5 * config.jacking_coeff_rear * fy_r
+	return [-dfz_f, dfz_f, -dfz_r, dfz_r]
+
+## Elastic steering compliance deflection (rad) at front kingpin from tire Mz and mechanical trail.
+## In ISO 8855, positive Fy produces negative Mz and negative mechanical-trail torque (-Fy * x_trail),
+## yielding delta_comp < 0 (elastic understeer).
+static func compute_steering_compliance(mz_tire: float, fy_tire: float, config: VehicleConfig) -> float:
+	var k_steer: float = maxf(config.steering_compliance_stiffness_nm_rad, 1.0)
+	var kingpin_torque: float = mz_tire - fy_tire * config.mechanical_trail_front
+	return clampf(kingpin_torque / k_steer, -0.1, 0.1)
 
 ## Progressive bump stop force (N, >= 0) engaging when delta_z exceeds bumpstop_start.
 static func compute_bumpstop_force(delta_z: float, is_front: bool, config: VehicleConfig) -> float:

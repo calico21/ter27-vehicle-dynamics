@@ -182,6 +182,40 @@ static func run() -> Dictionary:
 		failed += 1
 		errors.append("Radial deflection / ride rate failed: rho=%.6f (exp %.6f), k_ride=%.2f (exp %.2f)" % [w_test.radial_deflection, exp_rho, w_test.ride_rate, exp_k_ride])
 
+	# 10. 3D M^-1 Anti-Dive (13.88%) pitch reduction under braking while preserving sum(Fz) = m*g
+	var anti_res: Dictionary = SuspensionSystemScript.compute_anti_pitch_forces([-2000.0, -2000.0, -500.0, -500.0], cfg_rc)
+	var anti_forces: Array = anti_res["corner_forces"]
+	var anti_pitch_tau: float = float(anti_res["pitch_torque_ros"])
+	# Braking (Fx < 0) produces positive front anti-dive force and negative (nose-up) pitch torque
+	if absf(float(anti_forces[0]) - 0.1388 * 2000.0) < 1e-3 and anti_pitch_tau < 0.0:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("Anti-dive M^-1 check failed: dfz0=%.2f, tau_y=%.2f" % [float(anti_forces[0]), anti_pitch_tau])
+
+	# 11. Steering compliance: delta_comp < 0 on outer/front wheel under positive Fy & negative Mz
+	var delta_comp: float = SuspensionSystemScript.compute_steering_compliance(-50.0, 2000.0, cfg_rc)
+	var exp_comp: float = (-50.0 - 2000.0 * 0.013) / 9500.0
+	if delta_comp < 0.0 and absf(delta_comp - exp_comp) < 1e-7:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("Steering compliance check failed: delta_comp=%.6f (exp %.6f)" % [delta_comp, exp_comp])
+
+	# 12. Digressive 2-stage damper continuity at v_damper = 0.05 m/s and reduced high-speed slope
+	var mr_f: float = cfg_rc.motion_ratio_front
+	var dzd_knee: float = cfg_rc.damper_knee_velocity / mr_f
+	var f_below: float = SuspensionSystemScript.compute_damper_force_wheel(true, dzd_knee - 1e-6, cfg_rc)
+	var f_above: float = SuspensionSystemScript.compute_damper_force_wheel(true, dzd_knee + 1e-6, cfg_rc)
+	var f_high: float = SuspensionSystemScript.compute_damper_force_wheel(true, dzd_knee * 3.0, cfg_rc)
+	var slope_low: float = SuspensionSystemScript.get_wheel_damping(true, dzd_knee * 0.5, cfg_rc)
+	var slope_high: float = SuspensionSystemScript.get_wheel_damping(true, dzd_knee * 2.0, cfg_rc)
+	if absf(f_above - f_below) < 0.05 and slope_low > slope_high and f_high > f_above:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("Digressive damper continuity/slope failed: f_below=%.2f, f_above=%.2f, slope_low=%.1f, slope_high=%.1f" % [f_below, f_above, slope_low, slope_high])
+
 	return {
 		"name": "SuspensionSystem (Block B)",
 		"passed": passed,

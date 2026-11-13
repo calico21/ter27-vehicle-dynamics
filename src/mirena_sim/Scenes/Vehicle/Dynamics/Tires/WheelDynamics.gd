@@ -192,7 +192,7 @@ func integrate_wheel_spin(T_drive: float, T_brake: float, dt: float, config: Veh
 		return
 	
 	var r = loaded_radius if loaded_radius > 0.0 else config.wheel_radius
-	var I_w = maxf(config.wheel_inertia, 1e-4)
+	var I_w = config.get_effective_wheel_inertia()
 	var no_drive: bool = absf(T_drive) <= 1e-6
 	
 	# Rolling resistance torque opposing rotation
