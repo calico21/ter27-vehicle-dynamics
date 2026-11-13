@@ -278,7 +278,7 @@ func _init_ros() -> void:
 
 # --- Physics Process (Piloting & Telemetry) ---
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F8:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F7:
 		ecu_driving_mode = 1 - ecu_driving_mode
 		var mode_name: String = "ECU_TV_V3_4WD" if ecu_driving_mode == 1 else "LINEAL_4WD"
 		print("[ECU Mode]: %s" % mode_name)
@@ -735,7 +735,7 @@ func _update_minimal_hud() -> void:
 	if _hud_label == null:
 		return
 	var kmh: float = linear_velocity.length() * 3.6
-	var mode_str: String = "ECU TV v3 4WD [F8]" if ecu_driving_mode == 1 else "LINEAL 4WD [F8]"
+	var mode_str: String = "ECU TV v3 4WD [F7]" if ecu_driving_mode == 1 else "LINEAL 4WD [F7]"
 	var tc_str: String = "  |  TC ACTIVE" if tv_tc_active else ""
 	_hud_label.text = "%5.1f km/h   |   %4.1f / 80.0 kW\n%s%s" % [kmh, tv_elec_power_kw, mode_str, tc_str]
 

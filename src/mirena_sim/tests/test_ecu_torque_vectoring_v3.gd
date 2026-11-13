@@ -175,6 +175,41 @@ static func run() -> Dictionary:
 		failed += 1
 		errors.append("ECU_TV_V3_4WD 0-75m / top speed failed: t_75m=%.2f s v_max=%.2f m/s (%.1f km/h)" % [t_75m, v_max, v_max * 3.6])
 
+	# 8. Accel -> hard brake -> accel: mu_surface must not degrade and second launch equals first
+	var m_ab := VehicleDynamicsModel.new(cfg)
+	var in_go := VehicleInputs.new()
+	in_go.set_from_manual(1.0, 0.0, 0.0, cfg.max_steer_angle)
+	in_go.ecu_driving_mode = 1
+	var in_stop := VehicleInputs.new()
+	in_stop.set_from_manual(0.0, 1.0, 0.0, cfg.max_steer_angle)
+	in_stop.ecu_driving_mode = 1
+	var launch_times: Array[float] = []
+	var min_mu: float = 99.0
+	for phase in range(2):
+		var t_launch: float = -1.0
+		var tt: float = 0.0
+		for _s2 in range(1600): # up to 8 s
+			m_ab.step_standalone(in_go, 0.005)
+			tt += 0.005
+			for mu_i in m_ab.ecu_tv_v3.tc_mu_surface:
+				min_mu = minf(min_mu, mu_i)
+			if m_ab.chassis_state.linear_velocity.x >= 20.0:
+				t_launch = tt
+				break
+		launch_times.append(t_launch)
+		for _s3 in range(1600): # brake to standstill
+			m_ab.step_standalone(in_stop, 0.005)
+			for mu_i in m_ab.ecu_tv_v3.tc_mu_surface:
+				min_mu = minf(min_mu, mu_i)
+			if m_ab.chassis_state.linear_velocity.x < 0.05:
+				break
+	var rel_diff: float = absf(launch_times[1] - launch_times[0]) / maxf(launch_times[0], 1e-3)
+	if launch_times[0] > 0.0 and launch_times[1] > 0.0 and min_mu >= 1.60 and rel_diff < 0.03:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("Accel-brake-accel degradation: t1=%.3f s t2=%.3f s diff=%.2f%% min_mu=%.3f" % [launch_times[0], launch_times[1], rel_diff * 100.0, min_mu])
+
 	return {
 		"name": "test_ecu_torque_vectoring_v3",
 		"passed": passed,

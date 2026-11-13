@@ -67,6 +67,7 @@ const GP_TC_ALPHA_MU_EMA: float = 0.008
 const GP_TC_MU_LO: float = 0.40
 const GP_TC_MU_HI: float = 2.20
 const GP_TC_MU_NOM: float = 1.90
+const GP_TC_MU_TAU_RECOVERY: float = 4.0
 const GP_TC_V_MIN: float = 1.5
 const GP_TC_CLAMP_BETA: float = 50.0
 
@@ -342,7 +343,7 @@ static func gp_estimate_fy(vx: float, vy: float, wz: float, delta: float, fz: Ar
 	return fy_out
 
 static func gp_friction_ellipse_t_ub(fz: Array[float], fy_est: Array[float], mu_est: float) -> Array[float]:
-	var mu_safe: float = clampf(mu_est, 0.4, 2.0)
+	var mu_safe: float = clampf(mu_est, 1.35, 2.20)
 	var t_ub: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	for i in range(4):
 		var max_cap: float = mu_safe * fz[i]
@@ -496,7 +497,8 @@ func gp_tc_step_4wd(
 	wz: float,
 	fz: Array[float],
 	dt: float,
-	wheel_steers: Array[float] = [0.0, 0.0, 0.0, 0.0]
+	wheel_steers: Array[float] = [0.0, 0.0, 0.0, 0.0],
+	brake_norm: float = 0.0
 ) -> void:
 	var t_mean_abs: float = 0.25 * (
 		absf(t_req_out[0]) + absf(t_req_out[1]) + absf(t_req_out[2]) + absf(t_req_out[3])
@@ -515,13 +517,6 @@ func gp_tc_step_4wd(
 
 	var gate_mu: float = gp_sigmoid(t_mean_abs - 20.0)
 	var alpha_gated: float = GP_TC_ALPHA_MU_EMA * gate_mu
-	for i in range(4):
-		tc_mu_surface[i] = clampf(
-			(1.0 - alpha_gated) * tc_mu_surface[i] + alpha_gated * mu_meas[i],
-			GP_TC_MU_LO,
-			GP_TC_MU_HI
-		)
-
 	var cs_factor: float = maxf(_tc_combined_slip_factor(vx, vy, wz), 0.72)
 	var speed_gate: float = gp_sigmoid((vx - GP_TC_V_MIN) * 3.0)
 	var kp_eff: float = (GP_TC_KP * 20.0) * (1.0 + GP_TC_V_KP_SCALE / (absf(vx) + 0.5))
@@ -541,6 +536,19 @@ func gp_tc_step_4wd(
 		var kappa_raw: float = _tc_compute_kappa(omega[i], vx_wheel)
 		tc_kappa_filt[i] = GP_TC_ALPHA_KAPPA_LP * tc_kappa_filt[i] + (1.0 - GP_TC_ALPHA_KAPPA_LP) * kappa_raw
 
+		# mu_surface: only evidence of real saturation (|kappa| > 0.08) may lower it
+		var slipping: bool = absf(tc_kappa_filt[i]) > 0.08
+		var mu_new: float = tc_mu_surface[i]
+		if slipping:
+			mu_new = (1.0 - alpha_gated) * mu_new + alpha_gated * mu_meas[i]
+		else:
+			if mu_meas[i] > mu_new:
+				mu_new = (1.0 - alpha_gated) * mu_new + alpha_gated * mu_meas[i]
+			mu_new += (GP_TC_MU_NOM - mu_new) * clampf(dt / GP_TC_MU_TAU_RECOVERY, 0.0, 1.0)
+		tc_mu_surface[i] = clampf(mu_new, GP_TC_MU_LO, GP_TC_MU_HI)
+
+		var traction_demand: bool = t_req_out[i] > 15.0 and brake_norm < 0.05
+
 		var prev_k: float = tc_kappa_prev[i]
 		var d_kappa: float = tc_kappa_filt[i] - prev_k
 		var d_fx: float = fx_wheels[i] - tc_fx_prev[i]
@@ -548,7 +556,7 @@ func gp_tc_step_4wd(
 		tc_fx_prev[i] = fx_wheels[i]
 
 		var max_phys_dk: float = 0.30 * dt / 0.005
-		if absf(d_kappa) > 0.0001 and absf(d_kappa) < max_phys_dk and vx > 2.0:
+		if traction_demand and absf(d_kappa) > 0.0001 and absf(d_kappa) < max_phys_dk and vx > 2.0:
 			var lam_rls: float = 0.985
 			var p_val: float = tc_rls_p[i]
 			var phi: float = d_kappa
@@ -568,10 +576,11 @@ func gp_tc_step_4wd(
 		var grad_dir: float = tc_rls_theta[i] / (theta_mag + 5000.0)
 		var kappa_grad: float = tc_kappa_opt[i] + 0.03 * grad_dir * dt
 
-		tc_kappa_opt[i] = (
-			secant_ok * clampf(kappa_secant, 0.05, 0.22)
-			+ (1.0 - secant_ok) * clampf(kappa_grad, 0.05, 0.22)
-		)
+		if traction_demand:
+			tc_kappa_opt[i] = (
+				secant_ok * clampf(kappa_secant, 0.05, 0.22)
+				+ (1.0 - secant_ok) * clampf(kappa_grad, 0.05, 0.22)
+			)
 		tc_theta_prev[i] = tc_rls_theta[i]
 
 		var kappa_analytical: float = _tc_kappa_star(fz[i], tc_mu_surface[i]) * cs_factor
@@ -579,12 +588,17 @@ func gp_tc_step_4wd(
 		var kappa_meas_mag: float = sign_i * tc_kappa_filt[i]
 		var error: float = kappa_meas_mag - kappa_target_mag
 
-		var raw_integral: float = tc_pi_integral[i] + error * dt * speed_gate
-		tc_pi_integral[i] = GP_TC_I_MAX * tanh(raw_integral / GP_TC_I_MAX)
-		if error < 0.0:
-			tc_pi_integral[i] *= (1.0 - 0.08)
+		if traction_demand:
+			var raw_integral: float = tc_pi_integral[i] + error * dt * speed_gate
+			tc_pi_integral[i] = GP_TC_I_MAX * tanh(raw_integral / GP_TC_I_MAX)
+			if error < 0.0:
+				tc_pi_integral[i] *= (1.0 - 0.08)
+			else:
+				tc_pi_integral[i] *= (1.0 - 0.002)
 		else:
-			tc_pi_integral[i] *= (1.0 - 0.002)
+			tc_pi_integral[i] *= 0.5
+			if absf(tc_pi_integral[i]) < 1e-6:
+				tc_pi_integral[i] = 0.0
 
 		var pi_out: float = kp_eff * error + ki_eff * tc_pi_integral[i]
 		tc_omega_prev_ema[i] = omega_ema[i]
@@ -769,7 +783,7 @@ func _gp_tv_step(
 		t_cmd[i] = tv_final
 
 	# Stage 8: 4WD Adaptive RLS Traction Control
-	gp_tc_step_4wd(t_cmd, omega, vx, vy_est, wz_corr, fz_est, dt, wheel_steers)
+	gp_tc_step_4wd(t_cmd, omega, vx, vy_est, wz_corr, fz_est, dt, wheel_steers, brake_norm)
 	gp_ekf_update_friction()
 
 	for i in range(4):
