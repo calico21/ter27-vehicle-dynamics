@@ -35,17 +35,21 @@ var _compositors: Array[Compositor] = []
 var _effects: Array[LidarFaceCompositorEffect] = []
 
 # --- ROS Components ---
-var _node: RosNode
-var _lidar_pub: RosPublisher
-var _ros_timer: RosTimer
+var _node: Object
+var _lidar_pub: Object
+var _ros_timer: Object
 
 # --- Rendering Components ---
 var _rd: RenderingDevice
 var _face_textures: Array[RID] = []
 var _output_texture_rid: RID
 var is_sampling: bool = false
-var _cached_msg: RosSensorMsgsPointCloud2
-var _current_stamp: RosMsg
+var _cached_msg: Object
+var _current_stamp: Object
+
+func _new_ros_msg(msg_class: String) -> Object:
+	var script: Script = load("res://addons/rclgd/gen/%s.gd" % msg_class)
+	return script.new() if script else null
 
 var _stitch_shader: RID
 var _stitch_pipeline: RID
@@ -82,7 +86,9 @@ func _ready() -> void:
 	_setup_rendering_pipeline()
 
 	# 3. ROS 2 Init
-	_node = RosNode.new()
+	if not ClassDB.class_exists("RosNode"):
+		return
+	_node = ClassDB.instantiate("RosNode")
 	_node.init(name.to_snake_case(),ros_namespace.to_snake_case())
 	_lidar_pub = _node.create_publisher(lidar_topic, "sensor_msgs/msg/PointCloud2")
 
@@ -413,7 +419,7 @@ func _write_transform_to_array(t: Transform3D, index: int) -> void:
 	_params_float_array[index + 15] = 1.0
 
 func _prepare_msg_template():
-	_cached_msg = RosSensorMsgsPointCloud2.new()
+	_cached_msg = _new_ros_msg("RosSensorMsgsPointCloud2")
 	_cached_msg.height = 1
 	_cached_msg.is_dense = true
 	_cached_msg.point_step = 16 
@@ -423,7 +429,7 @@ func _prepare_msg_template():
 		_create_field("z", 8, 7), _create_field("intensity", 12, 7)
 	]
 
-func _create_field(fname: String, offset: int, datatype: int) -> RosSensorMsgsPointField:
-	var f = RosSensorMsgsPointField.new()
+func _create_field(fname: String, offset: int, datatype: int) -> Object:
+	var f = _new_ros_msg("RosSensorMsgsPointField")
 	f.name = fname; f.offset = offset; f.datatype = datatype; f.count = 1
 	return f

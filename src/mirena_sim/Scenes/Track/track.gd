@@ -25,11 +25,15 @@ var track_gen = TrackGenerator.new()
 signal track_loaded
 
 # ROS node to manage tracks
-var _node: RosNode
-var _track_pub : RosPublisher
-var _map_pub : RosPublisher
-var _map_timer : RosTimer
-var _track_timer : RosTimer
+var _node: Object
+var _track_pub : Object
+var _map_pub : Object
+var _map_timer : Object
+var _track_timer : Object
+
+func _new_ros_msg(msg_class: String) -> Object:
+	var script: Script = load("res://addons/rclgd/gen/%s.gd" % msg_class)
+	return script.new() if script else null
 
 # Standard ROS 2 Origin (X: Forward, Y: Left, PSI: Counter-Clockwise Yaw)
 var origin : Transform3D 
@@ -44,7 +48,9 @@ func _on_ros_parameter_changed(param_name: String, value: Variant):
 				load_track(value)
 
 func _ready() -> void:
-	_node = RosNode.new()
+	if not ClassDB.class_exists("RosNode"):
+		return
+	_node = ClassDB.instantiate("RosNode")
 	_node.init("track_manager")
 	# Track name parameter and callback
 	_node.declare_parameter("track", "")
@@ -66,7 +72,7 @@ func _ready() -> void:
 
 # ROS publishers
 func _publish_full_map():
-	var msg = RosMirenaCommonEntityList.new()
+	var msg = _new_ros_msg("RosMirenaCommonEntityList")
 	msg.header.frame_id = "debug_map"
 	msg.header.stamp = _node.now()
 	msg.entities = get_tree().get_nodes_in_group("Cones").map(func(c): return _to_ent(c,true))
@@ -74,12 +80,12 @@ func _publish_full_map():
 
 func _publish_track():
 	if not Sim.track: return
-	var msg = RosMirenaCommonTrack.new()
+	var msg = _new_ros_msg("RosMirenaCommonTrack")
 	msg.header.frame_id = "debug_map"
 	msg.header.stamp = _node.now()
 	msg.is_closed = track_curve.closed
 	msg.gates = get_gate_positions().map(func(t: Transform3D):
-		var gate = RosMirenaCommonGate.new()
+		var gate = _new_ros_msg("RosMirenaCommonGate")
 		gate.x = -t.origin.z  # Godot -Z Forward -> ROS +X
 		gate.y = -t.origin.x  # Godot -X Left    -> ROS +Y
 		gate.psi = -t.basis.get_euler(EulerOrder.EULER_ORDER_YXZ).x
@@ -87,8 +93,8 @@ func _publish_track():
 	)
 	_track_pub.publish(msg)
 	
-func _to_ent(cone: Node3D, global : bool = false) -> RosMirenaCommonEntity:
-	var ent = RosMirenaCommonEntity.new()
+func _to_ent(cone: Node3D, global : bool = false) -> Object:
+	var ent = _new_ros_msg("RosMirenaCommonEntity")
 	var pos = cone.global_position if global else to_local(cone.global_position)
 	ent.type = cone.get_type_as_string()
 	

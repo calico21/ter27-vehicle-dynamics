@@ -221,15 +221,19 @@ var _cog_from_imu: Transform3D = Transform3D.IDENTITY
 var _lidar_from_imu: Transform3D = Transform3D.IDENTITY
 
 # --- ROS Components ---
-var _node: RosNode
-var _imu_in_cog_pub: RosPublisher
-var _imu_in_lidar_pub: RosPublisher
-var _odom_pub: RosPublisher
-var _fix_pub: RosPublisher
-var _cog_msg: RosSensorMsgsImu
-var _lidar_msg: RosSensorMsgsImu
-var _odom_msg: RosNavMsgsOdometry
-var _fix_msg: RosSensorMsgsNavSatFix
+var _node: Object
+var _imu_in_cog_pub: Object
+var _imu_in_lidar_pub: Object
+var _odom_pub: Object
+var _fix_pub: Object
+var _cog_msg: Object
+var _lidar_msg: Object
+var _odom_msg: Object
+var _fix_msg: Object
+
+func _new_ros_msg(msg_class: String) -> Object:
+	var script: Script = load("res://addons/rclgd/gen/%s.gd" % msg_class)
+	return script.new() if script else null
 
 ## Mounts are broadcast centrally by the vehicle's RosTransformManager.
 ##
@@ -241,12 +245,15 @@ func get_static_transforms() -> Array:
 	return [{"transform": transform, "frame_id": frame_id, "parent_frame_id": parent_frame_id}]
 
 func _ready() -> void:
-	_node = RosNode.new()
+	if not ClassDB.class_exists("RosNode"):
+		set_physics_process(false)
+		return
+	_node = ClassDB.instantiate("RosNode")
 	_node.init(name.to_snake_case(), ros_namespace.to_snake_case())
 
 	# Sensor-layer outputs only, exactly the four the driver owns. State fusion
-	var qos := RosQoS.new()
-	qos.reliability = RosQoS.RELIABLE
+	var qos = ClassDB.instantiate("RosQoS")
+	qos.reliability = ClassDB.class_get_integer_constant("RosQoS", "RELIABLE")
 	qos.depth =	10
 	# Sensor-layer outputs using the RosQoS object
 	_imu_in_lidar_pub = _node.create_publisher("/sensors/lidar/imu", "sensor_msgs/msg/Imu", qos)
@@ -254,10 +261,10 @@ func _ready() -> void:
 	_odom_pub = _node.create_publisher("/sensors/imu/odom", "nav_msgs/msg/Odometry", qos)
 	_fix_pub = _node.create_publisher("/sensors/gps/fix", "sensor_msgs/msg/NavSatFix", qos)	
 	
-	_cog_msg = RosSensorMsgsImu.new()
-	_lidar_msg = RosSensorMsgsImu.new()
-	_odom_msg = RosNavMsgsOdometry.new()
-	_fix_msg = RosSensorMsgsNavSatFix.new()
+	_cog_msg = _new_ros_msg("RosSensorMsgsImu")
+	_lidar_msg = _new_ros_msg("RosSensorMsgsImu")
+	_odom_msg = _new_ros_msg("RosNavMsgsOdometry")
+	_fix_msg = _new_ros_msg("RosSensorMsgsNavSatFix")
 	_fill_imu_covariances()
 
 	# No RosTimer here on purpose: publishing is driven off _physics_process so
@@ -536,7 +543,7 @@ func _advance_ins_mode(dt: float) -> void:
 ## frame, then transfer it along the mounting arm. Angular acceleration is
 ## neglected in the transfer there, so it is neglected here too -- the sim
 ## carries the driver's approximation rather than papering over it.
-func _fill_imu(msg: RosSensorMsgsImu, stamp, frame: String,
+func _fill_imu(msg: Object, stamp, frame: String,
 		frame_from_imu: Transform3D, attitude: Basis) -> void:
 	var rot := frame_from_imu.basis
 	var ang := rot * noisy_gyro

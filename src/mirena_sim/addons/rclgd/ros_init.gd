@@ -1,6 +1,20 @@
 extends Node
 
+const _STUBS_PATH := "res://addons/rclgd/ros_stubs.gd"
+
+static func _sync_ros_stubs() -> void:
+	if ClassDB.class_exists("RosMsg"):
+		if FileAccess.file_exists(_STUBS_PATH):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(_STUBS_PATH))
+	else:
+		if not FileAccess.file_exists(_STUBS_PATH):
+			var f := FileAccess.open(_STUBS_PATH, FileAccess.WRITE)
+			if f:
+				f.store_string("# Auto-generated fallback stub when native rclgd GDExtension is absent.\nclass_name RosMsg\nextends RefCounted\n")
+				f.close()
+
 static func _static_init() -> void:
+	_sync_ros_stubs()
 	if Engine.is_editor_hint(): return
 	if Engine.has_singleton("rclgd"):
 		var ros: Object = Engine.get_singleton("rclgd")

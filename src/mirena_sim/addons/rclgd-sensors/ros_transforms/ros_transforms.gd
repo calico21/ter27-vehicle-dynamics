@@ -19,11 +19,13 @@ class_name RosTransformManager
 ## Root of the subtree scanned for sensors. Defaults to the parent (the vehicle body).
 @export var vehicle_root: NodePath
 
-var _node: RosNode
-var _tf_broadcaster: RosTfBroadcaster
+var _node: Object
+var _tf_broadcaster: Object
 
 func _ready() -> void:
-	_node = RosNode.new()
+	if not ClassDB.class_exists("RosNode"):
+		return
+	_node = ClassDB.instantiate("RosNode")
 	_node.init(name.to_snake_case(), ros_namespace.to_snake_case())
 	_tf_broadcaster = _node.create_tf_broadcaster()
 	# Defer so every sensor's _ready has run before their mounts are collected.

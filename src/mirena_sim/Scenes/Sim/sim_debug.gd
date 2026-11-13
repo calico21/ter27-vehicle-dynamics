@@ -1,7 +1,11 @@
 extends Node
 
 # --- Estado Interno ---
-var _node: RosNode
+var _node: Object
+
+func _new_ros_msg(msg_class: String) -> Object:
+	var script: Script = load("res://addons/rclgd/gen/%s.gd" % msg_class)
+	return script.new() if script else null
 var _tasks: Array[PublishTask] = []
 var slam_cones: Array = []
 var car_frame = "cog"
@@ -12,7 +16,9 @@ func _ready() -> void:
 		Sim.track_loaded.connect(func(): slam_cones.clear())
 
 func _setup_ros_system() -> void:
-	_node = RosNode.new()
+	if not ClassDB.class_exists("RosNode"):
+		return
+	_node = ClassDB.instantiate("RosNode")
 	_node.init("SimDebug")
 	_node.set_parameter("use_sim_time", true)
 
@@ -28,8 +34,8 @@ func _physics_process(delta: float) -> void:
 		task.tick(delta)
 
 # --- Callbacks (Ahora reciben su propio publisher por argumento) ---
-func _publish_car_state(pub: RosPublisher):
-	var msg = RosMirenaCommonCar.new()
+func _publish_car_state(pub: Object):
+	var msg = _new_ros_msg("RosMirenaCommonCar")
 	msg.header.stamp = _node.now()
 	msg.header.frame_id = "map"
 	msg.x = Sim.car.global_position.z
@@ -41,48 +47,48 @@ func _publish_car_state(pub: RosPublisher):
 	pub.publish(msg)
 
 
-func _process_debug_perception(pub: RosPublisher):
+func _process_debug_perception(pub: Object):
 	var cones = Sim.car.get_cones_in_sight()
 	for cone in cones:
 		if not slam_cones.has(cone): slam_cones.append(cone)
 	
-	var msg = RosMirenaCommonDebugEntityList.new()
+	var msg = _new_ros_msg("RosMirenaCommonDebugEntityList")
 	msg.header.frame_id = car_frame
 	msg.header.stamp = _node.now()
 	msg.entities = cones.map(func(c): return _to_deb_ent(c, Sim.car))
 	pub.publish(msg)
 
-func _publish_slam(pub: RosPublisher):
-	var msg = RosMirenaCommonEntityList.new()
+func _publish_slam(pub: Object):
+	var msg = _new_ros_msg("RosMirenaCommonEntityList")
 	msg.header.frame_id = "map"
 	msg.header.stamp = _node.now()
 	slam_cones = slam_cones.filter(func(c): return is_instance_valid(c))
 	msg.entities = slam_cones.map(func(c): return _to_ent(c))
 	pub.publish(msg)
 
-func _publish_full_map(pub: RosPublisher):
-	var msg = RosMirenaCommonEntityList.new()
+func _publish_full_map(pub: Object):
+	var msg = _new_ros_msg("RosMirenaCommonEntityList")
 	msg.header.frame_id = "map"
 	msg.header.stamp = _node.now()
 	msg.entities = get_tree().get_nodes_in_group("Cones").map(func(c): return _to_ent(c))
 	pub.publish(msg)
 
 
-func _publish_track(pub: RosPublisher):
+func _publish_track(pub: Object):
 	if not Sim.track: return
-	var msg = RosMirenaCommonTrack.new()
+	var msg = _new_ros_msg("RosMirenaCommonTrack")
 	msg.header.frame_id = "map"
 	msg.header.stamp = _node.now()
 	msg.is_closed = Sim.track.track_curve.closed
 	msg.gates = Sim.track.get_gate_positions().map(func(gp):
-		var gate = RosMirenaCommonGate.new()
+		var gate = _new_ros_msg("RosMirenaCommonGate")
 		gate.x = gp.x; gate.y = gp.y; gate.psi = gp.psi
 		return gate
 	)
 	pub.publish(msg)
 
-func _publish_control(pub: RosPublisher):
-	var msg = RosMirenaCommonCarControl.new()
+func _publish_control(pub: Object):
+	var msg = _new_ros_msg("RosMirenaCommonCarControl")
 	msg.header.frame_id = "map"
 	msg.header.stamp = _node.now()
 	msg.gas = Sim.car.gas; msg.steer_angle = Sim.car.steering
@@ -90,8 +96,8 @@ func _publish_control(pub: RosPublisher):
 
 # --- Helper ---
 ## Convierte un cono a mensaje de ROS, opcionalmente relativo a un frame (nodo)
-func _to_ent(cone: Node3D, reference_frame: Node3D = null) -> RosMirenaCommonEntity:
-	var ent = RosMirenaCommonEntity.new()
+func _to_ent(cone: Node3D, reference_frame: Node3D = null) -> Object:
+	var ent = _new_ros_msg("RosMirenaCommonEntity")
 	
 	# Obtenemos la posición inicial (global)
 	var pos: Vector3 = cone.global_position
@@ -113,8 +119,8 @@ func _to_ent(cone: Node3D, reference_frame: Node3D = null) -> RosMirenaCommonEnt
 
 # --- Helper ---
 ## Convierte un cono a mensaje de ROS con informacion extra
-func _to_deb_ent(cone: Node3D, reference_frame: Node3D = null) -> RosMirenaCommonDebugEntity:
-	var ent = RosMirenaCommonEntity.new()
+func _to_deb_ent(cone: Node3D, reference_frame: Node3D = null) -> Object:
+	var ent = _new_ros_msg("RosMirenaCommonEntity")
 	
 	# Obtenemos la posición inicial (global)
 	var global_pos: Vector3 = cone.global_position
@@ -134,7 +140,7 @@ func _to_deb_ent(cone: Node3D, reference_frame: Node3D = null) -> RosMirenaCommo
 	
 	ent.type = cone.get_type_as_string()
 	
-	var deb_ent = RosMirenaCommonDebugEntity.new()
+	var deb_ent = _new_ros_msg("RosMirenaCommonDebugEntity")
 	deb_ent.ent = ent
 	deb_ent.debug_id = cone.get_instance_id()
 	deb_ent.debug_real_position.x = -global_pos.z

@@ -6,9 +6,9 @@ var interval: float
 var timer: float = 0.0
 var enabled: bool = true
 var callback: Callable
-var publisher: RosPublisher
+var publisher: Object
 
-func _init(_name: String, _hz: float, _pub: RosPublisher, _callback: Callable):
+func _init(_name: String, _hz: float, _pub: Object, _callback: Callable):
 	name = _name
 	set_freq(_hz)
 	publisher = _pub

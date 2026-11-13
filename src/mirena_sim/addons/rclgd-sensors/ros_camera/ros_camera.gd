@@ -22,18 +22,22 @@ var _camera: Camera3D
 var _remote_transform: RemoteTransform3D # The bridge node
 
 # --- ROS Components ---
-var _node: RosNode
-var _camera_pub: RosPublisher
-var _camera_info_pub: RosPublisher
-var _ros_timer: RosTimer
+var _node: Object
+var _camera_pub: Object
+var _camera_info_pub: Object
+var _ros_timer: Object
 
 # --- Internal Variables ---
-var _cached_image_msg: RosSensorMsgsImage
-var _cached_info_msg: RosSensorMsgsCameraInfo
+var _cached_image_msg: Object
+var _cached_info_msg: Object
 var rd: RenderingDevice
 var is_requesting: bool = false
 var _resolved_optical_frame: String
-var _current_stamp: RosMsg
+var _current_stamp: Object
+
+func _new_ros_msg(msg_class: String) -> Object:
+	var script: Script = load("res://addons/rclgd/gen/%s.gd" % msg_class)
+	return script.new() if script else null
 
 var optical_tf = Transform3D(Basis(Vector3(0, 1, 0), Vector3(0, 0, -1), Vector3(-1, 0, 0)).orthonormalized(), Vector3.ZERO)
 
@@ -48,7 +52,9 @@ func get_static_transforms() -> Array:
 func _ready() -> void:
 	_setup_internal_nodes()
 	Vector3.FORWARD
-	_node = RosNode.new()
+	if not ClassDB.class_exists("RosNode"):
+		return
+	_node = ClassDB.instantiate("RosNode")
 	_node.init(name.to_snake_case(),ros_namespace.to_snake_case())
 	
 	_camera_pub = _node.create_publisher("/sensors/camera/image", "sensor_msgs/msg/Image")
@@ -125,14 +131,14 @@ func _on_data_received(data: PackedByteArray) -> void:
 	is_requesting = false
 
 func _cache_message_templates(camera: Camera3D) -> void:
-	_cached_image_msg = RosSensorMsgsImage.new()
+	_cached_image_msg = _new_ros_msg("RosSensorMsgsImage")
 	_cached_image_msg.height = resolution.y
 	_cached_image_msg.width = resolution.x
 	_cached_image_msg.encoding = "rgba8"
 	_cached_image_msg.step = resolution.x * 4
 	_cached_image_msg.header.frame_id = _resolved_optical_frame
 	
-	_cached_info_msg = RosSensorMsgsCameraInfo.new()
+	_cached_info_msg = _new_ros_msg("RosSensorMsgsCameraInfo")
 	_cached_info_msg.header.frame_id = _resolved_optical_frame
 	_cached_info_msg.width = resolution.x
 	_cached_info_msg.height = resolution.y
