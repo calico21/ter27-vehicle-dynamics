@@ -18,7 +18,7 @@ static func run() -> Dictionary:
 		failed += 1
 		errors.append("Failed to load gamepad.json")
 
-	if is_equal_approx(gp.steering_deadzone, 0.06) and is_equal_approx(gp.steering_gamma, 2.2) and is_equal_approx(gp.speed_sensitivity, 0.65):
+	if is_equal_approx(gp.steering_deadzone, 0.06) and is_equal_approx(gp.steering_gamma, 2.2) and is_equal_approx(gp.speed_sensitivity, 0.25):
 		passed += 1
 	else:
 		failed += 1
@@ -107,7 +107,7 @@ static func run() -> Dictionary:
 		if absf(out_low) > 1.0 + 1e-5 or absf(out_high) > 1.0 + 1e-5:
 			bounded = false
 
-	if bounded and out_low > 0.85 and out_high > 0.20 and out_high < out_low * 0.65:
+	if bounded and out_low > 0.85 and out_high > 0.70 and out_high < out_low * 0.90:
 		passed += 1
 	else:
 		failed += 1

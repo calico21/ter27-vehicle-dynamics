@@ -35,8 +35,8 @@ const GP_I_WHEEL_EST: float = 0.5075  # [kg*m^2]
 # ── Tire & Understeer Reference ─────────────────────────────────────────────
 const GP_C_ALPHA_F: float = 35000.0
 const GP_C_ALPHA_R: float = 32000.0
-const GP_MU_NOM: float = 1.60
-const GP_MU_SLIDE: float = 1.25
+const GP_MU_NOM: float = 1.90
+const GP_MU_SLIDE: float = 1.55
 const GP_MU_DEG_FZ: float = 0.00012
 const GP_K_US: float = 0.006
 const GP_K_US_FZ: float = 0.0015
@@ -54,7 +54,7 @@ const GP_UB_LPF_TAU: float = 0.0300
 const FIXED_DT: float = 0.005         # 200 Hz ECU rate
 
 # ── Traction Control RLS Constants ──────────────────────────────────────────
-const GP_TC_KP: float = 23.113
+const GP_TC_KP: float = 12.0
 const GP_TC_KI: float = 12.0
 const GP_TC_B0: float = 14.0
 const GP_TC_B1: float = -0.0018
@@ -65,8 +65,8 @@ const GP_TC_V_KP_SCALE: float = 3.0
 const GP_TC_ALPHA_KAPPA_LP: float = 0.85
 const GP_TC_ALPHA_MU_EMA: float = 0.008
 const GP_TC_MU_LO: float = 0.40
-const GP_TC_MU_HI: float = 2.00
-const GP_TC_MU_NOM: float = 1.60
+const GP_TC_MU_HI: float = 2.20
+const GP_TC_MU_NOM: float = 1.90
 const GP_TC_V_MIN: float = 1.5
 const GP_TC_CLAMP_BETA: float = 50.0
 
@@ -328,7 +328,7 @@ static func gp_estimate_fy(vx: float, vy: float, wz: float, delta: float, fz: Ar
 		for w_idx in range(2):
 			var idx: int = int(wheel_indices[a][w_idx])
 			var fz_w: float = fz[idx]
-			var mu_peak: float = clampf(GP_MU_NOM * (1.0 - GP_MU_DEG_FZ * (fz_w - 750.0)), 0.8, 1.8)
+			var mu_peak: float = clampf(GP_MU_NOM * (1.0 - GP_MU_DEG_FZ * (fz_w - 750.0)), 0.8, 2.1)
 			var mu_slide: float = GP_MU_SLIDE * (mu_peak / GP_MU_NOM)
 			var theta: float = (0.5 * c_alpha[a] * abs_alpha) / (3.0 * mu_peak * fz_w + 1e-3)
 			var fy_w: float = 0.0
@@ -346,7 +346,9 @@ static func gp_friction_ellipse_t_ub(fz: Array[float], fy_est: Array[float], mu_
 	var t_ub: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	for i in range(4):
 		var max_cap: float = mu_safe * fz[i]
-		var fx_sq_max: float = (max_cap * max_cap) - (fy_est[i] * fy_est[i])
+		var min_fx_reserve_ratio: float = 0.35
+		var fx_reserve: float = min_fx_reserve_ratio * max_cap
+		var fx_sq_max: float = maxf((max_cap * max_cap) - (fy_est[i] * fy_est[i]), fx_reserve * fx_reserve)
 		var fx_max: float = gp_softplus_sqrt(fx_sq_max * 4.0) * 0.5
 		t_ub[i] = fx_max * GP_R_WHEEL
 	return t_ub
@@ -520,7 +522,7 @@ func gp_tc_step_4wd(
 			GP_TC_MU_HI
 		)
 
-	var cs_factor: float = _tc_combined_slip_factor(vx, vy, wz)
+	var cs_factor: float = maxf(_tc_combined_slip_factor(vx, vy, wz), 0.72)
 	var speed_gate: float = gp_sigmoid((vx - GP_TC_V_MIN) * 3.0)
 	var kp_eff: float = (GP_TC_KP * 20.0) * (1.0 + GP_TC_V_KP_SCALE / (absf(vx) + 0.5))
 	var ki_eff: float = GP_TC_KI * 20.0

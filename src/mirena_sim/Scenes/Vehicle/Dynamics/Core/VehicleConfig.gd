@@ -32,7 +32,7 @@ enum WheelIndex {
 @export var roll_center_height_front: float = 0.01959
 @export var roll_center_height_rear: float = 0.04003
 @export var weight_dist_r: float = 0.55
-@export var ackermann_factor: float = 0.60
+@export var ackermann_factor: float = -0.11
 
 @export var ixx: float = 54.0
 @export var iyy: float = 105.0
@@ -118,8 +118,8 @@ var toe_table_rear: Array = []
 @export var slip_regularization_speed: float = 0.5
 @export var tire_vertical_stiffness: float = 115000.0
 ## Canonical MF 6.2 friction scaling factors (Calspan TTC belt -> real asphalt track grip).
-@export var lambda_mux: float = 0.78
-@export var lambda_muy: float = 0.80
+@export var lambda_mux: float = 0.95
+@export var lambda_muy: float = 0.90
 ## Legacy fallback alias for surface_grip_scale when lambda_mu* keys are absent.
 @export var surface_grip_scale: float = 0.78
 
