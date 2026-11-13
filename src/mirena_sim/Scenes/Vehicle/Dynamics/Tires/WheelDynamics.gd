@@ -73,10 +73,14 @@ var delta_Fx: float = 0.0
 var delta_Fy: float = 0.0
 var delta_Mz: float = 0.0
 
-# --- Suspension State ---
+# --- Suspension & Tire Radial Deflection State ---
 var is_grounded: bool = true
 var suspension_compression: float = 0.0 # m
 var suspension_velocity: float = 0.0    # m/s
+var radial_deflection: float = 0.0      # rho_i = max(0, Fz / kz) (m)
+var loaded_radius: float = 0.2032       # R_l = R0 - rho_i (m)
+var effective_radius: float = 0.2032    # R_e = R0 - rho_i / 3 (m)
+var ride_rate: float = 0.0              # k_ride = (k_wheel * kz) / (k_wheel + kz) (N/m)
 
 func _init(id: int = 0, wheel_name: String = "Wheel", right_side: bool = false) -> void:
 	wheel_id = id
@@ -119,9 +123,31 @@ func compute_slip(
 		alpha_transient = alpha
 		kappa_transient = kappa
 
+## Updates radial tire deflection rho_i, loaded radius R_l, effective rolling radius R_e,
+## and series ride rate k_ride from normal load F_z and tire vertical stiffness k_z.
+func update_radial_deflection(normal_force: float, is_front: bool, config: VehicleConfig) -> void:
+	var r0: float = config.wheel_radius if config != null else 0.2032
+	if config == null:
+		radial_deflection = 0.0
+		loaded_radius = r0
+		effective_radius = r0
+		ride_rate = 0.0
+		return
+	var kz: float = maxf(config.tire_vertical_stiffness, 1.0)
+	var fz_pos: float = maxf(0.0, normal_force) if is_grounded else 0.0
+	radial_deflection = minf(fz_pos / kz, 0.5 * r0)
+	loaded_radius = r0 - radial_deflection
+	effective_radius = r0 - radial_deflection / 3.0
+	var k_spring: float = config.spring_stiffness_front if is_front else config.spring_stiffness_rear
+	var mr: float = config.motion_ratio_front if is_front else config.motion_ratio_rear
+	var k_wheel: float = k_spring * mr * mr
+	ride_rate = (k_wheel * kz) / maxf(k_wheel + kz, 1.0)
+
 ## Computes tire forces using the high-performance hybrid tire model (MF 6.2 + Neural Residual).
 func compute_forces(normal_force: float, config: VehicleConfig) -> void:
 	F_z = maxf(0.0, normal_force)
+	var is_front: bool = (wheel_id < 2)
+	update_radial_deflection(F_z, is_front, config)
 	
 	if not is_grounded or F_z <= 1e-3:
 		F_x = 0.0
@@ -149,31 +175,14 @@ func compute_forces(normal_force: float, config: VehicleConfig) -> void:
 		is_right_side
 	)
 	
-	var grip_scale: float = clampf(config.surface_grip_scale, 0.1, 1.5) if config != null else 1.0
-	var fx_raw: float = tire_res["Fx"]
-	var fy_raw: float = tire_res["Fy"]
-	var mz_raw: float = tire_res["Mz"]
-	var mx_raw: float = tire_res.get("Mx", 0.0)
-	var dfx_raw: float = tire_res.get("delta_Fx", 0.0)
-	var dfy_raw: float = tire_res.get("delta_Fy", 0.0)
-	var dmz_raw: float = tire_res.get("delta_Mz", 0.0)
-	var out_scale: float = grip_scale
-	if grip_scale < 0.9999:
-		# Smooth C-inf isotropic road friction envelope (preserves low-slip carcass stiffness
-		# in the 1-5 deg linear range while scaling Calspan belt peak mu (~2.5) down to asphalt).
-		var f_cap: float = maxf(2.50 * grip_scale * F_z, 1e-3)
-		var f_mag: float = sqrt(fx_raw * fx_raw + fy_raw * fy_raw)
-		var r: float = f_mag / f_cap
-		var r2: float = r * r
-		out_scale = 1.0 / pow(1.0 + r2 * r2, 0.25)
-	F_x = fx_raw * out_scale
-	F_y = fy_raw * out_scale
-	M_z = mz_raw * out_scale
-	M_x = mx_raw * out_scale
+	F_x = tire_res["Fx"]
+	F_y = tire_res["Fy"]
+	M_z = tire_res["Mz"]
+	M_x = tire_res.get("Mx", 0.0)
 	M_y = tire_res.get("My", 0.0)
-	delta_Fx = dfx_raw * out_scale
-	delta_Fy = dfy_raw * out_scale
-	delta_Mz = dmz_raw * out_scale
+	delta_Fx = tire_res.get("delta_Fx", 0.0)
+	delta_Fy = tire_res.get("delta_Fy", 0.0)
+	delta_Mz = tire_res.get("delta_Mz", 0.0)
 
 ## Integrates the rotational equation of motion for this wheel:
 ## I_w * d(omega)/dt = T_drive - T_brake * sgn(omega) - F_x * R_w - F_rr * R_w
@@ -182,7 +191,7 @@ func integrate_wheel_spin(T_drive: float, T_brake: float, dt: float, config: Veh
 	if dt <= 0.0:
 		return
 	
-	var r = config.wheel_radius
+	var r = loaded_radius if loaded_radius > 0.0 else config.wheel_radius
 	var I_w = maxf(config.wheel_inertia, 1e-4)
 	var no_drive: bool = absf(T_drive) <= 1e-6
 	
@@ -263,3 +272,7 @@ func reset() -> void:
 	is_grounded = true
 	suspension_compression = 0.0
 	suspension_velocity = 0.0
+	radial_deflection = 0.0
+	loaded_radius = 0.2032
+	effective_radius = 0.2032
+	ride_rate = 0.0

@@ -160,6 +160,10 @@ var QSY2: float
 var QSY3: float
 var QSY4: float
 
+# Canonical MF 6.2 friction scaling factors (1.0 = raw TTC belt calibration)
+var LMUX: float = 1.0
+var LMUY: float = 1.0
+
 var _unloaded_warned: bool = false
 
 
@@ -294,7 +298,7 @@ func _pure_lateral(alpha: float, fz: float, gamma: float, p_kpa: float, right: b
 	var cy: float = PCY1
 	# Runtime-only safety: keep the camber factor positive far outside the +-4 deg training range.
 	var camber_f: float = maxf(1.0 - PDY3 * gamma * gamma, 0.2)
-	var mu_y: float = (PDY1 + PDY2 * dfz) * (1.0 + PPY3 * dpi + PPY4 * dpi * dpi) * camber_f
+	var mu_y: float = (PDY1 + PDY2 * dfz) * (1.0 + PPY3 * dpi + PPY4 * dpi * dpi) * camber_f * LMUY
 	var dy: float = mu_y * fz
 	var side: float = -1.0 if right else 1.0
 	var shy: float = side * (PHY1 + PHY2 * dfz) + PHY3 * gamma
@@ -313,7 +317,7 @@ func _pure_longitudinal(kappa: float, fz: float, gamma: float, p_kpa: float) -> 
 	var dfz: float = _dfz(fz)
 	var dpi: float = (p_kpa - pinom) / pinom
 	var cx: float = PCX1
-	var mu_x: float = (PDX1 + PDX2 * dfz) * (1.0 + PPX3 * dpi + PPX4 * dpi * dpi) * maxf(1.0 - PDX3 * gamma * gamma, 0.2)
+	var mu_x: float = (PDX1 + PDX2 * dfz) * (1.0 + PPX3 * dpi + PPX4 * dpi * dpi) * maxf(1.0 - PDX3 * gamma * gamma, 0.2) * LMUX
 	var dx: float = mu_x * fz
 	var kx: float = kappa + PHX1 + PHX2 * dfz
 	var svx: float = fz * (PVX1 + PVX2 * dfz)

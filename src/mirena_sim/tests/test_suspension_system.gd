@@ -136,14 +136,51 @@ static func run() -> Dictionary:
 	]
 	var step_res = model.step(inp, Vector3(15.0, 0.0, 0.0), Vector3.ZERO, contacts, 0.0025)
 	var steers: Array = step_res["wheel_steer_angles"]
-	if absf(model.wheels[0].camber_angle - gamma_fl) < 1e-6 \
-			and absf(model.wheels[1].camber_angle - gamma_fr) < 1e-6 \
+	var exp_ground_fl: float = SuspensionSystemScript.compute_ground_camber_iso(0.01, float(steers[0]), 0.0, true, false, cfg_kin)
+	var exp_ground_fr: float = SuspensionSystemScript.compute_ground_camber_iso(0.01, float(steers[1]), 0.0, true, true, cfg_kin)
+	if absf(model.wheels[0].camber_angle - exp_ground_fl) < 1e-6 \
+			and absf(model.wheels[1].camber_angle - exp_ground_fr) < 1e-6 \
 			and absf(float(steers[0]) - (0.1 + tau_fl)) < 1e-6 \
 			and absf(float(steers[1]) - (0.1 + tau_fr)) < 1e-6:
 		passed += 1
 	else:
 		failed += 1
 		errors.append("VehicleDynamicsModel kinematics propagation failed")
+
+	# 7. TeR27 Roll Center (h_rc,cg) & 16.8% sprung roll moment arm reduction
+	var cfg_rc = VehicleConfigScript.new()
+	var h_roll: float = SuspensionSystemScript.get_roll_moment_arm(cfg_rc)
+	var roll_torque_ratio: float = (cfg_rc.sprung_mass * h_roll) / (cfg_rc.mass * cfg_rc.h_cog)
+	var reduction_pct: float = (1.0 - roll_torque_ratio) * 100.0
+	if absf(cfg_rc.roll_center_height_cg - 0.030832) < 1e-4 and absf(reduction_pct - 16.8) < 0.2:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("Roll center / 16.8%% reduction failed: h_rc_cg=%.5f, reduction=%.2f%%" % [cfg_rc.roll_center_height_cg, reduction_pct])
+
+	# 8. Caster (5 deg) & KPI (10 deg) ground camber coupling under steer & roll
+	var g_left_turn_fr: float = SuspensionSystemScript.compute_ground_camber_iso(0.0, 0.2, 0.02, true, true, cfg_rc)
+	var g_zero_fr: float = SuspensionSystemScript.compute_ground_camber_iso(0.0, 0.0, 0.0, true, true, cfg_rc)
+	if g_left_turn_fr > g_zero_fr - 0.02:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("Caster/KPI ground camber coupling failed: g_steer=%.4f, g_zero=%.4f" % [g_left_turn_fr, g_zero_fr])
+
+	# 9. Tire vertical stiffness kz, radial deflection rho, loaded radius Rl, and series ride rate
+	var w_test = model.wheels[0]
+	w_test.is_grounded = true
+	w_test.update_radial_deflection(1150.0, true, cfg_rc)
+	var exp_rho: float = 1150.0 / cfg_rc.tire_vertical_stiffness
+	var kw_front: float = SuspensionSystemScript.get_wheel_spring_stiffness(true, cfg_rc)
+	var exp_k_ride: float = (kw_front * cfg_rc.tire_vertical_stiffness) / (kw_front + cfg_rc.tire_vertical_stiffness)
+	if absf(w_test.radial_deflection - exp_rho) < 1e-6 \
+			and absf(w_test.loaded_radius - (cfg_rc.wheel_radius - exp_rho)) < 1e-6 \
+			and absf(w_test.ride_rate - exp_k_ride) < 1e-2:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("Radial deflection / ride rate failed: rho=%.6f (exp %.6f), k_ride=%.2f (exp %.2f)" % [w_test.radial_deflection, exp_rho, w_test.ride_rate, exp_k_ride])
 
 	return {
 		"name": "SuspensionSystem (Block B)",

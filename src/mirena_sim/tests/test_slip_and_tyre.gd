@@ -64,5 +64,21 @@ static func run() -> Dictionary:
 	else:
 		failed += 1
 		errors.append("Lateral restoring force direction failed: vy > 0 produced Fy=%.2f (must be negative)" % wheel.F_y)
+
+	# Test 5: Canonical MF 6.2 lambda_muy scales peak Fy without distorting linear Kya
+	var TireModelScript = preload("../Scenes/Vehicle/Dynamics/Tires/TireModel.gd")
+	var mf = TireModelScript.get_mf62()
+	mf.LMUY = 1.0
+	var comb_full = mf.compute_combined_forces(0.0, deg_to_rad(8.0), F_z_nominal, 0.0, 83.0, false)
+	mf.LMUY = 0.80
+	var comb_scaled = mf.compute_combined_forces(0.0, deg_to_rad(8.0), F_z_nominal, 0.0, 83.0, false)
+	mf.LMUY = 1.0
+	var kya_diff = absf(float(comb_full["Kya"]) - float(comb_scaled["Kya"]))
+	var fy_ratio = absf(float(comb_scaled["Fy"])) / maxf(absf(float(comb_full["Fy"])), 1e-3)
+	if kya_diff < 1e-3 and fy_ratio > 0.70 and fy_ratio < 0.90:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("Canonical LMUY scaling failed: kya_diff=%.4f, fy_ratio=%.4f" % [kya_diff, fy_ratio])
 	
 	return {"name": "test_slip_and_tyre", "passed": passed, "failed": failed, "errors": errors}

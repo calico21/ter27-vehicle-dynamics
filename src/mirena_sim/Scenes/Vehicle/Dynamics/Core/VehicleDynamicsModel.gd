@@ -36,6 +36,9 @@ var net_torque_chassis_godot: Vector3 = Vector3.ZERO
 # --- Chassis States (in ISO/ROS chassis frame) ---
 var linear_velocity_ros: Vector3 = Vector3.ZERO
 var angular_velocity_ros: Vector3 = Vector3.ZERO
+var _prev_fy_front: float = 0.0
+var _prev_fy_rear: float = 0.0
+var _prev_ay_ros: float = 0.0
 
 func _init(cfg: VehicleConfig = null) -> void:
 	if cfg != null:
@@ -132,7 +135,11 @@ func step_forces(
 	# 2. Determine Normal Forces Fz and Suspension Alignment (zero load-transfer double counting)
 	var normal_forces: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	var toe_offsets: Array[float] = [0.0, 0.0, 0.0, 0.0]
+	var corner_dz: Array[float] = [0.0, 0.0, 0.0, 0.0]
+	var chassis_roll_rad: float = chassis_state.roll
 	if ground_contacts.size() >= 4:
+		if ground_contacts[0] is Dictionary and ground_contacts[0].has("chassis_roll"):
+			chassis_roll_rad = float(ground_contacts[0].get("chassis_roll", chassis_roll_rad))
 		var has_corner_travel: bool = (ground_contacts[0] is Dictionary) and ground_contacts[0].has("delta_z")
 		if has_corner_travel:
 			var dz_arr: Array[float] = [0.0, 0.0, 0.0, 0.0]
@@ -143,11 +150,13 @@ func step_forces(
 				g_arr[i] = bool(c.get("grounded", true))
 				dz_arr[i] = float(c.get("delta_z", 0.0))
 				dz_dot_arr[i] = float(c.get("delta_z_dot", 0.0))
-			var corners: Array[SuspensionCorner] = suspension.evaluate_from_corners(dz_arr, dz_dot_arr, g_arr, config)
+				corner_dz[i] = dz_arr[i]
+			suspension.evaluate_from_corners(dz_arr, dz_dot_arr, g_arr, config)
+			suspension.apply_non_elastic_lateral_load_transfer(_prev_fy_front, _prev_fy_rear, _prev_ay_ros, config)
+			var corners: Array[SuspensionCorner] = suspension.corners
 			for i in range(4):
 				var sc: SuspensionCorner = corners[i]
 				wheels[i].is_grounded = sc.is_grounded
-				wheels[i].camber_angle = sc.camber_rad
 				toe_offsets[i] = sc.toe_rad
 				normal_forces[i] = sc.fz
 		else:
@@ -155,14 +164,12 @@ func step_forces(
 				var c = ground_contacts[i]
 				wheels[i].is_grounded = c.get("grounded", true)
 				normal_forces[i] = c.get("fz", 0.0)
-				wheels[i].camber_angle = SuspensionSystem.compute_corner_camber_iso(0.0, i < 2, wheels[i].is_right_side, config)
 				toe_offsets[i] = SuspensionSystem.compute_corner_toe_iso(0.0, i < 2, wheels[i].is_right_side, config)
 	else:
 		var ax_approx = (drive_trqs[0] + drive_trqs[1] + drive_trqs[2] + drive_trqs[3]) / (config.mass * config.wheel_radius)
 		normal_forces = compute_analytic_normal_forces(ax_approx, u * r, local_v_ros.length())
 		for i in range(4):
 			wheels[i].is_grounded = true
-			wheels[i].camber_angle = SuspensionSystem.compute_corner_camber_iso(0.0, i < 2, wheels[i].is_right_side, config)
 			toe_offsets[i] = SuspensionSystem.compute_corner_toe_iso(0.0, i < 2, wheels[i].is_right_side, config)
 	
 	# 3. Kinematics, Slips, Forces and Wheel Spin per Wheel
@@ -189,7 +196,11 @@ func step_forces(
 		var delta_w = base_steer + toe_offsets[i]
 		wheel_steer_angles.append(delta_w)
 		
-		w.compute_slip(v_hub.x, v_hub.y, delta_w, config.slip_regularization_speed, config.wheel_radius, dt)
+		w.camber_angle = SuspensionSystem.compute_ground_camber_iso(
+			corner_dz[i], delta_w, chassis_roll_rad, i < 2, w.is_right_side, config
+		)
+		w.update_radial_deflection(normal_forces[i], i < 2, config)
+		w.compute_slip(v_hub.x, v_hub.y, delta_w, config.slip_regularization_speed, w.effective_radius, dt)
 		w.compute_forces(normal_forces[i], config)
 		w.integrate_wheel_spin(drive_trqs[i], brake_trqs[i], dt, config)
 		
@@ -215,6 +226,9 @@ func step_forces(
 	# 5. Net Force & Torque on Chassis (ROS Frame)
 	net_force_chassis_ros = total_wheel_force_ros + f_aero_ros
 	net_torque_chassis_ros = total_wheel_torque_ros + tau_aero_ros
+	_prev_fy_front = wheel_forces_ros[0].y + wheel_forces_ros[1].y
+	_prev_fy_rear = wheel_forces_ros[2].y + wheel_forces_ros[3].y
+	_prev_ay_ros = net_force_chassis_ros.y / maxf(config.mass, 1e-3)
 	
 	# Convert net quantities to Godot frame:
 	net_force_chassis_godot = VehicleConfig.ros_to_godot_vec(net_force_chassis_ros)
@@ -328,3 +342,6 @@ func reset() -> void:
 	net_torque_chassis_godot = Vector3.ZERO
 	linear_velocity_ros = Vector3.ZERO
 	angular_velocity_ros = Vector3.ZERO
+	_prev_fy_front = 0.0
+	_prev_fy_rear = 0.0
+	_prev_ay_ros = 0.0

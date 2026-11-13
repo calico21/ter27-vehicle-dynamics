@@ -206,7 +206,8 @@ static func compute_ground_contacts_6dof(
 			"grounded": is_g,
 			"delta_z": dz,
 			"delta_z_dot": dz_dot,
-			"r_pos_ros": r_contact_body
+			"r_pos_ros": r_contact_body,
+			"chassis_roll": state.roll
 		})
 
 	return contacts

@@ -7,5 +7,7 @@
   "cornering_stiffness": 45000.0,
   "rolling_resistance_coeff": 0.015,
   "slip_regularization_speed": 0.5,
-  "surface_grip_scale": 0.78
+  "tire_vertical_stiffness": 115000.0,
+  "lambda_mux": 0.78,
+  "lambda_muy": 0.80
 }

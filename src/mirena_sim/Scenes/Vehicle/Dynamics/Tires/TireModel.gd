@@ -78,6 +78,14 @@ static func compute_forces(
 		}
 	
 	var mf = get_mf62()
+	var prev_lmux: float = mf.LMUX
+	var prev_lmuy: float = mf.LMUY
+	if config != null:
+		mf.LMUX = clampf(config.lambda_mux, 0.1, 1.5)
+		mf.LMUY = clampf(config.lambda_muy, 0.1, 1.5)
+	else:
+		mf.LMUX = 1.0
+		mf.LMUY = 1.0
 	var res_vec: Vector2 = Vector2.ZERO
 	if use_neural and enable_neural_correction:
 		var nn = get_neural()
@@ -87,6 +95,8 @@ static func compute_forces(
 	# Canonical evaluation with proper combined slip attenuation on the residual
 	var forces = mf.compute_all(kappa, alpha, normal_load, gamma, p_kpa, v_x, is_right_side, res_vec)
 	var comb = mf.compute_combined_forces(kappa, alpha, normal_load, gamma, p_kpa, is_right_side)
+	mf.LMUX = prev_lmux
+	mf.LMUY = prev_lmuy
 	var gyk: float = comb["Gyk"]
 	var delta_fy_eff: float = gyk * res_vec.x
 	var delta_mz_eff: float = gyk * res_vec.y

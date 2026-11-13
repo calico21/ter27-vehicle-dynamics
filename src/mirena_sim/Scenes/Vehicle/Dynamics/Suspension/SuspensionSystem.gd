@@ -130,6 +130,60 @@ static func get_wheel_spring_stiffness(is_front: bool, config: VehicleConfig) ->
 	var mr: float = config.motion_ratio_front if is_front else config.motion_ratio_rear
 	return k_spring * mr * mr
 
+## Series ride rate combining wheel-referred suspension stiffness and tire vertical stiffness (N/m).
+static func get_ride_rate(is_front: bool, config: VehicleConfig) -> float:
+	var k_wheel: float = get_wheel_spring_stiffness(is_front, config)
+	var k_z: float = maxf(config.tire_vertical_stiffness, 1.0)
+	return (k_wheel * k_z) / maxf(k_wheel + k_z, 1.0)
+
+## Effective sprung-mass roll moment arm above the roll axis at CG: h_roll = h_s - h_rc,cg (m).
+static func get_roll_moment_arm(config: VehicleConfig) -> float:
+	return maxf(0.0, config.h_sprung_cog - config.roll_center_height_cg)
+
+## Geometric roll-center + unsprung-mass lateral load transfer per axle (N).
+## Positive result shifts load from Left (+Y) to Right (-Y) when turning left (ay_ros > 0, fy_axle > 0).
+static func compute_non_elastic_lateral_load_transfer(
+	fy_axle: float,
+	ay_ros: float,
+	is_front: bool,
+	config: VehicleConfig,
+	r_loaded: float = -1.0
+) -> float:
+	var track: float = maxf(config.track_width_f if is_front else config.track_width_r, 0.1)
+	var h_rc: float = config.roll_center_height_front if is_front else config.roll_center_height_rear
+	var sprung_ratio: float = clampf(config.sprung_mass / maxf(config.mass, 1e-3), 0.0, 1.0)
+	var dfz_rc: float = (sprung_ratio * fy_axle * h_rc) / track
+	var m_u_axle: float = 0.5 * maxf(config.unsprung_mass_total, 0.0)
+	var h_u: float = r_loaded if r_loaded > 0.0 else config.wheel_radius
+	var dfz_u: float = (m_u_axle * ay_ros * h_u) / track
+	return dfz_rc + dfz_u
+
+## Applies non-elastic lateral load transfer (roll-center geometric + unsprung mass)
+## across each grounded axle while preserving Fz >= 0 and axle vertical force sum.
+func apply_non_elastic_lateral_load_transfer(
+	fy_front: float,
+	fy_rear: float,
+	ay_ros: float,
+	config: VehicleConfig
+) -> void:
+	for axle_idx in range(2):
+		var is_front: bool = (axle_idx == 0)
+		var l_idx: int = VehicleConfig.WheelIndex.FL if is_front else VehicleConfig.WheelIndex.RL
+		var r_idx: int = VehicleConfig.WheelIndex.FR if is_front else VehicleConfig.WheelIndex.RR
+		var c_l: SuspensionCorner = corners[l_idx]
+		var c_r: SuspensionCorner = corners[r_idx]
+		if not c_l.is_grounded or not c_r.is_grounded:
+			continue
+		var fy_axle: float = fy_front if is_front else fy_rear
+		var dfz: float = compute_non_elastic_lateral_load_transfer(fy_axle, ay_ros, is_front, config)
+		# Clamp transfer so neither wheel goes below 0 N (conserves c_l.fz + c_r.fz)
+		if dfz > 0.0:
+			dfz = minf(dfz, c_l.fz)
+		elif dfz < 0.0:
+			dfz = -minf(-dfz, c_r.fz)
+		c_l.fz -= dfz
+		c_r.fz += dfz
+
 ## Wheel-referred asymmetric vertical damping: c_wheel = c_damper * MR^2 (N*s/m).
 static func get_wheel_damping(is_front: bool, comp_vel: float, config: VehicleConfig) -> float:
 	var mr: float = config.motion_ratio_front if is_front else config.motion_ratio_rear
@@ -194,6 +248,25 @@ static func compute_corner_camber_iso(delta_z: float, is_front: bool, is_right: 
 	var camber_vehicle: float = lookup_1d_table(table, delta_z)
 	# Negative vehicle camber = top inward: left leans right (-gamma), right leans left (+gamma)
 	return -camber_vehicle if is_right else camber_vehicle
+
+## Returns effective ground-plane ISO 8855 camber gamma_ground (rad) including:
+## static camber + kinematic bump camber + chassis roll (-phi) + Caster/KPI steer coupling.
+static func compute_ground_camber_iso(
+	delta_z: float,
+	steer_rad: float,
+	chassis_roll_rad: float,
+	is_front: bool,
+	is_right: bool,
+	config: VehicleConfig
+) -> float:
+	var gamma_susp: float = compute_corner_camber_iso(delta_z, is_front, is_right, config)
+	var gamma_steer: float = 0.0
+	if is_front:
+		var caster_rad: float = deg_to_rad(config.caster_angle_deg)
+		var kpi_rad: float = deg_to_rad(config.kpi_angle_deg)
+		var kpi_sign: float = -1.0 if is_right else 1.0
+		gamma_steer = caster_rad * sin(steer_rad) + kpi_sign * kpi_rad * (1.0 - cos(steer_rad))
+	return gamma_susp - chassis_roll_rad + gamma_steer
 
 ## Returns ISO 8855 toe angle offset tau (rad) for corner at travel delta_z (m).
 static func compute_corner_toe_iso(delta_z: float, is_front: bool, is_right: bool, config: VehicleConfig) -> float:

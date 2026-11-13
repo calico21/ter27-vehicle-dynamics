@@ -21,11 +21,16 @@ enum WheelIndex {
 
 # --- Chassis & Mass Geometry ---
 @export var mass: float = 290.0
+@export var sprung_mass: float = 260.0
+@export var unsprung_mass_total: float = 30.0
 @export var gravity: float = 9.81
 @export var wheelbase: float = 1.540
 @export var track_width_f: float = 1.230
 @export var track_width_r: float = 1.230
 @export var h_cog: float = 0.290
+@export var h_sprung_cog: float = 0.300
+@export var roll_center_height_front: float = 0.01959
+@export var roll_center_height_rear: float = 0.04003
 @export var weight_dist_r: float = 0.55
 @export var ackermann_factor: float = 0.60
 
@@ -35,6 +40,8 @@ enum WheelIndex {
 
 var a_cog: float = 0.847
 var b_cog: float = 0.693
+var roll_center_height_cg: float = 0.030832
+var h_roll_arm: float = 0.269168
 
 # --- Suspension & Raycast ---
 # TeR27 design values: spring stiffness & constant motion ratios (MR = dx_spring / dz_wheel = 1 / 1.13)
@@ -57,6 +64,8 @@ var b_cog: float = 0.693
 @export var bumpstop_quadratic_rear: float = 2500000.0
 @export var ray_rest_length: float = 0.32
 @export var ray_cast_length: float = 0.45
+@export var caster_angle_deg: float = 5.0
+@export var kpi_angle_deg: float = 10.0
 
 # Optimum Kinematics 1D tables stored internally as [[delta_z_m, angle_rad], ...]
 var camber_table_front: Array = []
@@ -91,7 +100,11 @@ var toe_table_rear: Array = []
 @export var cornering_stiffness: float = 45000.0
 @export var rolling_resistance_coeff: float = 0.015
 @export var slip_regularization_speed: float = 0.5
-## Scales raw Calspan TTC belt friction down to real asphalt track grip (<= 1.0 preserves SSF > mu_y).
+@export var tire_vertical_stiffness: float = 115000.0
+## Canonical MF 6.2 friction scaling factors (Calspan TTC belt -> real asphalt track grip).
+@export var lambda_mux: float = 0.78
+@export var lambda_muy: float = 0.80
+## Legacy fallback alias for surface_grip_scale when lambda_mu* keys are absent.
 @export var surface_grip_scale: float = 0.78
 
 # --- Aerodynamics ---
@@ -154,11 +167,16 @@ func _load_chassis_json(file_path: String) -> void:
 	if d.is_empty():
 		return
 	mass = float(d.get("mass", mass))
+	sprung_mass = float(d.get("sprung_mass", sprung_mass))
+	unsprung_mass_total = float(d.get("unsprung_mass_total", unsprung_mass_total))
 	gravity = float(d.get("gravity", gravity))
 	wheelbase = float(d.get("wheelbase", wheelbase))
 	track_width_f = float(d.get("track_width_front", track_width_f))
 	track_width_r = float(d.get("track_width_rear", track_width_r))
 	h_cog = float(d.get("cg_height", h_cog))
+	h_sprung_cog = float(d.get("sprung_cg_height", h_sprung_cog))
+	roll_center_height_front = float(d.get("roll_center_height_front", roll_center_height_front))
+	roll_center_height_rear = float(d.get("roll_center_height_rear", roll_center_height_rear))
 	weight_dist_r = float(d.get("weight_distribution_rear", weight_dist_r))
 	ackermann_factor = clampf(float(d.get("ackermann_factor", ackermann_factor)), 0.0, 1.0)
 	if d.has("max_steer_angle"):
@@ -192,6 +210,8 @@ func _load_suspension_json(file_path: String) -> void:
 	bumpstop_quadratic_rear = float(d.get("bumpstop_quadratic_rear", bumpstop_quadratic_rear))
 	ray_rest_length = float(d.get("ray_rest_length", ray_rest_length))
 	ray_cast_length = float(d.get("ray_cast_length", ray_cast_length))
+	caster_angle_deg = float(d.get("caster_angle_deg", caster_angle_deg))
+	kpi_angle_deg = float(d.get("kpi_angle_deg", kpi_angle_deg))
 	camber_table_front = _parse_kinematic_table_deg(d.get("camber_table_front_deg", []))
 	camber_table_rear = _parse_kinematic_table_deg(d.get("camber_table_rear_deg", []))
 	toe_table_front = _parse_kinematic_table_deg(d.get("toe_table_front_deg", []))
@@ -219,7 +239,11 @@ func _load_tires_json(file_path: String) -> void:
 	cornering_stiffness = float(d.get("cornering_stiffness", cornering_stiffness))
 	rolling_resistance_coeff = float(d.get("rolling_resistance_coeff", rolling_resistance_coeff))
 	slip_regularization_speed = float(d.get("slip_regularization_speed", slip_regularization_speed))
-	surface_grip_scale = clampf(float(d.get("surface_grip_scale", surface_grip_scale)), 0.1, 1.5)
+	tire_vertical_stiffness = maxf(1.0, float(d.get("tire_vertical_stiffness", tire_vertical_stiffness)))
+	if d.has("surface_grip_scale"):
+		surface_grip_scale = clampf(float(d.get("surface_grip_scale", surface_grip_scale)), 0.1, 1.5)
+	lambda_mux = clampf(float(d.get("lambda_mux", surface_grip_scale)), 0.1, 1.5)
+	lambda_muy = clampf(float(d.get("lambda_muy", surface_grip_scale)), 0.1, 1.5)
 
 func _load_drivetrain_json(file_path: String) -> void:
 	var d = _read_json_file(file_path)
@@ -285,10 +309,12 @@ func get_cl_a_rear() -> float:
 		return _cl_a_rear_explicit
 	return cl_a * (1.0 - clampf(aero_balance_front, 0.0, 1.0))
 
-## Recalculates longitudinal CoG distances based on wheelbase and weight distribution.
+## Recalculates longitudinal CoG distances and roll-center geometry.
 func update_derived_geometry() -> void:
 	a_cog = wheelbase * weight_dist_r
 	b_cog = wheelbase * (1.0 - weight_dist_r)
+	roll_center_height_cg = (1.0 - weight_dist_r) * roll_center_height_front + weight_dist_r * roll_center_height_rear
+	h_roll_arm = maxf(0.0, h_sprung_cog - roll_center_height_cg)
 
 ## Convert vector from Godot (+X Right, +Y Up, -Z Forward) to ROS (+X Forward, +Y Left, +Z Up).
 static func godot_to_ros_vec(v: Vector3) -> Vector3:
