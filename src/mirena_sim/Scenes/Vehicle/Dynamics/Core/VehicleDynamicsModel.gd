@@ -136,7 +136,7 @@ func step_forces(
 	var brake_trqs: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	if in_inputs.ecu_driving_mode == 1 and in_inputs.drive_mode == VehicleConfig.DriveMode.FOUR_WD and not in_inputs.override_wheel_torques:
 		var r_whl: float = maxf(config.wheel_radius, 1e-4)
-		var max_whl_trq: float = config.motor_peak_torque * config.gear_ratio * config.drivetrain_efficiency
+		var max_whl_trq: float = config.motor_peak_torque * config.gear_ratio
 		var spd_clamped: float = maxf(absf(u), 1.0)
 		var max_pwr_force: float = (config.power_limit_watts * config.drivetrain_efficiency) / spd_clamped
 		var max_fx_4wd: float = minf(4.0 * max_whl_trq / r_whl, max_pwr_force)
@@ -154,6 +154,9 @@ func step_forces(
 		)
 		if in_inputs.throttle > 0.0:
 			var eff: float = maxf(config.drivetrain_efficiency, 1e-3)
+			for i in range(4):
+				if tv_trqs[i] > 0.0:
+					tv_trqs[i] *= TorqueVectoring.compute_motor_speed_scale(w_omegas[i], true, config)
 			var p_dc_limit: float = maxf(config.max_dc_power_w, 0.0)
 			if p_dc_limit > 0.0:
 				var p_elec: float = 0.0

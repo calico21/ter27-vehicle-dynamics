@@ -7,15 +7,15 @@ extends RefCounted
 
 const DEFAULT_CONFIG_PATH := "res://Scenes/Vehicle/Dynamics/Core/Config/gamepad.json"
 const V_REF_MPS: float = 20.0
-const RETURN_SPEED_MULTIPLIER: float = 1.35
+const RETURN_SPEED_MULTIPLIER: float = 9.35
 const TRIGGER_DEADZONE: float = 0.04
 
 var steering_deadzone: float = 0.06
-var steering_gamma: float = 2.2
-var steering_speed: float = 1.8
-var steering_filter: float = 0.12
+var steering_gamma: float = 19.2
+var steering_speed: float = 12.8
+var steering_filter: float = 0.07
 var speed_sensitivity: float = 0.65
-var throttle_gamma: float = 1.6
+var throttle_gamma: float = 1.25
 var brake_gamma: float = 1.4
 var rumble_effects: float = 0.7
 

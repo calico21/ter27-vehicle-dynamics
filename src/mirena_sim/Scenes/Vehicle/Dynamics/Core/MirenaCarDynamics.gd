@@ -45,7 +45,7 @@ var tv_yaw_moment_req: float = 0.0
 @export_range(0.5, 5.0, 0.05) var steering_speed: float = 1.8
 @export_range(0.0, 0.5, 0.01) var steering_filter: float = 0.12
 @export_range(0.0, 1.0, 0.01) var speed_sensitivity: float = 0.65
-@export_range(1.0, 3.0, 0.05) var throttle_gamma: float = 1.6
+@export_range(1.0, 3.0, 0.05) var throttle_gamma: float = 1.25
 @export_range(1.0, 3.0, 0.05) var brake_gamma: float = 1.4
 @export_range(0.0, 1.0, 0.05) var rumble_effects: float = 0.7
 
@@ -114,6 +114,11 @@ var tv_mz_req: float = 0.0
 var tv_mu_est: Array[float] = [1.5, 1.5, 1.5, 1.5]
 var tv_kappa_opt: Array[float] = [0.12, 0.12, 0.12, 0.12]
 var tv_torque_4wd: Array[float] = [0.0, 0.0, 0.0, 0.0]
+var tv_elec_power_kw: float = 0.0
+var tv_tc_active: bool = false
+
+var _hud_layer: CanvasLayer = null
+var _hud_label: Label = null
 
 var slam_cones: Array = []
 var hit_cones: Array = []
@@ -166,6 +171,7 @@ func _ready() -> void:
 	cone_collision_set(true)
 	_connect_to_initial_gate()
 	_init_ros()
+	_setup_minimal_hud()
 	
 	# Register Cameras
 	var sim_node = get_node_or_null("/root/Sim")
@@ -295,6 +301,7 @@ func _physics_process(delta: float) -> void:
 	
 	_update_wheel_speeds_ros()
 	_publish_car_state()
+	_update_minimal_hud()
 
 # --- Physics Integration (Forces & Moments) ---
 ## Native Godot RigidBody3D force integration callback.
@@ -367,6 +374,13 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 		tv_mu_est = model.ecu_tv_v3.tc_mu_surface.duplicate()
 		tv_kappa_opt = model.ecu_tv_v3.tc_kappa_opt.duplicate()
 		tv_torque_4wd = step_res["drive_torques"].duplicate()
+		tv_tc_active = model.ecu_tv_v3.tc_active and ecu_driving_mode == 1
+	var eff: float = maxf(config.drivetrain_efficiency, 1e-3)
+	var p_elec_w: float = 0.0
+	var d_trqs: Array = step_res["drive_torques"]
+	for i in range(4):
+		p_elec_w += maxf(0.0, float(d_trqs[i]) * absf(model.wheels[i].omega)) / eff
+	tv_elec_power_kw = p_elec_w * 0.001
 	var normal_forces: Array = step_res["normal_forces"]
 	var wheel_forces_ros: Array = step_res["wheel_forces_ros"]
 	var wheel_moments_ros: Array = step_res["wheel_moments_ros"]
@@ -693,6 +707,37 @@ func _publish_lap_status(cones_hit: int, lap_time: float) -> void:
 	lap_status_msg.cones_hit = cones_hit
 	lap_status_msg.lap_time = lap_time
 	_lap_status_pub.publish(lap_status_msg)
+
+func _setup_minimal_hud() -> void:
+	if DisplayServer.get_name() == "headless" or OS.has_feature("headless"):
+		return
+	_hud_layer = CanvasLayer.new()
+	_hud_layer.layer = 10
+	var panel := PanelContainer.new()
+	panel.position = Vector2(16, 16)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.05, 0.06, 0.08, 0.72)
+	style.set_corner_radius_all(6)
+	style.content_margin_left = 12
+	style.content_margin_right = 12
+	style.content_margin_top = 8
+	style.content_margin_bottom = 8
+	panel.add_theme_stylebox_override("panel", style)
+	_hud_label = Label.new()
+	_hud_label.add_theme_font_size_override("font_size", 15)
+	_hud_label.add_theme_color_override("font_color", Color(0.95, 0.97, 1.0))
+	panel.add_child(_hud_label)
+	_hud_layer.add_child(panel)
+	add_child(_hud_layer)
+	_update_minimal_hud()
+
+func _update_minimal_hud() -> void:
+	if _hud_label == null:
+		return
+	var kmh: float = linear_velocity.length() * 3.6
+	var mode_str: String = "ECU TV v3 4WD [F8]" if ecu_driving_mode == 1 else "LINEAL 4WD [F8]"
+	var tc_str: String = "  |  TC ACTIVE" if tv_tc_active else ""
+	_hud_label.text = "%5.1f km/h   |   %4.1f / 80.0 kW\n%s%s" % [kmh, tv_elec_power_kw, mode_str, tc_str]
 
 # --- Interface & Utility Methods ---
 func set_origin(target_transform: Transform3D, reset_vel: bool = false) -> void:

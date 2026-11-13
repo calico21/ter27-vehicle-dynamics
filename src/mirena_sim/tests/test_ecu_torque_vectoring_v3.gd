@@ -129,6 +129,52 @@ static func run() -> Dictionary:
 		failed += 1
 		errors.append("ECU_TV_V3_4WD did not reduce sideslip vs LINEAL_4WD: beta_lin=%.4f beta_ecu=%.4f" % [peak_beta_lin, peak_beta_ecu])
 
+	# 6. 80 kW DC / 72 kW mech global power budget with >18 kW per rear wheel under acceleration
+	var m_pwr := VehicleDynamicsModel.new(cfg)
+	var v_pwr := 20.0
+	m_pwr.chassis_state.linear_velocity = Vector3(v_pwr, 0.0, 0.0)
+	for i in range(4):
+		m_pwr.wheels[i].omega = v_pwr / cfg.wheel_radius
+	var in_pwr := VehicleInputs.new()
+	in_pwr.set_from_manual(1.0, 0.0, 0.0, cfg.max_steer_angle)
+	in_pwr.ecu_driving_mode = 1
+	var pwr_trqs: Array = [0.0, 0.0, 0.0, 0.0]
+	for _s in range(40):
+		var r_pwr := m_pwr.step_standalone(in_pwr, 0.005)
+		pwr_trqs = r_pwr["forces"]["drive_torques"]
+	var p_rear_wheel: float = pwr_trqs[2] * absf(m_pwr.wheels[2].omega)
+	var p_total_mech: float = 0.0
+	for i in range(4):
+		p_total_mech += pwr_trqs[i] * absf(m_pwr.wheels[i].omega)
+	if p_rear_wheel > 18000.0 and p_total_mech > 68000.0 and p_total_mech <= 72500.0:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("4WD power budget check failed: P_rl=%.1f W P_total_mech=%.1f W" % [p_rear_wheel, p_total_mech])
+
+	# 7. Straight-line 0-75 m acceleration & 80 kW aerodynamic top speed equilibrium (ECU_TV_V3_4WD)
+	var m_acc := VehicleDynamicsModel.new(cfg)
+	var in_acc := VehicleInputs.new()
+	in_acc.set_from_manual(1.0, 0.0, 0.0, cfg.max_steer_angle)
+	in_acc.ecu_driving_mode = 1
+	var dist_x: float = 0.0
+	var t_75m: float = -1.0
+	var t_sim: float = 0.0
+	var v_max: float = 0.0
+	for _step in range(3000): # 15.0 s @ 200 Hz
+		m_acc.step_standalone(in_acc, 0.005)
+		t_sim += 0.005
+		var vx_now: float = m_acc.chassis_state.linear_velocity.x
+		dist_x += vx_now * 0.005
+		v_max = maxf(v_max, vx_now)
+		if t_75m < 0.0 and dist_x >= 75.0:
+			t_75m = t_sim
+	if t_75m > 0.0 and t_75m < 3.95 and v_max >= 30.0 and v_max <= 38.0:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("ECU_TV_V3_4WD 0-75m / top speed failed: t_75m=%.2f s v_max=%.2f m/s (%.1f km/h)" % [t_75m, v_max, v_max * 3.6])
+
 	return {
 		"name": "test_ecu_torque_vectoring_v3",
 		"passed": passed,

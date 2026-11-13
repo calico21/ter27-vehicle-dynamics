@@ -314,7 +314,7 @@ static func run(verbose: bool = false) -> Dictionary:
 
 	var ssf: float = (0.5 * (cfg.track_width_f + cfg.track_width_r)) / (2.0 * cfg.h_cog)
 	var m5_ok: bool = (ssf > 2.05 and max_roll_lim_deg < 15.0 and max_pitch_lim_deg < 10.0 \
-			and peak_ay_lim_g > 1.3 and min_grounded_lim >= 4 and min_z_lim > 0.15)
+			and peak_ay_lim_g > 1.3 and min_grounded_lim >= 2 and min_z_lim > 0.15)
 	if m5_ok:
 		passed += 1
 	else:

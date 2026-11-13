@@ -28,13 +28,14 @@ const GP_AERO_AREA: float = 1.0
 const GP_AIR_DENSITY: float = 1.225
 
 const GP_MAX_TRQ_ACT: float = 312.5   # 25 Nm motor * 12.5 gear ratio [Nm at wheel]
-const GP_P_MAX_WHL: float = 18000.0   # 80 kW DC * 0.90 / 4 [W mech per wheel]
+const GP_P_MAX_WHL: float = 32000.0   # Per-inverter hardware power cap [W mech per wheel]
+const GP_P_MAX_TOTAL_MECH: float = 72000.0 # 80 kW DC bus * 0.90 efficiency [W mech total]
 const GP_I_WHEEL_EST: float = 0.5075  # [kg*m^2]
 
 # ── Tire & Understeer Reference ─────────────────────────────────────────────
 const GP_C_ALPHA_F: float = 35000.0
 const GP_C_ALPHA_R: float = 32000.0
-const GP_MU_NOM: float = 1.50
+const GP_MU_NOM: float = 1.60
 const GP_MU_SLIDE: float = 1.25
 const GP_MU_DEG_FZ: float = 0.00012
 const GP_K_US: float = 0.006
@@ -65,7 +66,7 @@ const GP_TC_ALPHA_KAPPA_LP: float = 0.85
 const GP_TC_ALPHA_MU_EMA: float = 0.008
 const GP_TC_MU_LO: float = 0.40
 const GP_TC_MU_HI: float = 2.00
-const GP_TC_MU_NOM: float = 1.50
+const GP_TC_MU_NOM: float = 1.60
 const GP_TC_V_MIN: float = 1.5
 const GP_TC_CLAMP_BETA: float = 50.0
 
@@ -105,6 +106,7 @@ var t_qp_prev: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var t_out_prev: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var t_ub_filt: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var t_lb_filt: Array[float] = [0.0, 0.0, 0.0, 0.0]
+var _ub_filt_initialized: bool = false
 var ax_filt: float = 0.0
 var ay_filt: float = 0.0
 var mz_sat_ratio: float = 1.0
@@ -120,13 +122,14 @@ var tc_rls_theta: Array[float] = [30000.0, 30000.0, 30000.0, 30000.0]
 var tc_theta_prev: Array[float] = [30000.0, 30000.0, 30000.0, 30000.0]
 var tc_kappa_prev: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var tc_fx_prev: Array[float] = [0.0, 0.0, 0.0, 0.0]
-var tc_kappa_opt: Array[float] = [0.12, 0.12, 0.12, 0.12]
+var tc_kappa_opt: Array[float] = [0.15, 0.15, 0.15, 0.15]
 
 # ── Fixed-rate 200 Hz Accumulator & Telemetry ───────────────────────────────
 var _time_acc: float = 0.0
 var last_t_cmd: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var last_wz_ref: float = 0.0
 var last_mz_req: float = 0.0
+var tc_active: bool = false
 
 func _init() -> void:
 	reset()
@@ -144,6 +147,7 @@ func reset() -> void:
 	t_out_prev = [0.0, 0.0, 0.0, 0.0]
 	t_ub_filt = [0.0, 0.0, 0.0, 0.0]
 	t_lb_filt = [0.0, 0.0, 0.0, 0.0]
+	_ub_filt_initialized = false
 	ax_filt = 0.0
 	ay_filt = 0.0
 	mz_sat_ratio = 1.0
@@ -158,12 +162,13 @@ func reset() -> void:
 	tc_theta_prev = [30000.0, 30000.0, 30000.0, 30000.0]
 	tc_kappa_prev = [0.0, 0.0, 0.0, 0.0]
 	tc_fx_prev = [0.0, 0.0, 0.0, 0.0]
-	tc_kappa_opt = [0.12, 0.12, 0.12, 0.12]
+	tc_kappa_opt = [0.15, 0.15, 0.15, 0.15]
 
 	_time_acc = 0.0
 	last_t_cmd = [0.0, 0.0, 0.0, 0.0]
 	last_wz_ref = 0.0
 	last_mz_req = 0.0
+	tc_active = false
 
 # ── gp_math ──────────────────────────────────────────────────────────────────
 static func gp_softplus(x: float) -> float:
@@ -520,6 +525,7 @@ func gp_tc_step_4wd(
 	var kp_eff: float = (GP_TC_KP * 20.0) * (1.0 + GP_TC_V_KP_SCALE / (absf(vx) + 0.5))
 	var ki_eff: float = GP_TC_KI * 20.0
 
+	var any_tc_cut: bool = false
 	for i in range(4):
 		var sign_i: float = -1.0 if t_req_out[i] < 0.0 else 1.0
 		var mag_in: float = absf(t_req_out[i])
@@ -590,7 +596,10 @@ func gp_tc_step_4wd(
 		var reduction: float = speed_gate * gp_softplus(pi_out * GP_TC_CLAMP_BETA) / GP_TC_CLAMP_BETA
 		var mag_cmd: float = mag_in - reduction
 		var mag_out: float = minf(gp_softplus(mag_cmd * GP_TC_CLAMP_BETA) / GP_TC_CLAMP_BETA, mag_in)
+		if (mag_in - mag_out) > 1.0:
+			any_tc_cut = true
 		t_req_out[i] = sign_i * mag_out
+	tc_active = any_tc_cut
 
 # ── gp_torque_vectoring (200 Hz 8-stage step) ───────────────────────────────
 func step(
@@ -718,15 +727,21 @@ func _gp_tv_step(
 	var max_sum: float = 0.0
 	for i in range(4):
 		var raw_ub_i: float = minf(t_ub_friction[i], t_ub_power[i])
-		t_ub_filt[i] += alpha_ub * (raw_ub_i - t_ub_filt[i])
+		if not _ub_filt_initialized:
+			t_ub_filt[i] = raw_ub_i
+		else:
+			t_ub_filt[i] += alpha_ub * (raw_ub_i - t_ub_filt[i])
 		t_ub[i] = t_ub_filt[i]
 		t_lb_filt[i] = 0.0
 		max_sum += t_ub[i]
+	_ub_filt_initialized = true
 
 	var fx_clamped: float = fx_driver
+	var max_sum_power: float = GP_P_MAX_TOTAL_MECH / maxf(w_chassis, 1e-3)
+	var eff_max_sum: float = minf(max_sum, max_sum_power)
 	var req_sum: float = fx_clamped * GP_R_WHEEL
-	if req_sum > max_sum:
-		fx_clamped = max_sum / GP_R_WHEEL
+	if req_sum > eff_max_sum:
+		fx_clamped = eff_max_sum / GP_R_WHEEL
 	if req_sum < 0.0:
 		fx_clamped = 0.0
 
