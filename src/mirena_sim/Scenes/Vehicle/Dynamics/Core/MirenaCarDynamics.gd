@@ -13,6 +13,7 @@ class_name MirenaCar
 const VehicleConfigScript = preload("VehicleConfig.gd")
 const VehicleInputsScript = preload("VehicleInputs.gd")
 const VehicleDynamicsModelScript = preload("VehicleDynamicsModel.gd")
+const GamepadControllerScript = preload("GamepadController.gd")
 const TireModelScript = preload("../Tires/TireModel.gd")
 const DrivetrainModelScript = preload("../Drivetrain/DrivetrainModel.gd")
 const BrakeModelScript = preload("../Brakes/BrakeModel.gd")
@@ -36,6 +37,18 @@ var telemetry: VehicleTelemetryScript
 var tv_yaw_moment_req: float = 0.0
 @export var manual_steer_rate: float = 8.0
 @export var manual_steer_return_rate: float = 12.0
+
+@export_group("Assetto Corsa Gamepad Settings")
+@export_range(0.0, 0.30, 0.01) var steering_deadzone: float = 0.06
+@export_range(1.0, 4.0, 0.05) var steering_gamma: float = 2.2
+@export_range(0.5, 5.0, 0.05) var steering_speed: float = 1.8
+@export_range(0.0, 0.5, 0.01) var steering_filter: float = 0.12
+@export_range(0.0, 1.0, 0.01) var speed_sensitivity: float = 0.65
+@export_range(1.0, 3.0, 0.05) var throttle_gamma: float = 1.6
+@export_range(1.0, 3.0, 0.05) var brake_gamma: float = 1.4
+@export_range(0.0, 1.0, 0.05) var rumble_effects: float = 0.7
+
+var gamepad: GamepadControllerScript = GamepadControllerScript.new()
 @export var rail_speed: float = 10.0
 @export var rail_look_ahead: float = 3.0
 var _rail_progress: float = 0.0
@@ -122,6 +135,15 @@ func _ready() -> void:
 	model = VehicleDynamicsModelScript.new(config)
 	inputs = VehicleInputsScript.new()
 	telemetry = VehicleTelemetryScript.new()
+	if gamepad.load_from_json():
+		steering_deadzone = gamepad.steering_deadzone
+		steering_gamma = gamepad.steering_gamma
+		steering_speed = gamepad.steering_speed
+		steering_filter = gamepad.steering_filter
+		speed_sensitivity = gamepad.speed_sensitivity
+		throttle_gamma = gamepad.throttle_gamma
+		brake_gamma = gamepad.brake_gamma
+		rumble_effects = gamepad.rumble_effects
 	
 	# Configure RigidBody3D properties from VehicleConfig
 	mass = config.mass
@@ -240,6 +262,8 @@ func _init_ros() -> void:
 
 # --- Physics Process (Piloting & Telemetry) ---
 func _physics_process(delta: float) -> void:
+	if pilot != PilotMode.MANUAL and _joy_vibrating:
+		_stop_all_joy_vibration()
 	match pilot:
 		PilotMode.NO_PILOT:
 			_process_no_pilot()
@@ -378,49 +402,66 @@ func _process_no_pilot() -> void:
 	self.steering = 0.0
 	self.brake = 1.0
 
+func _sync_gamepad_settings() -> void:
+	gamepad.steering_deadzone = steering_deadzone
+	gamepad.steering_gamma = steering_gamma
+	gamepad.steering_speed = steering_speed
+	gamepad.steering_filter = steering_filter
+	gamepad.speed_sensitivity = speed_sensitivity
+	gamepad.throttle_gamma = throttle_gamma
+	gamepad.brake_gamma = brake_gamma
+	gamepad.rumble_effects = rumble_effects
+
+func _stop_all_joy_vibration() -> void:
+	for joy_id in Input.get_connected_joypads():
+		Input.stop_joy_vibration(joy_id)
+	_joy_vibrating = false
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PAUSED or what == NOTIFICATION_EXIT_TREE or what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		if _joy_vibrating:
+			_stop_all_joy_vibration()
+
 func _process_manual_pilot(delta: float) -> void:
+	_sync_gamepad_settings()
 	var joypads: Array[int] = Input.get_connected_joypads()
 	var has_joypad: bool = joypads.size() > 0
 	var kb_steer: float = Input.get_action_strength("manual_steer_l") - Input.get_action_strength("manual_steer_r")
+	var kb_throttle: float = clampf(Input.get_action_strength("manual_gas_pos"), 0.0, 1.0)
+	var kb_brake: float = clampf(Input.get_action_strength("manual_gas_neg"), 0.0, 1.0)
+	var ebs_in: float = clampf(Input.get_action_strength("EBS"), 0.0, 1.0)
 
 	if has_joypad:
 		var joy_id: int = joypads[0]
 		var raw_x: float = -Input.get_joy_axis(joy_id, JOY_AXIS_LEFT_X)
-		var joy_steer: float = 0.0
-		if absf(raw_x) >= 0.05:
-			var norm_x: float = clampf((absf(raw_x) - 0.05) / 0.95, 0.0, 1.0)
-			joy_steer = signf(raw_x) * pow(norm_x, 1.35)
-		if absf(joy_steer) > 0.0 or is_zero_approx(kb_steer):
-			# Direct immediate response for analog stick (no keyboard ramp lag)
-			_steer_smoothed = joy_steer
+		var vx_mps: float = absf((global_transform.basis.inverse() * linear_velocity).z)
+		if absf(raw_x) > gamepad.steering_deadzone or is_zero_approx(kb_steer):
+			_steer_smoothed = gamepad.step_steering(raw_x, vx_mps, delta)
 		else:
 			var steer_rate = manual_steer_return_rate if (absf(kb_steer) < absf(_steer_smoothed) or kb_steer * _steer_smoothed < 0.0) else manual_steer_rate
 			_steer_smoothed = _smooth_steer(_steer_smoothed, kb_steer, delta, steer_rate)
+
+		var joy_throttle: float = gamepad.normalize_trigger(Input.get_joy_axis(joy_id, JOY_AXIS_TRIGGER_RIGHT), false)
+		var joy_brake: float = gamepad.normalize_trigger(Input.get_joy_axis(joy_id, JOY_AXIS_TRIGGER_LEFT), true)
+		self.gas = gamepad.shape_throttle(maxf(kb_throttle, joy_throttle))
+		self.brake = maxf(gamepad.shape_brake(maxf(kb_brake, joy_brake)), ebs_in)
+
+		if model != null:
+			var rumble: Vector2 = gamepad.compute_rumble(model.wheels, model.suspension.corners, linear_velocity.length(), delta)
+			if rumble.x > 0.01 or rumble.y > 0.01:
+				Input.start_joy_vibration(joy_id, rumble.x, rumble.y, 0.05)
+				_joy_vibrating = true
+			elif _joy_vibrating:
+				_stop_all_joy_vibration()
 	else:
 		var steer_rate = manual_steer_return_rate if (absf(kb_steer) < absf(_steer_smoothed) or kb_steer * _steer_smoothed < 0.0) else manual_steer_rate
 		_steer_smoothed = _smooth_steer(_steer_smoothed, kb_steer, delta, steer_rate)
+		self.gas = kb_throttle
+		self.brake = maxf(kb_brake, ebs_in)
+		if _joy_vibrating:
+			_stop_all_joy_vibration()
 
-	var throttle_in: float = clampf(Input.get_action_strength("manual_gas_pos"), 0.0, 1.0)
-	var brake_in: float = clampf(Input.get_action_strength("manual_gas_neg"), 0.0, 1.0)
-	self.gas = throttle_in - brake_in
 	self.steering = _steer_smoothed * config.max_steer_angle
-	self.brake = clampf(Input.get_action_strength("EBS"), 0.0, 1.0)
-
-	# Subtle haptic feedback on PS4 controller proportional to longitudinal tire slip/lockup
-	if has_joypad and model != null:
-		var joy_id: int = joypads[0]
-		var max_kappa: float = 0.0
-		if linear_velocity.length() > 1.0:
-			for w in model.wheels:
-				if w.is_grounded:
-					max_kappa = maxf(max_kappa, absf(w.kappa))
-		if max_kappa > 0.12:
-			var vib: float = clampf((max_kappa - 0.12) / 0.45, 0.0, 0.6)
-			Input.start_joy_vibration(joy_id, vib * 0.4, vib * 0.8, 0.05)
-			_joy_vibrating = true
-		elif _joy_vibrating:
-			Input.stop_joy_vibration(joy_id)
-			_joy_vibrating = false
 
 func _process_ros_pilot() -> void:
 	self.gas = _ros_gas
@@ -645,6 +686,9 @@ func reset_position() -> void:
 	self.steering = 0.0
 	self.brake = 0.0
 	_steer_smoothed = 0.0
+	gamepad.reset()
+	if _joy_vibrating:
+		_stop_all_joy_vibration()
 	_ros_gas = 0.0
 	_ros_steer = 0.0
 	_ros_brake = 0.0
