@@ -34,6 +34,7 @@ var telemetry: VehicleTelemetryScript
 @export var pilot: PilotMode = PilotMode.NO_PILOT
 @export var drive_mode: VehicleConfigScript.DriveMode = VehicleConfigScript.DriveMode.FOUR_WD
 @export var tv_mode: int = 0
+@export_enum("LINEAL_4WD", "ECU_TV_V3_4WD") var ecu_driving_mode: int = 1
 var tv_yaw_moment_req: float = 0.0
 @export var manual_steer_rate: float = 8.0
 @export var manual_steer_return_rate: float = 12.0
@@ -104,6 +105,15 @@ var steering: float = 0.0
 var brake: float = 0.0
 var _steer_smoothed: float = 0.0
 var _joy_vibrating: bool = false
+
+# --- ECU TV v3 Live Telemetry (visible in Godot Remote Inspector) ---
+var tv_vy_est: float = 0.0
+var tv_beta_est_deg: float = 0.0
+var tv_wz_ref: float = 0.0
+var tv_mz_req: float = 0.0
+var tv_mu_est: Array[float] = [1.5, 1.5, 1.5, 1.5]
+var tv_kappa_opt: Array[float] = [0.12, 0.12, 0.12, 0.12]
+var tv_torque_4wd: Array[float] = [0.0, 0.0, 0.0, 0.0]
 
 var slam_cones: Array = []
 var hit_cones: Array = []
@@ -261,6 +271,12 @@ func _init_ros() -> void:
 	_as_status_sub = _node.call("create_subscription", "/as_status", "mirena_common/msg/AsInfo", _on_as_status)
 
 # --- Physics Process (Piloting & Telemetry) ---
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F8:
+		ecu_driving_mode = 1 - ecu_driving_mode
+		var mode_name: String = "ECU_TV_V3_4WD" if ecu_driving_mode == 1 else "LINEAL_4WD"
+		print("[ECU Mode]: %s" % mode_name)
+
 func _physics_process(delta: float) -> void:
 	if pilot != PilotMode.MANUAL and _joy_vibrating:
 		_stop_all_joy_vibration()
@@ -291,6 +307,7 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	# 1. Update inputs (unified longitudinal mapping + normalized [0, 1] brake + TV command)
 	inputs.drive_mode = drive_mode
 	inputs.tv_mode = tv_mode
+	inputs.ecu_driving_mode = ecu_driving_mode
 	inputs.tv_yaw_moment_req = tv_yaw_moment_req
 	inputs.set_unified_control(self.gas, self.steering, self.brake, config.max_steer_angle)
 	
@@ -342,6 +359,14 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 		})
 	
 	var step_res: Dictionary = model.step_forces(inputs, local_v_ros, local_w_ros, ground_contacts, dt)
+	if model.ecu_tv_v3 != null:
+		tv_vy_est = model.ecu_tv_v3.ekf_x[0]
+		tv_beta_est_deg = rad_to_deg(model.ecu_tv_v3.ekf_beta_est)
+		tv_wz_ref = model.ecu_tv_v3.last_wz_ref
+		tv_mz_req = model.ecu_tv_v3.last_mz_req
+		tv_mu_est = model.ecu_tv_v3.tc_mu_surface.duplicate()
+		tv_kappa_opt = model.ecu_tv_v3.tc_kappa_opt.duplicate()
+		tv_torque_4wd = step_res["drive_torques"].duplicate()
 	var normal_forces: Array = step_res["normal_forces"]
 	var wheel_forces_ros: Array = step_res["wheel_forces_ros"]
 	var wheel_moments_ros: Array = step_res["wheel_moments_ros"]

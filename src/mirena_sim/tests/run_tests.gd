@@ -15,6 +15,7 @@ const TestTireParity = preload("test_tire_parity.gd")
 const TestTransientDynamics = preload("test_transient_dynamics.gd")
 const TestRosContracts = preload("test_ros_contracts.gd")
 const TestGamepadAndBrakes = preload("test_gamepad_and_brakes.gd")
+const TestEcuTorqueVectoringV3 = preload("test_ecu_torque_vectoring_v3.gd")
 const AcceptanceManeuversSuite = preload("acceptance_maneuvers_suite.gd")
 
 func _init() -> void:
@@ -38,6 +39,7 @@ func _init() -> void:
 		TestResultantForces,
 		TestRosContracts,
 		TestGamepadAndBrakes,
+		TestEcuTorqueVectoringV3,
 		AcceptanceManeuversSuite
 	]
 	

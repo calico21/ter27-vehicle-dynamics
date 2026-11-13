@@ -26,6 +26,8 @@ var drive_mode: int = VehicleConfig.DriveMode.FOUR_WD
 
 ## Torque Vectoring sub-mode (0: MODE_OPEN symmetric 50/50, 1: MODE_DYC differential yaw moment).
 var tv_mode: int = 0
+## ECU Driving Mode (0: LINEAL_4WD, 1: ECU_TV_V3_4WD).
+var ecu_driving_mode: int = 0
 
 ## Requested yaw moment Delta_Mz (Nm, ISO 8855 +Z CCW left) for TorqueVectoring MODE_DYC.
 var tv_yaw_moment_req: float = 0.0
@@ -85,6 +87,7 @@ func reset() -> void:
 	steer_angle = 0.0
 	ebs = 0.0
 	tv_mode = 0
+	ecu_driving_mode = 0
 	tv_yaw_moment_req = 0.0
 	override_wheel_torques = false
 	wheel_motor_torques = [0.0, 0.0, 0.0, 0.0]

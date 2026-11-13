@@ -12,6 +12,7 @@ const VehicleInputs = preload("VehicleInputs.gd")
 const WheelDynamics = preload("../Tires/WheelDynamics.gd")
 const DrivetrainModel = preload("../Drivetrain/DrivetrainModel.gd")
 const TorqueVectoring = preload("../Drivetrain/TorqueVectoring.gd")
+const EcuTorqueVectoringV3 = preload("../Drivetrain/EcuTorqueVectoringV3.gd")
 const SuspensionModel = preload("../Suspension/SuspensionModel.gd")
 const SuspensionCorner = preload("../Suspension/SuspensionCorner.gd")
 const SuspensionSystem = preload("../Suspension/SuspensionSystem.gd")
@@ -22,6 +23,8 @@ var config: VehicleConfig
 var wheels: Array[WheelDynamics] = []
 var suspension: SuspensionSystem
 var torque_vectoring: TorqueVectoring
+var ecu_tv_v3: EcuTorqueVectoringV3
+var _prev_ax_ros: float = 0.0
 var chassis_state: ChassisDynamics.State6DOF
 var inputs: VehicleInputs
 
@@ -49,6 +52,7 @@ func _init(cfg: VehicleConfig = null) -> void:
 	inputs = VehicleInputs.new()
 	suspension = SuspensionSystem.new()
 	torque_vectoring = TorqueVectoring.new()
+	ecu_tv_v3 = EcuTorqueVectoringV3.new()
 	chassis_state = ChassisDynamics.State6DOF.new(config.h_cog)
 	_init_wheels()
 
@@ -128,9 +132,43 @@ func step_forces(
 	var r = local_w_ros.z
 	
 	# 1. Drivetrain, 200 Hz Torque Vectoring & Brakes
-	var torques = compute_drivetrain_torques(in_inputs, u, dt, advance_tv)
-	var drive_trqs: Array[float] = torques["drive"]
-	var brake_trqs: Array[float] = torques["brake"]
+	var drive_trqs: Array[float] = [0.0, 0.0, 0.0, 0.0]
+	var brake_trqs: Array[float] = [0.0, 0.0, 0.0, 0.0]
+	if in_inputs.ecu_driving_mode == 1 and in_inputs.drive_mode == VehicleConfig.DriveMode.FOUR_WD and not in_inputs.override_wheel_torques:
+		var r_whl: float = maxf(config.wheel_radius, 1e-4)
+		var max_whl_trq: float = config.motor_peak_torque * config.gear_ratio * config.drivetrain_efficiency
+		var spd_clamped: float = maxf(absf(u), 1.0)
+		var max_pwr_force: float = (config.power_limit_watts * config.drivetrain_efficiency) / spd_clamped
+		var max_fx_4wd: float = minf(4.0 * max_whl_trq / r_whl, max_pwr_force)
+		var fx_driver: float = in_inputs.throttle * max_fx_4wd
+		var w_omegas: Array[float] = [wheels[0].omega, wheels[1].omega, wheels[2].omega, wheels[3].omega]
+		var w_steers: Array[float] = [
+			compute_ackermann_steer(in_inputs.steer_angle, true, config),
+			compute_ackermann_steer(in_inputs.steer_angle, false, config),
+			0.0,
+			0.0
+		]
+		var tv_trqs: Array[float] = (
+			ecu_tv_v3.step(fx_driver, in_inputs.steer_angle, u, v, r, _prev_ay_ros, _prev_ax_ros, w_omegas, in_inputs.brake, dt, w_steers)
+			if advance_tv else ecu_tv_v3.last_t_cmd.duplicate()
+		)
+		if in_inputs.throttle > 0.0:
+			var eff: float = maxf(config.drivetrain_efficiency, 1e-3)
+			var p_dc_limit: float = maxf(config.max_dc_power_w, 0.0)
+			if p_dc_limit > 0.0:
+				var p_elec: float = 0.0
+				for i in range(4):
+					p_elec += maxf(0.0, tv_trqs[i] * absf(w_omegas[i])) / eff
+				if p_elec > p_dc_limit:
+					var p_scale: float = p_dc_limit / p_elec
+					for i in range(4):
+						tv_trqs[i] *= p_scale
+			drive_trqs = tv_trqs
+		brake_trqs = BrakeModel.compute_brake_torques(in_inputs, config)
+	else:
+		var torques = compute_drivetrain_torques(in_inputs, u, dt, advance_tv)
+		drive_trqs = torques["drive"]
+		brake_trqs = torques["brake"]
 	
 	# 2. Determine Normal Forces Fz and Suspension Alignment (zero load-transfer double counting)
 	var normal_forces: Array[float] = [0.0, 0.0, 0.0, 0.0]
@@ -239,6 +277,7 @@ func step_forces(
 	net_torque_chassis_ros = total_wheel_torque_ros + tau_aero_ros
 	_prev_fy_front = wheel_forces_ros[0].y + wheel_forces_ros[1].y
 	_prev_fy_rear = wheel_forces_ros[2].y + wheel_forces_ros[3].y
+	_prev_ax_ros = net_force_chassis_ros.x / maxf(config.mass, 1e-3)
 	_prev_ay_ros = net_force_chassis_ros.y / maxf(config.mass, 1e-3)
 	
 	# Convert net quantities to Godot frame:
@@ -345,6 +384,8 @@ func reset() -> void:
 		w.reset()
 	suspension.reset()
 	torque_vectoring.reset()
+	if ecu_tv_v3 != null:
+		ecu_tv_v3.reset()
 	chassis_state.reset(config.h_cog)
 	inputs.reset()
 	net_force_chassis_ros = Vector3.ZERO
@@ -355,4 +396,5 @@ func reset() -> void:
 	angular_velocity_ros = Vector3.ZERO
 	_prev_fy_front = 0.0
 	_prev_fy_rear = 0.0
+	_prev_ax_ros = 0.0
 	_prev_ay_ros = 0.0
