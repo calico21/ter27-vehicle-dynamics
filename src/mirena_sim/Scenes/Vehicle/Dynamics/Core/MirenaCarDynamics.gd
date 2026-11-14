@@ -649,6 +649,7 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 		var a_arr: Array = []
 		var tt_arr: Array = []
 		var td_arr: Array = []
+		var dsc_arr: Array[float] = _collect_disc_temps()
 		for wi in range(4):
 			var w_i = model.wheels[wi]
 			var f_r: Vector3 = wheel_forces_ros[wi] if wi < wheel_forces_ros.size() else Vector3.ZERO
@@ -658,10 +659,10 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 			fz_arr.append(fz_i)
 			k_arr.append(w_i.kappa)
 			a_arr.append(rad_to_deg(w_i.alpha))
-			tt_arr.append(w_i.tire_temp_core)
-			td_arr.append(w_i.brake_temp_c)
+			tt_arr.append(w_i.t_surf_c)
+			td_arr.append(dsc_arr[wi] if wi < dsc_arr.size() else 40.0)
 		var d_trqs_arr: Array = step_res.get("drive_torques", [0.0, 0.0, 0.0, 0.0])
-		var tc_cut_val: float = model.ecu_tv_v3.last_tc_torque_cut_nm if model.ecu_tv_v3 != null else 0.0
+		var tc_cut_val: Array = model.ecu_tv_v3.last_tc_cut_nm.duplicate() if model.ecu_tv_v3 != null else [0.0, 0.0, 0.0, 0.0]
 		var wz_ref_val: float = model.ecu_tv_v3.last_wz_ref if model.ecu_tv_v3 != null else 0.0
 		var mz_req_val: float = model.ecu_tv_v3.last_mz_req if model.ecu_tv_v3 != null else 0.0
 		var beta_deg_val: float = rad_to_deg(atan2(local_v_ros.y, maxf(absf(local_v_ros.x), 0.5)))
@@ -1507,10 +1508,10 @@ func _update_minimal_hud() -> void:
 		var names := ["FL", "FR", "RL", "RR"]
 		var lines: PackedStringArray = []
 		for i in range(4):
-			var t3: Vector3 = imo[i] if i < imo.size() else Vector3(50.0, 50.0, 50.0)
+			var t_arr: Array = imo[i] if (i < imo.size() and imo[i] is Array and imo[i].size() >= 3) else [50.0, 50.0, 50.0]
 			var fz_i: float = float(nfs[i]) if i < nfs.size() else 0.0
 			var td_i: float = float(dsc[i]) if i < dsc.size() else 40.0
-			lines.append("%s Fz:%4.0fN  Tire:%2.0f/%2.0f/%2.0f°C  Disc:%3.0f°C" % [names[i], fz_i, t3.x, t3.y, t3.z, td_i])
+			lines.append("%s Fz:%4.0fN  Tire:%2.0f/%2.0f/%2.0f°C  Disc:%3.0f°C" % [names[i], fz_i, float(t_arr[0]), float(t_arr[1]), float(t_arr[2]), td_i])
 		_hud_corners_lbl.text = "%s   |   %s\n%s   |   %s" % [lines[0], lines[1], lines[2], lines[3]]
 
 func launch_control_arm() -> bool:
