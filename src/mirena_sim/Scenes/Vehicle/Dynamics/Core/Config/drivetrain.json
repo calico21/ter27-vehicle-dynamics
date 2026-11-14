@@ -23,7 +23,7 @@
   "max_dc_power_w": 80000.0,
   "motor_peak_torque": 25.0,
   "motor_max_rpm": 22000.0,
-  "base_speed_rpm": 6500.0,
+  "base_speed_rpm": 9500.0,
   "motor_taper_ratio": 0.85,
   "gear_ratio": 12.5,
   "drivetrain_efficiency": 0.90,
@@ -34,5 +34,11 @@
   "max_steer_angle": 0.38,
   "tv_rate_hz": 200.0,
   "tv_allow_regen": false,
-  "regen_peak_torque": 0.0
+  "regen_peak_torque": 0.0,
+  "battery_internal_resistance_ohm": 0.14,
+  "battery_initial_soc": 0.95,
+  "battery_nominal_voltage_v": 540.0,
+  "battery_ocv_full_v": 600.0,
+  "battery_capacity_kwh": 7.2,
+  "inverter_tau_s": 0.008
 }

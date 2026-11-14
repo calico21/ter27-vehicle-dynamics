@@ -57,6 +57,7 @@ static func get_compound() -> String:
 ##   v_x: longitudinal contact speed (m/s) (default 10.0)
 ##   use_neural: toggle neural residual addition
 ##   is_right_side: whether wheel is mounted on right vehicle track (mirrors conicity/ply-steer)
+##   thermal_mu_scale: tread-temperature friction multiplier (1.0 in optimal 55-72 C window)
 ## Returns Dictionary with Fx, Fy, Mz, Mx, My, and residual diagnostics.
 static func compute_forces(
 	kappa: float,
@@ -67,7 +68,8 @@ static func compute_forces(
 	p_kpa: float = 83.0,
 	v_x: float = 10.0,
 	use_neural: bool = true,
-	is_right_side: bool = false
+	is_right_side: bool = false,
+	thermal_mu_scale: float = 1.0
 ) -> Dictionary:
 	var normal_load = maxf(0.0, F_z)
 	if normal_load <= 1e-3:
@@ -80,12 +82,13 @@ static func compute_forces(
 	var mf = get_mf62()
 	var prev_lmux: float = mf.LMUX
 	var prev_lmuy: float = mf.LMUY
+	var therm_scale: float = clampf(thermal_mu_scale, 0.5, 1.1)
 	if config != null:
-		mf.LMUX = clampf(config.lambda_mux, 0.1, 1.5)
-		mf.LMUY = clampf(config.lambda_muy, 0.1, 1.5)
+		mf.LMUX = clampf(config.lambda_mux, 0.1, 1.5) * therm_scale
+		mf.LMUY = clampf(config.lambda_muy, 0.1, 1.5) * therm_scale
 	else:
-		mf.LMUX = 1.0
-		mf.LMUY = 1.0
+		mf.LMUX = therm_scale
+		mf.LMUY = therm_scale
 	var res_vec: Vector2 = Vector2.ZERO
 	if use_neural and enable_neural_correction:
 		var nn = get_neural()

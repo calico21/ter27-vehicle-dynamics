@@ -18,6 +18,9 @@ const PARAM_DIR: String = "res://Scenes/Vehicle/Dynamics/Tires/MF62/"
 const DEFAULT_PARAM_FILE: String = "hoosier_16x7.5_10_mf62.json"
 const EDITOR_FALLBACK_DIR: String = "src/mirena_sim/Scenes/Vehicle/Dynamics/Tires/MF62/"
 const V_EPS_MPS: float = 0.5
+const SIGMA_ALPHA_NOMINAL_M: float = 0.28
+const SIGMA_KAPPA_NOMINAL_M: float = 0.15
+const RELAXATION_V_MIN_MPS: float = 1.5
 
 const HEADER_NUMERIC: PackedStringArray = ["FNOMIN", "PINOM", "UNLOADED_RADIUS", "VERTICAL_STIFFNESS"]
 const KNOWN_EXTRA: PackedStringArray = [
@@ -458,3 +461,62 @@ func compute_all(kappa: float, alpha: float, f_z: float, gamma: float = 0.0, p_k
 	var fy: float = gyk * (float(comb["Fy0"]) + residual.x) + float(comb["Svyk"])
 	var mz: float = compute_mz(alpha, f_z, fy_mf, gamma, p_kpa, fx, comb, kappa, is_right_side) + gyk * residual.y
 	return {"Fx": fx, "Fy": fy, "Mz": mz, "Mx": compute_mx(f_z, gamma, fy, p_kpa, is_right_side), "My": compute_my(f_z, fx, v_x)}
+
+
+# ----------------------------------------------------------------------
+# Transient Carcass Relaxation (Sub-Stepped Exponential ODE Integrator)
+# ----------------------------------------------------------------------
+## Vertical-load-dependent lateral relaxation length sigma_alpha (m).
+## Equals SIGMA_ALPHA_NOMINAL_M (0.28 m) at nominal F_z = f_z0 (800 N).
+static func get_sigma_alpha(f_z: float, f_z0: float = 800.0) -> float:
+	var load_ratio: float = clampf(maxf(f_z, 0.0) / maxf(f_z0, 1.0), 0.0, 2.5)
+	return clampf(SIGMA_ALPHA_NOMINAL_M * (0.45 + 0.55 * load_ratio), 0.12, 0.45)
+
+
+## Vertical-load-dependent longitudinal relaxation length sigma_kappa (m).
+## Equals SIGMA_KAPPA_NOMINAL_M (0.15 m) at nominal F_z = f_z0 (800 N).
+static func get_sigma_kappa(f_z: float, f_z0: float = 800.0) -> float:
+	var load_ratio: float = clampf(maxf(f_z, 0.0) / maxf(f_z0, 1.0), 0.0, 2.5)
+	return clampf(SIGMA_KAPPA_NOMINAL_M * (0.45 + 0.55 * load_ratio), 0.06, 0.30)
+
+
+## Integrates effective transient slip (alpha_eff, kappa_eff) via unconditionally stable
+## sub-stepped exponential relaxation. Returns Vector2(alpha_eff, kappa_eff).
+static func integrate_transient_slip_substep(
+	alpha_eff: float,
+	alpha_geom: float,
+	kappa_eff: float,
+	kappa_geom: float,
+	v_x: float,
+	dt: float,
+	f_z: float,
+	v_kappa_rel: float = NAN,
+	substeps: int = 4
+) -> Vector2:
+	if dt <= 0.0:
+		return Vector2(alpha_eff, kappa_eff)
+
+	var n_sub: int = maxi(substeps, 1)
+	var h: float = dt / float(n_sub)
+
+	var abs_vx: float = absf(v_x)
+	var abs_vk: float = abs_vx if is_nan(v_kappa_rel) else absf(v_kappa_rel)
+
+	var v_alpha: float = maxf(abs_vx, RELAXATION_V_MIN_MPS)
+	var v_kappa: float = maxf(abs_vk, RELAXATION_V_MIN_MPS)
+
+	var alpha_target: float = alpha_geom * clampf(abs_vx / V_EPS_MPS, 0.0, 1.0)
+	var kappa_target: float = kappa_geom * clampf(abs_vk / V_EPS_MPS, 0.0, 1.0)
+
+	var tau_a: float = get_sigma_alpha(f_z) / v_alpha
+	var tau_k: float = get_sigma_kappa(f_z) / v_kappa
+	var decay_a: float = exp(-h / maxf(tau_a, 1e-6))
+	var decay_k: float = exp(-h / maxf(tau_k, 1e-6))
+
+	var a_curr: float = alpha_eff if is_finite(alpha_eff) else 0.0
+	var k_curr: float = kappa_eff if is_finite(kappa_eff) else 0.0
+	for _s in range(n_sub):
+		a_curr = alpha_target + (a_curr - alpha_target) * decay_a
+		k_curr = kappa_target + (k_curr - kappa_target) * decay_k
+
+	return Vector2(a_curr, k_curr)

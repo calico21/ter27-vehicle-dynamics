@@ -9,5 +9,7 @@
   "slip_regularization_speed": 0.5,
   "tire_vertical_stiffness": 115000.0,
   "lambda_mux": 0.95,
-  "lambda_muy": 0.95
+  "lambda_muy": 0.84,
+  "track_temp_c": 28.0,
+  "tire_initial_temp_c": 58.0
 }

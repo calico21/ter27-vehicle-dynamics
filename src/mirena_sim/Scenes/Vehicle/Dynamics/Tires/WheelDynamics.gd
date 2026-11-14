@@ -7,7 +7,17 @@ extends RefCounted
 
 const VehicleConfig = preload("../Core/VehicleConfig.gd")
 const TireModel = preload("TireModel.gd")
-const TransientRelaxation = preload("Transient/TransientRelaxation.gd")
+const Pacejka62 = preload("MF62/Pacejka62.gd")
+
+const THERM_INIT_C: float = 58.0
+const THERM_TRACK_DEFAULT_C: float = 28.0
+const THERM_ETA_FRICTION: float = 0.65
+const THERM_C_ZONE_J_K: float = 420.0
+const THERM_C_CORE_J_K: float = 4200.0
+const THERM_G_CORE_ZONE_W_K: float = 9.0
+const THERM_G_LAT_ZONE_W_K: float = 5.0
+const THERM_G_TRACK_NOM_W_K: float = 18.0
+const THERM_G_CORE_AIR_W_K: float = 2.0
 
 var wheel_id: int = 0
 var name: String = "Wheel"
@@ -82,6 +92,22 @@ var loaded_radius: float = 0.2032       # R_l = R0 - rho_i (m)
 var effective_radius: float = 0.2032    # R_e = R0 - rho_i / 3 (m)
 var ride_rate: float = 0.0              # k_ride = (k_wheel * kz) / (k_wheel + kz) (N/m)
 
+# --- 3-Zone Tire Thermal State (Surface Tread + Core Carcass) ---
+var t_surf_c: float = THERM_INIT_C
+var t_core_c: float = THERM_INIT_C
+var t_zone_inner_c: float = THERM_INIT_C
+var t_zone_mid_c: float = THERM_INIT_C
+var t_zone_outer_c: float = THERM_INIT_C
+var t_track_c: float = THERM_TRACK_DEFAULT_C
+var thermal_mu_factor: float = 1.0
+var slip_power_w: float = 0.0
+
+static func _cfg_float(config: VehicleConfig, prop: String, default_val: float) -> float:
+	if config == null:
+		return default_val
+	var v: Variant = config.get(prop)
+	return float(v) if (typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT) else default_val
+
 func _init(id: int = 0, wheel_name: String = "Wheel", right_side: bool = false) -> void:
 	wheel_id = id
 	name = wheel_name
@@ -113,12 +139,22 @@ func compute_slip(
 	# Lateral slip angle: alpha = -atan2(vy, |vx|)
 	alpha = -atan2(v_lateral, u_denom)
 	
-	# First-order transient carcass relaxation integration
+	# First-order sub-stepped transient carcass relaxation integration (Pacejka62)
 	if TireModel.enable_transient_relaxation and dt > 0.0:
 		# Allow longitudinal slip to relax during standstill launch when wheel spins while v_x == 0
 		var v_kappa_rel: float = v_longitudinal if absf(v_longitudinal) >= absf(omega * wheel_radius) else (omega * wheel_radius)
-		alpha_transient = TransientRelaxation.integrate_alpha_relaxation(alpha_transient, alpha, v_longitudinal, dt, F_z)
-		kappa_transient = TransientRelaxation.integrate_kappa_relaxation(kappa_transient, kappa, v_kappa_rel, dt, F_z)
+		var eff_slip: Vector2 = Pacejka62.integrate_transient_slip_substep(
+			alpha_transient,
+			alpha,
+			kappa_transient,
+			kappa,
+			v_longitudinal,
+			dt,
+			F_z,
+			v_kappa_rel
+		)
+		alpha_transient = eff_slip.x
+		kappa_transient = eff_slip.y
 	else:
 		alpha_transient = alpha
 		kappa_transient = kappa
@@ -172,7 +208,8 @@ func compute_forces(normal_force: float, config: VehicleConfig) -> void:
 		inflation_pressure_kpa,
 		v_longitudinal,
 		TireModel.enable_neural_correction,
-		is_right_side
+		is_right_side,
+		thermal_mu_factor
 	)
 	
 	F_x = tire_res["Fx"]
@@ -246,6 +283,83 @@ func set_integrator_state(s: Vector4) -> void:
 	alpha_transient = s.z
 	kappa_transient = s.w
 
+## Sets tread surface and core temperatures (C) and refreshes thermal grip multiplier.
+func set_tire_temperature(surf_c: float, core_c: float = -999.0) -> void:
+	t_surf_c = surf_c
+	t_zone_inner_c = surf_c
+	t_zone_mid_c = surf_c
+	t_zone_outer_c = surf_c
+	t_core_c = surf_c if core_c < -900.0 else core_c
+	thermal_mu_factor = compute_thermal_grip_factor(t_surf_c)
+
+## Computes tire grip multiplier from tread surface temperature (C) for Hoosier R25B.
+static func compute_thermal_grip_factor(temp_c: float) -> float:
+	if temp_c <= 25.0:
+		return clampf(0.76 + (temp_c - 25.0) * 0.0032, 0.68, 0.76)
+	if temp_c < 55.0:
+		var u: float = (temp_c - 25.0) / 30.0
+		var s: float = u * u * (3.0 - 2.0 * u)
+		return lerpf(0.76, 1.00, s)
+	if temp_c <= 72.0:
+		return 1.00
+	if temp_c <= 85.0:
+		return 1.00 - 0.03 * ((temp_c - 72.0) / 13.0)
+	return maxf(0.68, 0.97 - 0.0075 * (temp_c - 85.0))
+
+## Advances 3-zone tread surface + core carcass thermal model over dt (s).
+func step_thermal(dt: float, config: VehicleConfig = null) -> void:
+	if config != null:
+		t_track_c = _cfg_float(config, "track_temp_c", t_track_c)
+	var r_eff: float = effective_radius if effective_radius > 0.0 else (config.wheel_radius if config != null else 0.2032)
+	var v_sx: float = omega * r_eff - v_longitudinal
+	var v_sy: float = v_lateral
+	var in_contact: bool = is_grounded and F_z > 1.0
+	slip_power_w = (absf(F_x * v_sx) + absf(F_y * v_sy)) if in_contact else 0.0
+	if dt <= 0.0:
+		thermal_mu_factor = compute_thermal_grip_factor(t_surf_c)
+		return
+
+	# Camber shifts contact heating & track conduction toward inner or outer shoulder:
+	# left wheel: negative camber (camber_angle < 0) loads inner; right wheel: positive camber loads inner.
+	var camber_inward: float = camber_angle if is_right_side else -camber_angle
+	var shift: float = clampf(camber_inward / deg_to_rad(5.0), -1.0, 1.0) * 0.22
+	var w_in: float = (1.0 / 3.0) + shift
+	var w_out: float = (1.0 / 3.0) - shift
+	var w_mid: float = 1.0 - w_in - w_out
+
+	var t_air_c: float = maxf(t_track_c - 4.0, 15.0)
+	var contact_scale: float = clampf(F_z / 800.0, 0.25, 1.8) if in_contact else 0.0
+	var g_track_total: float = THERM_G_TRACK_NOM_W_K * contact_scale
+	var g_air_zone: float = (3.0 + 0.55 * absf(v_longitudinal)) / 3.0
+	var q_fric_total: float = THERM_ETA_FRICTION * slip_power_w
+
+	var n_sub: int = maxi(1, int(ceil(dt / 0.05)))
+	var h: float = dt / float(n_sub)
+	for _s in range(n_sub):
+		var q_core_in: float = THERM_G_CORE_ZONE_W_K * (t_core_c - t_zone_inner_c)
+		var q_core_mid: float = THERM_G_CORE_ZONE_W_K * (t_core_c - t_zone_mid_c)
+		var q_core_out: float = THERM_G_CORE_ZONE_W_K * (t_core_c - t_zone_outer_c)
+
+		var q_lat_im: float = THERM_G_LAT_ZONE_W_K * (t_zone_mid_c - t_zone_inner_c)
+		var q_lat_mo: float = THERM_G_LAT_ZONE_W_K * (t_zone_outer_c - t_zone_mid_c)
+
+		var q_in: float = q_fric_total * w_in + (g_track_total * w_in) * (t_track_c - t_zone_inner_c) \
+			+ g_air_zone * (t_air_c - t_zone_inner_c) + q_core_in + q_lat_im
+		var q_mid: float = q_fric_total * w_mid + (g_track_total * w_mid) * (t_track_c - t_zone_mid_c) \
+			+ g_air_zone * (t_air_c - t_zone_mid_c) + q_core_mid - q_lat_im + q_lat_mo
+		var q_out: float = q_fric_total * w_out + (g_track_total * w_out) * (t_track_c - t_zone_outer_c) \
+			+ g_air_zone * (t_air_c - t_zone_outer_c) + q_core_out - q_lat_mo
+
+		var q_core: float = -(q_core_in + q_core_mid + q_core_out) + THERM_G_CORE_AIR_W_K * (t_air_c - t_core_c)
+
+		t_zone_inner_c = clampf(t_zone_inner_c + (q_in / THERM_C_ZONE_J_K) * h, -40.0, 220.0)
+		t_zone_mid_c = clampf(t_zone_mid_c + (q_mid / THERM_C_ZONE_J_K) * h, -40.0, 220.0)
+		t_zone_outer_c = clampf(t_zone_outer_c + (q_out / THERM_C_ZONE_J_K) * h, -40.0, 220.0)
+		t_core_c = clampf(t_core_c + (q_core / THERM_C_CORE_J_K) * h, -40.0, 220.0)
+
+	t_surf_c = (t_zone_inner_c + t_zone_mid_c + t_zone_outer_c) / 3.0
+	thermal_mu_factor = compute_thermal_grip_factor(t_surf_c)
+
 ## Resets dynamic states to zero.
 func reset() -> void:
 	omega = 0.0
@@ -276,3 +390,11 @@ func reset() -> void:
 	loaded_radius = 0.2032
 	effective_radius = 0.2032
 	ride_rate = 0.0
+	t_surf_c = THERM_INIT_C
+	t_core_c = THERM_INIT_C
+	t_zone_inner_c = THERM_INIT_C
+	t_zone_mid_c = THERM_INIT_C
+	t_zone_outer_c = THERM_INIT_C
+	t_track_c = THERM_TRACK_DEFAULT_C
+	thermal_mu_factor = 1.0
+	slip_power_w = 0.0
