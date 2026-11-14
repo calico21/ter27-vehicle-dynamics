@@ -220,20 +220,22 @@ var live_k_beta: float = 4500.0
 var live_throttle_mz_cut: float = 0.40
 
 # ── V4_SMC_HYBRID Parameters & Notch / SMC State ────────────────────────────
-var live_smc_k_gain: float = 1050.0
-var live_smc_k_ffd: float = 190.0
-var live_smc_lambda_beta: float = 5.2
-var live_smc_phi: float = 0.12
-var live_smc_tc_kappa_base: float = 0.045
+var live_smc_k_gain: float = 820.0
+var live_smc_k_ffd: float = 55.0
+var live_smc_lambda_beta: float = 8.5
+var live_smc_phi: float = 0.14
+var live_smc_tc_kappa_base: float = 0.040
 
 var _notch_x1: float = 0.0
 var _notch_x2: float = 0.0
 var _notch_y1: float = 0.0
 var _notch_y2: float = 0.0
 var _notch_delta_prev: float = 0.0
+var _smc_wz_prev: float = 0.0
+var _smc_wz_dot_filt: float = 0.0
 var smc_s_int: float = 0.0
 var last_smc_s: float = 0.0
-var last_tc_kappa_lim: Array[float] = [0.045, 0.045, 0.045, 0.045]
+var last_tc_kappa_lim: Array[float] = [0.040, 0.040, 0.040, 0.040]
 
 # ── Hardware Realism (CAN Latency & Encoder Quantization) ───────────────────
 var hardware_realism_enabled: bool = false:
@@ -305,6 +307,8 @@ func reset() -> void:
 	_notch_y1 = 0.0
 	_notch_y2 = 0.0
 	_notch_delta_prev = 0.0
+	_smc_wz_prev = 0.0
+	_smc_wz_dot_filt = 0.0
 	smc_s_int = 0.0
 	last_smc_s = 0.0
 	for i in range(4):
@@ -1250,11 +1254,10 @@ func _gp_tc_step_4wd_smc(
 	brake_norm: float = 0.0
 ) -> void:
 	var ay_g: float = ay_mps2 / 9.81
-	var ay_factor: float = 1.0 / (1.0 + 0.95 * ay_g * ay_g)
+	var ay_factor: float = 1.0 / (1.0 + 0.55 * ay_g * ay_g)
 	var alpha_peak: float = deg_to_rad(8.0)
 	var speed_gate: float = gp_sigmoid((vx - GP_TC_V_MIN) * 3.0)
-	var kp_eff: float = 45.0 * 20.0
-	var ki_eff: float = 30.0 * 20.0
+	var ki_nm: float = 1400.0
 
 	var dt_before: float = (t_req_out[1] - t_req_out[0]) + (t_req_out[3] - t_req_out[2])
 	var any_tc_cut: bool = false
@@ -1268,7 +1271,7 @@ func _gp_tc_step_4wd_smc(
 		var delta_i: float = wheel_steers[i] if (i < 2 and i < wheel_steers.size()) else 0.0
 		var alpha_i: float = atan2(vy_i, maxf(absf(vx_i), 1.0)) - delta_i
 		var alpha_ratio: float = alpha_i / alpha_peak
-		var alpha_factor: float = sqrt(maxf(0.06, 1.0 - alpha_ratio * alpha_ratio))
+		var alpha_factor: float = sqrt(maxf(0.08, 1.0 - alpha_ratio * alpha_ratio))
 
 		var kappa_lim_i: float = clampf(live_smc_tc_kappa_base * ay_factor * alpha_factor, 0.008, 0.12)
 		last_tc_kappa_lim[i] = kappa_lim_i
@@ -1278,21 +1281,24 @@ func _gp_tc_step_4wd_smc(
 		if i < 2:
 			vx_wheel = vx * cos(delta_i) + (vy + wz * GP_LF) * sin(delta_i)
 		var kappa_raw: float = _tc_compute_kappa(omega[i], vx_wheel)
-		tc_kappa_filt[i] = 0.50 * tc_kappa_filt[i] + 0.50 * kappa_raw
+		tc_kappa_filt[i] = 0.40 * tc_kappa_filt[i] + 0.60 * kappa_raw
 		tc_omega_prev_ema[i] = omega[i]
 
-		var traction_demand: bool = t_req_out[i] > 5.0 and brake_norm < 0.05
-		var error: float = absf(tc_kappa_filt[i]) - kappa_lim_i
-		if traction_demand and error > 0.0:
-			tc_pi_integral[i] = clampf(tc_pi_integral[i] + error * dt * speed_gate, 0.0, 1.5)
-			var pi_cut: float = speed_gate * (kp_eff * error + ki_eff * tc_pi_integral[i])
-			var t_cut: float = clampf(pi_cut, 0.0, t_req_out[i])
-			if t_cut > 1.0:
+		var t_cmd_pos: float = maxf(t_req_out[i], 0.0)
+		var traction_demand: bool = t_cmd_pos > 5.0 and brake_norm < 0.05
+		var kappa_eff: float = maxf(absf(kappa_raw), absf(tc_kappa_filt[i]))
+		var excess: float = kappa_eff - kappa_lim_i
+		if traction_demand and excess > 0.0:
+			var frac_cut: float = clampf(excess * 18.0, 0.0, 0.92)
+			tc_pi_integral[i] = clampf(tc_pi_integral[i] + ki_nm * excess * dt * speed_gate, 0.0, maxf(t_cmd_pos, 250.0))
+			var tc_cut: float = speed_gate * maxf(t_cmd_pos * frac_cut, tc_pi_integral[i])
+			tc_cut = clampf(tc_cut, 0.0, t_cmd_pos)
+			if tc_cut > 1.0:
 				any_tc_cut = true
-			t_req_out[i] = maxf(0.0, t_req_out[i] - t_cut)
+			t_req_out[i] = maxf(0.0, t_cmd_pos - tc_cut)
 		else:
-			tc_pi_integral[i] *= 0.75
-			if absf(tc_pi_integral[i]) < 1e-6:
+			tc_pi_integral[i] *= 0.96
+			if absf(tc_pi_integral[i]) < 0.05:
 				tc_pi_integral[i] = 0.0
 
 	# Preserve yaw moment direction/magnitude via soft_cap if TC cut creates an unwanted Mz spike
@@ -1592,8 +1598,14 @@ func _gp_tv_step(
 		_notch_delta_prev = delta_notch
 		delta_prev = delta_dz
 
+		var raw_wz_dot: float = (wz_corr - _smc_wz_prev) / maxf(dt, 1e-4)
+		_smc_wz_prev = wz_corr
+		_smc_wz_dot_filt += clampf(dt / (0.040 + dt), 0.0, 1.0) * (raw_wz_dot - _smc_wz_dot_filt)
+
 		# ISO/ROS (+Y left): left oversteer => vy < 0 => beta < 0 => needs Mz < 0, so +lambda_beta * beta brakes drift
-		var s_instant: float = wz_err + live_smc_lambda_beta * beta
+		var beta_excess: float = maxf(0.0, absf(beta) - 0.022)
+		var beta_emg: float = (1.0 if beta >= 0.0 else -1.0) * 1200.0 * beta_excess * beta_excess
+		var s_instant: float = wz_err + live_smc_lambda_beta * beta + beta_emg
 		var lambda_int: float = 2.0
 		if mz_sat_ratio > 0.85:
 			smc_s_int = clampf(smc_s_int + s_instant * dt, -0.35, 0.35)
@@ -1604,11 +1616,16 @@ func _gp_tv_step(
 
 		var phi_eff: float = maxf(live_smc_phi, 0.02) * (1.0 + 0.03 * vx_safe)
 		var smc_mz: float = live_smc_k_gain * tanh(s_surface / phi_eff)
-		ff_mz = live_smc_k_ffd * delta_dot_notch
-		p_mz = live_smc_k_gain * tanh((wz_err + lambda_int * smc_s_int) / phi_eff)
-		beta_term = smc_mz - p_mz
+
+		# Safety gate on turn-in feedforward: only active before 75% target yaw rate, zero if oversteering
+		var ff_allowed: bool = (absf(wz_corr) < 0.75 * absf(wz_ref)) and (absf(beta) <= 0.015) and (absf(wz_corr) <= absf(wz_ref))
+		ff_mz = (live_smc_k_ffd * delta_dot_notch) if ff_allowed else 0.0
+
+		var wz_damp_mz: float = -35.0 * _smc_wz_dot_filt
+		p_mz = live_smc_k_gain * tanh((wz_err + lambda_int * smc_s_int) / phi_eff) + wz_damp_mz
+		beta_term = smc_mz - (p_mz - wz_damp_mz)
 		i_mz = 0.0
-		mz_raw = smc_mz + ff_mz
+		mz_raw = smc_mz + ff_mz + wz_damp_mz
 		last_kp = live_smc_k_gain / phi_eff
 		last_ki = lambda_int
 		last_kd = live_smc_k_ffd
@@ -1688,6 +1705,8 @@ func _gp_tv_step(
 			t_ub_filt[i] += alpha_ub * (raw_ub_i - t_ub_filt[i])
 		t_ub[i] = t_ub_filt[i]
 		var lb_raw: float = -minf(80.0, 0.25 * t_ub[i]) if (allow_regen_tv and fx_driver <= 50.0) else 0.0
+		if control_law_mode == ControlLawMode.V4_SMC_HYBRID and i >= 2 and fx_driver <= 20.0 and brake_norm < 0.05:
+			lb_raw = maxf(lb_raw, -25.0)
 		t_lb_filt[i] = lb_raw
 		t_lb[i] = lb_raw
 		max_sum += t_ub[i]

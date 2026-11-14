@@ -308,6 +308,13 @@ static func run(verbose: bool = false) -> Dictionary:
 	else:
 		failed += 1
 
+	# H) V4 SMC Hybrid specific assertions: Step-Steer Entry (65 km/h no gas) & Full-Throttle Cornering TC
+	var v4_spec_ok: bool = _verify_v4_smc_entry_and_tc(cfg, verbose, errors)
+	if v4_spec_ok:
+		passed += 1
+	else:
+		failed += 1
+
 	if verbose:
 		print("----------------------------------------------------------------------------------")
 		print("TV Characterization Summary: %d/%d assertions PASSED." % [passed, passed + failed])
@@ -1229,4 +1236,82 @@ static func _run_v3_vs_v4_benchmark(
 		if float(m.get("peak_beta_deg", 99.0)) > 15.0:
 			ok = false
 			errors.append("V4 SMC excessive sideslip on %s: peak_beta=%.2f deg" % [pair[0], float(m.get("peak_beta_deg", 0.0))])
+	return ok
+
+static func _verify_v4_smc_entry_and_tc(
+	cfg: VehicleConfigScript,
+	verbose: bool,
+	errors: Array
+) -> bool:
+	var v4_path := "res://Scenes/Vehicle/Dynamics/Core/Config/tv_maps/05_smc_pivot_4wd.json"
+	var ok := true
+
+	# 1. Step-Steer Entry at 65 km/h (18.06 m/s) off-throttle
+	var m_entry := VehicleDynamicsModelScript.new(cfg)
+	var inp_entry := VehicleInputsScript.new()
+	_apply_tv_profile(m_entry, inp_entry, 3, {"map_file": v4_path})
+	var v_init := 65.0 / 3.6
+	m_entry.chassis_state.linear_velocity = Vector3(v_init, 0.0, 0.0)
+	for wi in range(4):
+		m_entry.wheels[wi].omega = v_init / cfg.wheel_radius
+	inp_entry.throttle = 0.0
+	inp_entry.brake = 0.0
+
+	var wz_sq_sum := 0.0
+	var wz_n := 0
+	var peak_beta_entry := 0.0
+	var target_delta := 0.10
+	var total_steps := int(round(1.5 / SIM_DT))
+	for step_i in range(total_steps):
+		var t := float(step_i) * SIM_DT
+		inp_entry.steer_angle = target_delta * clampf(t / 0.15, 0.0, 1.0)
+		var res: Dictionary = m_entry.step_standalone(inp_entry, SIM_DT, 0.0)
+		var vx := m_entry.chassis_state.linear_velocity.x
+		var vy := m_entry.chassis_state.linear_velocity.y
+		var wz := m_entry.chassis_state.angular_velocity.z
+		var beta_deg := absf(VehicleTelemetryScript.compute_beta_deg(vx, vy))
+		peak_beta_entry = maxf(peak_beta_entry, beta_deg)
+		var tv_d: Dictionary = VehicleTelemetryScript.extract_tv_state(m_entry, inp_entry.steer_angle, res)
+		if t >= 0.25:
+			var w_err := float(tv_d["wz_ref"]) - wz
+			wz_sq_sum += w_err * w_err
+			wz_n += 1
+	var wz_rmse_entry := sqrt(wz_sq_sum / float(maxi(wz_n, 1)))
+	if wz_rmse_entry >= 0.08 or peak_beta_entry >= 1.8:
+		ok = false
+		errors.append("V4 Step-Steer Entry 65 km/h failed: wz_rmse=%.4f (<0.08), peak_beta=%.2f deg (<1.8)" % [wz_rmse_entry, peak_beta_entry])
+
+	# 2. Full-Throttle Cornering TC (100% gas in steady corner)
+	var m_tc := VehicleDynamicsModelScript.new(cfg)
+	var inp_tc := VehicleInputsScript.new()
+	_apply_tv_profile(m_tc, inp_tc, 3, {"map_file": v4_path})
+	var v_tc := 14.0
+	m_tc.chassis_state.linear_velocity = Vector3(v_tc, 0.0, 0.0)
+	for wi in range(4):
+		m_tc.wheels[wi].omega = v_tc / cfg.wheel_radius
+	inp_tc.steer_angle = 0.12
+	inp_tc.throttle = 0.15
+	for _s in range(int(round(0.4 / SIM_DT))):
+		m_tc.step_standalone(inp_tc, SIM_DT, 0.0)
+
+	inp_tc.throttle = 1.0
+	var max_tc_cut := 0.0
+	var max_kappa_mid := 0.0
+	for _s in range(int(round(1.0 / SIM_DT))):
+		m_tc.step_standalone(inp_tc, SIM_DT, 0.0)
+		for wi in range(4):
+			max_tc_cut = maxf(max_tc_cut, float(m_tc.ecu_tv_v3.last_tc_cut_nm[wi]))
+			max_kappa_mid = maxf(max_kappa_mid, absf(float(m_tc.wheels[wi].kappa)))
+	if max_tc_cut <= 30.0 or max_kappa_mid >= 0.055:
+		ok = false
+		errors.append("V4 Full-Throttle Cornering TC failed: max_tc_cut=%.1f Nm (>30), max_kappa=%.4f (<0.055)" % [max_tc_cut, max_kappa_mid])
+
+	if verbose:
+		print("[V4 SMC SPECIFIC VERIFICATION]")
+		print("  Step-Steer Entry (65 km/h, 0%% gas) : wz_rmse=%.4f rad/s | peak_beta=%.2f deg | %s" % [
+			wz_rmse_entry, peak_beta_entry, "PASS" if (wz_rmse_entry < 0.08 and peak_beta_entry < 1.8) else "FAIL"
+		])
+		print("  Full-Throttle Cornering TC (100%%)  : max_tc_cut=%.1f Nm | max_kappa=%.4f | %s\n" % [
+			max_tc_cut, max_kappa_mid, "PASS" if (max_tc_cut > 30.0 and max_kappa_mid < 0.055) else "FAIL"
+		])
 	return ok
