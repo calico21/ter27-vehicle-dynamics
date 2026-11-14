@@ -17,6 +17,7 @@ const TestRosContracts = preload("test_ros_contracts.gd")
 const TestGamepadAndBrakes = preload("test_gamepad_and_brakes.gd")
 const TestEcuTorqueVectoringV3 = preload("test_ecu_torque_vectoring_v3.gd")
 const AcceptanceManeuversSuite = preload("acceptance_maneuvers_suite.gd")
+const TestTVCharacterization = preload("test_tv_characterization.gd")
 
 func _init() -> void:
 	print("\n========================================================")
@@ -40,7 +41,8 @@ func _init() -> void:
 		TestRosContracts,
 		TestGamepadAndBrakes,
 		TestEcuTorqueVectoringV3,
-		AcceptanceManeuversSuite
+		AcceptanceManeuversSuite,
+		TestTVCharacterization
 	]
 	
 	var total_passed = 0
