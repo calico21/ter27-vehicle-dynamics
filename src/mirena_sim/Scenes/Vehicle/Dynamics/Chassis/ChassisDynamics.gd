@@ -130,14 +130,23 @@ static func compute_derivatives(
 	var f_grav_b: Vector3 = compute_gravity_body(state.roll, state.pitch, config)
 	d.vel_dot = (net_force_body + f_grav_b) / m - w.cross(v)
 
-	# Rotational Euler equation for principal-axis inertia diag(Ixx, Iyy, Izz):
-	# I * w_dot + w x (I * w) = M_total_body
+	# Rotational Euler equation with sprung/total Ixx, Iyy, Izz and Ixz coupling:
+	# I * w_dot + w x (I_diag * w) = M_total_body
 	var ix: float = maxf(config.ixx, 1e-3)
 	var iy: float = maxf(config.iyy, 1e-3)
-	var iz: float = maxf(config.izz, 1e-3)
+	var iz: float = maxf(config.get_total_izz(), 1e-3)
+	var ixz: float = config.ixz
 	var i_w = Vector3(ix * w.x, iy * w.y, iz * w.z)
 	var rhs_rot: Vector3 = net_torque_body - w.cross(i_w)
-	d.omega_dot = Vector3(rhs_rot.x / ix, rhs_rot.y / iy, rhs_rot.z / iz)
+	var det_xz: float = ix * iz - ixz * ixz
+	if det_xz > 1e-3:
+		d.omega_dot = Vector3(
+			(iz * rhs_rot.x + ixz * rhs_rot.z) / det_xz,
+			rhs_rot.y / iy,
+			(ixz * rhs_rot.x + ix * rhs_rot.z) / det_xz
+		)
+	else:
+		d.omega_dot = Vector3(rhs_rot.x / ix, rhs_rot.y / iy, rhs_rot.z / iz)
 
 	# Inertial position kinematics
 	var r_wb: Basis = basis_body_to_world(state.roll, state.pitch, state.yaw)

@@ -5,6 +5,8 @@ const VehicleInputsScript = preload("../Scenes/Vehicle/Dynamics/Core/VehicleInpu
 const VehicleDynamicsModelScript = preload("../Scenes/Vehicle/Dynamics/Core/VehicleDynamicsModel.gd")
 const SuspensionCornerScript = preload("../Scenes/Vehicle/Dynamics/Suspension/SuspensionCorner.gd")
 const SuspensionSystemScript = preload("../Scenes/Vehicle/Dynamics/Suspension/SuspensionSystem.gd")
+const AeroModelScript = preload("../Scenes/Vehicle/Dynamics/Aerodynamics/AeroModel.gd")
+const ChassisDynamicsScript = preload("../Scenes/Vehicle/Dynamics/Chassis/ChassisDynamics.gd")
 
 static func run() -> Dictionary:
 	var passed: int = 0
@@ -147,16 +149,16 @@ static func run() -> Dictionary:
 		failed += 1
 		errors.append("VehicleDynamicsModel kinematics propagation failed")
 
-	# 7. TeR27 Roll Center (h_rc,cg) & 16.8% sprung roll moment arm reduction
+	# 7. TeR27 Roll Center (h_rc,cg) & 21.7% sprung roll moment arm reduction
 	var cfg_rc = VehicleConfigScript.new()
 	var h_roll: float = SuspensionSystemScript.get_roll_moment_arm(cfg_rc)
 	var roll_torque_ratio: float = (cfg_rc.sprung_mass * h_roll) / (cfg_rc.mass * cfg_rc.h_cog)
 	var reduction_pct: float = (1.0 - roll_torque_ratio) * 100.0
-	if absf(cfg_rc.roll_center_height_cg - 0.030832) < 1e-4 and absf(reduction_pct - 16.8) < 0.2:
+	if absf(cfg_rc.roll_center_height_cg - 0.030832) < 1e-4 and absf(reduction_pct - 21.7) < 0.2:
 		passed += 1
 	else:
 		failed += 1
-		errors.append("Roll center / 16.8%% reduction failed: h_rc_cg=%.5f, reduction=%.2f%%" % [cfg_rc.roll_center_height_cg, reduction_pct])
+		errors.append("Roll center / 21.7%% reduction failed: h_rc_cg=%.5f, reduction=%.2f%%" % [cfg_rc.roll_center_height_cg, reduction_pct])
 
 	# 8. Caster (5 deg) & KPI (10 deg) ground camber coupling under steer & roll
 	var g_left_turn_fr: float = SuspensionSystemScript.compute_ground_camber_iso(0.0, 0.2, 0.02, true, true, cfg_rc)
@@ -182,12 +184,12 @@ static func run() -> Dictionary:
 		failed += 1
 		errors.append("Radial deflection / ride rate failed: rho=%.6f (exp %.6f), k_ride=%.2f (exp %.2f)" % [w_test.radial_deflection, exp_rho, w_test.ride_rate, exp_k_ride])
 
-	# 10. 3D M^-1 Anti-Dive (13.88%) pitch reduction under braking while preserving sum(Fz) = m*g
+	# 10. 3D M^-1 Anti-Dive (56.9%) pitch reduction under braking while preserving sum(Fz) = m*g
 	var anti_res: Dictionary = SuspensionSystemScript.compute_anti_pitch_forces([-2000.0, -2000.0, -500.0, -500.0], cfg_rc)
 	var anti_forces: Array = anti_res["corner_forces"]
 	var anti_pitch_tau: float = float(anti_res["pitch_torque_ros"])
 	# Braking (Fx < 0) produces positive front anti-dive force and negative (nose-up) pitch torque
-	if absf(float(anti_forces[0]) - 0.1388 * 2000.0) < 1e-3 and anti_pitch_tau < 0.0:
+	if absf(float(anti_forces[0]) - 0.569 * 2000.0) < 1e-3 and anti_pitch_tau < 0.0:
 		passed += 1
 	else:
 		failed += 1
@@ -215,6 +217,78 @@ static func run() -> Dictionary:
 	else:
 		failed += 1
 		errors.append("Digressive damper continuity/slope failed: f_below=%.2f, f_above=%.2f, slope_low=%.1f, slope_high=%.1f" % [f_below, f_above, slope_low, slope_high])
+
+	# 13. TeR27 Anti-Ackermann (-11%) geometry: outer wheel steers more than inner wheel
+	var steer_cmd: float = 0.20
+	var steer_inner_fl: float = SuspensionSystemScript.compute_ackermann_steer(steer_cmd, true, cfg_rc)
+	var steer_outer_fr: float = SuspensionSystemScript.compute_ackermann_steer(steer_cmd, false, cfg_rc)
+	var cfg_pro = VehicleConfigScript.new()
+	cfg_pro.ackermann_factor = 0.60
+	var steer_pro_fl: float = SuspensionSystemScript.compute_ackermann_steer(steer_cmd, true, cfg_pro)
+	var steer_pro_fr: float = SuspensionSystemScript.compute_ackermann_steer(steer_cmd, false, cfg_pro)
+	if absf(cfg_rc.ackermann_factor + 0.11) < 1e-6 \
+			and steer_inner_fl < steer_cmd and steer_outer_fr > steer_cmd \
+			and steer_pro_fl > steer_cmd and steer_pro_fr < steer_cmd:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("Anti-Ackermann (-11%%) check failed: anti=(%.4f, %.4f), pro=(%.4f, %.4f)" % [
+			steer_inner_fl, steer_outer_fr, steer_pro_fl, steer_pro_fr
+		])
+
+	# 14. TeR27 tabulated camber gain (-0.181 deg/10mm front, -0.288 deg/10mm rear) & bump steer
+	var c_f0: float = rad_to_deg(SuspensionSystemScript.lookup_1d_table(cfg_rc.camber_table_front, 0.0))
+	var c_f10: float = rad_to_deg(SuspensionSystemScript.lookup_1d_table(cfg_rc.camber_table_front, 0.01))
+	var c_r0: float = rad_to_deg(SuspensionSystemScript.lookup_1d_table(cfg_rc.camber_table_rear, 0.0))
+	var c_r10: float = rad_to_deg(SuspensionSystemScript.lookup_1d_table(cfg_rc.camber_table_rear, 0.01))
+	var toe_f25: float = rad_to_deg(SuspensionSystemScript.lookup_1d_table(cfg_rc.toe_table_front, 0.025))
+	var toe_r25: float = rad_to_deg(SuspensionSystemScript.lookup_1d_table(cfg_rc.toe_table_rear, 0.025))
+	if absf(c_f0 - (-2.0)) < 1e-4 and absf((c_f10 - c_f0) - (-0.181)) < 1e-3 \
+			and absf(c_r0 - (-1.5)) < 1e-4 and absf((c_r10 - c_r0) - (-0.288)) < 1e-3 \
+			and absf(toe_f25 - (-0.018)) < 1e-4 and absf(toe_r25) < 1e-6:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("TeR27 camber/bump-steer tables mismatch: cf=(%.3f, d=%.3f), cr=(%.3f, d=%.3f), toe=(%.4f, %.4f)" % [
+			c_f0, c_f10 - c_f0, c_r0, c_r10 - c_r0, toe_f25, toe_r25
+		])
+
+	# 15. Ride-height-sensitive aerodynamics (static=1.0, ground effect, front stall < 18mm, high ride loss)
+	var mod_static: Dictionary = AeroModelScript.compute_ride_height_modulation(0.035, 0.035, cfg_rc)
+	var mod_ge: Dictionary = AeroModelScript.compute_ride_height_modulation(0.022, 0.022, cfg_rc)
+	var mod_stall: Dictionary = AeroModelScript.compute_ride_height_modulation(0.010, 0.035, cfg_rc)
+	var mod_high: Dictionary = AeroModelScript.compute_ride_height_modulation(0.065, 0.065, cfg_rc)
+	var aero_ge: Dictionary = AeroModelScript.compute_forces_ros(Vector3(30.0, 0.0, 0.0), cfg_rc, 0.022, 0.022)
+	var aero_stall: Dictionary = AeroModelScript.compute_forces_ros(Vector3(30.0, 0.0, 0.0), cfg_rc, 0.010, 0.035)
+	if absf(float(mod_static["scale_front"]) - 1.0) < 1e-6 and absf(float(mod_static["scale_rear"]) - 1.0) < 1e-6 \
+			and absf(float(mod_static["drag_scale"]) - 1.0) < 1e-6 and not bool(mod_static["front_stalled"]) \
+			and float(mod_ge["scale_front"]) > 1.10 and float(mod_ge["scale_rear"]) > 1.10 \
+			and bool(mod_stall["front_stalled"]) and float(mod_stall["scale_front"]) < 0.70 \
+			and float(mod_stall["drag_scale"]) > 1.05 and float(mod_high["scale_front"]) < 0.90 \
+			and float(aero_stall["downforce_front"]) < float(aero_ge["downforce_front"]) \
+			and bool(aero_stall["front_stalled"]):
+		passed += 1
+	else:
+		failed += 1
+		errors.append("Ride-height aero modulation failed: static=%s ge=%s stall=%s high=%s" % [
+			str(mod_static), str(mod_ge), str(mod_stall), str(mod_high)
+		])
+
+	# 16. Total Izz with Steiner unsprung corners (~137.14 kg*m^2) & Ixz roll-yaw coupling
+	var total_izz: float = cfg_rc.get_total_izz()
+	var s_coupl = ChassisDynamicsScript.State6DOF.new(cfg_rc.h_cog)
+	var d_coupl = ChassisDynamicsScript.compute_derivatives(s_coupl, Vector3.ZERO, Vector3(100.0, 0.0, 0.0), cfg_rc)
+	var s_free = ChassisDynamicsScript.State6DOF.new(2.0)
+	s_free.angular_velocity = Vector3(0.0, 0.0, 2.0)
+	var d_free = ChassisDynamicsScript.compute_derivatives(s_free, Vector3.ZERO, Vector3.ZERO, cfg_rc)
+	if absf(total_izz - 137.141) < 0.2 and absf(d_coupl.omega_dot.z) > 0.1 and d_coupl.omega_dot.z < 0.0 \
+			and d_free.omega_dot.length() < 1e-6:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("Total Izz / Ixz coupling failed: Izz=%.3f, wz_dot=%.5f, free_wdot=%s" % [
+			total_izz, d_coupl.omega_dot.z, str(d_free.omega_dot)
+		])
 
 	return {
 		"name": "SuspensionSystem (Block B)",

@@ -234,7 +234,10 @@ static func compute_anti_pitch_forces(fx_corners: Array, config: VehicleConfig) 
 	var dfz1: float = -config.anti_dive_ratio_front * fx1
 	var dfz2: float = config.anti_squat_ratio_rear * fx2
 	var dfz3: float = config.anti_squat_ratio_rear * fx3
-	var pitch_torque_ros: float = -config.a_cog * (dfz0 + dfz1) + config.b_cog * (dfz2 + dfz3)
+	var pitch_torque_ros: float = config.h_cog * (
+		config.anti_dive_ratio_front * (fx0 + fx1)
+		+ config.anti_squat_ratio_rear * (fx2 + fx3)
+	)
 	return {
 		"corner_forces": [dfz0, dfz1, dfz2, dfz3],
 		"pitch_torque_ros": pitch_torque_ros
@@ -248,12 +251,31 @@ static func compute_jacking_forces(fy_corners: Array, config: VehicleConfig) -> 
 	var dfz_r: float = 0.5 * config.jacking_coeff_rear * fy_r
 	return [-dfz_f, dfz_f, -dfz_r, dfz_r]
 
+## Computes front wheel steer angle (ISO +Z CCW left) supporting pro-Ackermann (> 0)
+## and anti-Ackermann (< 0, e.g. -0.11 on TeR27).
+static func compute_ackermann_steer(steer_angle: float, is_left: bool, config: VehicleConfig) -> float:
+	var abs_s: float = absf(steer_angle)
+	var ack: float = clampf(config.ackermann_factor, -1.0, 1.0)
+	if abs_s < 1e-6 or is_zero_approx(ack) or config.wheelbase <= 1e-3:
+		return steer_angle
+	var half_t: float = 0.5 * config.track_width_f
+	var r_turn: float = config.wheelbase / tan(abs_s)
+	var is_inner: bool = (steer_angle > 0.0 and is_left) or (steer_angle < 0.0 and not is_left)
+	var r_wheel: float = maxf(r_turn - half_t, 0.25 * config.wheelbase) if is_inner else (r_turn + half_t)
+	var ack_mag: float = atan2(config.wheelbase, r_wheel)
+	var delta_ack: float = ack_mag - abs_s
+	return signf(steer_angle) * (abs_s + ack * delta_ack)
+
 ## Elastic steering compliance deflection (rad) at front kingpin from tire Mz and mechanical trail.
 ## In ISO 8855, positive Fy produces negative Mz and negative mechanical-trail torque (-Fy * x_trail),
 ## yielding delta_comp < 0 (elastic understeer).
 static func compute_steering_compliance(mz_tire: float, fy_tire: float, config: VehicleConfig) -> float:
+	if config.steering_compliance_coeff_rad_nm <= 0.0:
+		return 0.0
 	var k_steer: float = maxf(config.steering_compliance_stiffness_nm_rad, 1.0)
 	var kingpin_torque: float = mz_tire - fy_tire * config.mechanical_trail_front
+	if absf(config.steering_compliance_coeff_rad_nm - 1.0 / k_steer) > 1e-9:
+		return clampf(kingpin_torque * config.steering_compliance_coeff_rad_nm, -0.1, 0.1)
 	return clampf(kingpin_torque / k_steer, -0.1, 0.1)
 
 ## Progressive bump stop force (N, >= 0) engaging when delta_z exceeds bumpstop_start.

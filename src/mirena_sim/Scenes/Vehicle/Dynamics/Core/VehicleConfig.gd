@@ -21,27 +21,30 @@ enum WheelIndex {
 
 # --- Chassis & Mass Geometry ---
 @export var mass: float = 290.0
-@export var sprung_mass: float = 260.0
-@export var unsprung_mass_total: float = 30.0
+@export var sprung_mass: float = 236.0
+@export var unsprung_mass: float = 13.5
+@export var unsprung_mass_total: float = 54.0
 @export var gravity: float = 9.81
 @export var wheelbase: float = 1.540
 @export var track_width_f: float = 1.230
 @export var track_width_r: float = 1.230
 @export var h_cog: float = 0.290
-@export var h_sprung_cog: float = 0.300
+@export var h_sprung_cog: float = 0.30986
 @export var roll_center_height_front: float = 0.01959
 @export var roll_center_height_rear: float = 0.04003
+@export var front_weight_distribution: float = 0.45
 @export var weight_dist_r: float = 0.55
 @export var ackermann_factor: float = -0.11
 
-@export var ixx: float = 54.0
-@export var iyy: float = 105.0
-@export var izz: float = 125.0
+@export var ixx: float = 15.4
+@export var iyy: float = 84.2
+@export var izz: float = 83.1
+@export var ixz: float = -6.4
 
 var a_cog: float = 0.847
 var b_cog: float = 0.693
 var roll_center_height_cg: float = 0.030832
-var h_roll_arm: float = 0.269168
+var h_roll_arm: float = 0.279028
 
 # --- Suspension & Raycast ---
 # TeR27 design values: spring stiffness & constant motion ratios (MR = dx_spring / dz_wheel = 1 / 1.13)
@@ -62,12 +65,27 @@ var h_roll_arm: float = 0.269168
 var use_digressive_damper: bool = true
 @export var arb_stiffness_front: float = 4500.0
 @export var arb_stiffness_rear: float = 5500.0
-@export var anti_dive_ratio_front: float = 0.1388
-@export var anti_squat_ratio_rear: float = 0.1154
+@export var anti_dive_ratio_front: float = 0.569
+@export var anti_squat_ratio_rear: float = 0.412
 @export var jacking_coeff_front: float = 0.0323
 @export var jacking_coeff_rear: float = 0.0651
 @export var mechanical_trail_front: float = 0.013
-@export var steering_compliance_stiffness_nm_rad: float = 9500.0
+var _syncing_compliance: bool = false
+@export var steering_compliance_stiffness_nm_rad: float = 9500.0:
+	set(v):
+		steering_compliance_stiffness_nm_rad = maxf(1.0, v)
+		if not _syncing_compliance:
+			_syncing_compliance = true
+			steering_compliance_coeff_rad_nm = 1.0 / steering_compliance_stiffness_nm_rad
+			_syncing_compliance = false
+@export var steering_compliance_coeff_rad_nm: float = 1.0 / 9500.0:
+	set(v):
+		steering_compliance_coeff_rad_nm = maxf(0.0, v)
+		if not _syncing_compliance:
+			_syncing_compliance = true
+			if steering_compliance_coeff_rad_nm > 1e-9:
+				steering_compliance_stiffness_nm_rad = 1.0 / steering_compliance_coeff_rad_nm
+			_syncing_compliance = false
 @export var bumpstop_start_front: float = 0.025
 @export var bumpstop_start_rear: float = 0.025
 @export var bumpstop_stiffness_front: float = 120000.0
@@ -78,6 +96,8 @@ var use_digressive_damper: bool = true
 @export var ray_cast_length: float = 0.45
 @export var caster_angle_deg: float = 5.0
 @export var kpi_angle_deg: float = 10.0
+@export var static_camber_front_deg: float = -2.0
+@export var static_camber_rear_deg: float = -1.5
 
 # Optimum Kinematics 1D tables stored internally as [[delta_z_m, angle_rad], ...]
 var camber_table_front: Array = []
@@ -102,6 +122,12 @@ var toe_table_rear: Array = []
 @export var tv_rate_hz: float = 200.0
 @export var tv_allow_regen: bool = false
 @export var regen_peak_torque: float = 0.0
+@export var battery_internal_resistance_ohm: float = 0.14
+@export var battery_initial_soc: float = 0.95
+@export var battery_nominal_voltage_v: float = 540.0
+@export var battery_ocv_full_v: float = 600.0
+@export var battery_capacity_kwh: float = 7.2
+@export var inverter_tau_s: float = 0.008
 
 # --- Brakes ---
 @export var brake_mu: float = 1.30
@@ -117,6 +143,8 @@ var toe_table_rear: Array = []
 @export var rolling_resistance_coeff: float = 0.015
 @export var slip_regularization_speed: float = 0.5
 @export var tire_vertical_stiffness: float = 115000.0
+@export var track_temp_c: float = 28.0
+@export var tire_initial_temp_c: float = 58.0
 ## Canonical MF 6.2 friction scaling factors (Calspan TTC belt -> real asphalt track grip).
 @export var lambda_mux: float = 0.95
 @export var lambda_muy: float = 0.90
@@ -129,6 +157,9 @@ var toe_table_rear: Array = []
 @export var cl_a: float = 6.0
 @export var aero_balance_front: float = 0.48
 @export var cp_height: float = 0.144
+@export var static_ride_height_front: float = 0.035
+@export var static_ride_height_rear: float = 0.035
+@export var aero_stall_ride_height_front: float = 0.018
 var _has_explicit_axle_cl: bool = false
 var _cl_a_front_explicit: float = 0.0
 var _cl_a_rear_explicit: float = 0.0
@@ -184,17 +215,33 @@ func _load_chassis_json(file_path: String) -> void:
 		return
 	mass = float(d.get("mass", mass))
 	sprung_mass = float(d.get("sprung_mass", sprung_mass))
-	unsprung_mass_total = float(d.get("unsprung_mass_total", unsprung_mass_total))
+	if d.has("unsprung_mass"):
+		unsprung_mass = maxf(0.0, float(d.get("unsprung_mass", unsprung_mass)))
+		unsprung_mass_total = 4.0 * unsprung_mass
+	elif d.has("unsprung_mass_total"):
+		unsprung_mass_total = maxf(0.0, float(d.get("unsprung_mass_total", unsprung_mass_total)))
+		unsprung_mass = unsprung_mass_total * 0.25
 	gravity = float(d.get("gravity", gravity))
 	wheelbase = float(d.get("wheelbase", wheelbase))
-	track_width_f = float(d.get("track_width_front", track_width_f))
-	track_width_r = float(d.get("track_width_rear", track_width_r))
+	if d.has("track_width_front"):
+		track_width_f = float(d.get("track_width_front", track_width_f))
+	elif d.has("track_front"):
+		track_width_f = float(d.get("track_front", track_width_f))
+	if d.has("track_width_rear"):
+		track_width_r = float(d.get("track_width_rear", track_width_r))
+	elif d.has("track_rear"):
+		track_width_r = float(d.get("track_rear", track_width_r))
 	h_cog = float(d.get("cg_height", h_cog))
 	h_sprung_cog = float(d.get("sprung_cg_height", h_sprung_cog))
 	roll_center_height_front = float(d.get("roll_center_height_front", roll_center_height_front))
 	roll_center_height_rear = float(d.get("roll_center_height_rear", roll_center_height_rear))
-	weight_dist_r = float(d.get("weight_distribution_rear", weight_dist_r))
-	ackermann_factor = clampf(float(d.get("ackermann_factor", ackermann_factor)), 0.0, 1.0)
+	if d.has("front_weight_distribution"):
+		front_weight_distribution = clampf(float(d.get("front_weight_distribution", front_weight_distribution)), 0.0, 1.0)
+		weight_dist_r = 1.0 - front_weight_distribution
+	else:
+		weight_dist_r = clampf(float(d.get("weight_distribution_rear", weight_dist_r)), 0.0, 1.0)
+		front_weight_distribution = 1.0 - weight_dist_r
+	ackermann_factor = clampf(float(d.get("ackermann_factor", ackermann_factor)), -1.0, 1.0)
 	if d.has("max_steer_angle"):
 		max_steer_angle = float(d.get("max_steer_angle", max_steer_angle))
 	
@@ -203,6 +250,7 @@ func _load_chassis_json(file_path: String) -> void:
 		ixx = float(inertia.get("ixx", ixx))
 		iyy = float(inertia.get("iyy", iyy))
 		izz = float(inertia.get("izz", izz))
+		ixz = float(inertia.get("ixz", ixz))
 
 func _load_suspension_json(file_path: String) -> void:
 	var d = _read_json_file(file_path)
@@ -232,7 +280,10 @@ func _load_suspension_json(file_path: String) -> void:
 	jacking_coeff_front = float(d.get("jacking_coeff_front", jacking_coeff_front))
 	jacking_coeff_rear = float(d.get("jacking_coeff_rear", jacking_coeff_rear))
 	mechanical_trail_front = float(d.get("mechanical_trail_front", mechanical_trail_front))
-	steering_compliance_stiffness_nm_rad = maxf(1.0, float(d.get("steering_compliance_stiffness_nm_rad", steering_compliance_stiffness_nm_rad)))
+	if d.has("steering_compliance_stiffness_nm_rad"):
+		steering_compliance_stiffness_nm_rad = maxf(1.0, float(d.get("steering_compliance_stiffness_nm_rad", steering_compliance_stiffness_nm_rad)))
+	elif d.has("steering_compliance_coeff_rad_nm"):
+		steering_compliance_coeff_rad_nm = maxf(0.0, float(d.get("steering_compliance_coeff_rad_nm", steering_compliance_coeff_rad_nm)))
 	bumpstop_start_front = float(d.get("bumpstop_start_front", bumpstop_start_front))
 	bumpstop_start_rear = float(d.get("bumpstop_start_rear", bumpstop_start_rear))
 	bumpstop_stiffness_front = float(d.get("bumpstop_stiffness_front", bumpstop_stiffness_front))
@@ -243,10 +294,53 @@ func _load_suspension_json(file_path: String) -> void:
 	ray_cast_length = float(d.get("ray_cast_length", ray_cast_length))
 	caster_angle_deg = float(d.get("caster_angle_deg", caster_angle_deg))
 	kpi_angle_deg = float(d.get("kpi_angle_deg", kpi_angle_deg))
-	camber_table_front = _parse_kinematic_table_deg(d.get("camber_table_front_deg", []))
-	camber_table_rear = _parse_kinematic_table_deg(d.get("camber_table_rear_deg", []))
+	var has_static_f: bool = d.has("static_camber_front_deg")
+	var has_static_r: bool = d.has("static_camber_rear_deg")
+	static_camber_front_deg = float(d.get("static_camber_front_deg", static_camber_front_deg))
+	static_camber_rear_deg = float(d.get("static_camber_rear_deg", static_camber_rear_deg))
+	camber_table_front = _load_camber_table(d, "camber_table_front_deg", "camber_gain_front_deg_per_10mm", static_camber_front_deg, has_static_f)
+	camber_table_rear = _load_camber_table(d, "camber_table_rear_deg", "camber_gain_rear_deg_per_10mm", static_camber_rear_deg, has_static_r)
 	toe_table_front = _parse_kinematic_table_deg(d.get("toe_table_front_deg", []))
 	toe_table_rear = _parse_kinematic_table_deg(d.get("toe_table_rear_deg", []))
+
+static func _load_camber_table(d: Dictionary, table_key: String, gain_key: String, static_deg: float, has_static: bool) -> Array:
+	var table: Array = _parse_kinematic_table_deg(d.get(table_key, []))
+	if table.size() > 0:
+		if has_static:
+			var base_zero_rad: float = _lookup_table_rad(table, 0.0)
+			var offset_rad: float = deg_to_rad(static_deg) - base_zero_rad
+			if absf(offset_rad) > 1e-7:
+				for pt in table:
+					pt[1] = float(pt[1]) + offset_rad
+		return table
+	if d.has(gain_key):
+		var gain_per_10mm: float = float(d.get(gain_key, 0.0))
+		for dz_mm in [-30, -20, -10, 0, 10, 20, 30]:
+			var dz_m: float = float(dz_mm) * 0.001
+			var ang_deg: float = static_deg + gain_per_10mm * (float(dz_mm) / 10.0)
+			table.append([dz_m, deg_to_rad(ang_deg)])
+		return table
+	if has_static and not d.has(table_key):
+		return [[0.0, deg_to_rad(static_deg)]]
+	return table
+
+static func _lookup_table_rad(table: Array, delta_z: float) -> float:
+	var n: int = table.size()
+	if n == 0:
+		return 0.0
+	if n == 1 or delta_z <= float(table[0][0]):
+		return float(table[0][1])
+	if delta_z >= float(table[n - 1][0]):
+		return float(table[n - 1][1])
+	for i in range(n - 1):
+		var xa: float = float(table[i][0])
+		var xb: float = float(table[i + 1][0])
+		if delta_z >= xa and delta_z <= xb:
+			var dx: float = xb - xa
+			if absf(dx) < 1e-9:
+				return float(table[i][1])
+			return lerpf(float(table[i][1]), float(table[i + 1][1]), (delta_z - xa) / dx)
+	return float(table[n - 1][1])
 
 static func _parse_kinematic_table_deg(raw_table: Variant) -> Array:
 	var out: Array = []
@@ -271,6 +365,8 @@ func _load_tires_json(file_path: String) -> void:
 	rolling_resistance_coeff = float(d.get("rolling_resistance_coeff", rolling_resistance_coeff))
 	slip_regularization_speed = float(d.get("slip_regularization_speed", slip_regularization_speed))
 	tire_vertical_stiffness = maxf(1.0, float(d.get("tire_vertical_stiffness", tire_vertical_stiffness)))
+	track_temp_c = float(d.get("track_temp_c", track_temp_c))
+	tire_initial_temp_c = float(d.get("tire_initial_temp_c", tire_initial_temp_c))
 	if d.has("surface_grip_scale"):
 		surface_grip_scale = clampf(float(d.get("surface_grip_scale", surface_grip_scale)), 0.1, 1.5)
 	lambda_mux = clampf(float(d.get("lambda_mux", surface_grip_scale)), 0.1, 1.5)
@@ -299,6 +395,12 @@ func _load_drivetrain_json(file_path: String) -> void:
 	tv_rate_hz = float(d.get("tv_rate_hz", tv_rate_hz))
 	tv_allow_regen = bool(d.get("tv_allow_regen", tv_allow_regen))
 	regen_peak_torque = float(d.get("regen_peak_torque", regen_peak_torque))
+	battery_internal_resistance_ohm = maxf(0.0, float(d.get("battery_internal_resistance_ohm", battery_internal_resistance_ohm)))
+	battery_initial_soc = clampf(float(d.get("battery_initial_soc", battery_initial_soc)), 0.0, 1.0)
+	battery_nominal_voltage_v = maxf(1.0, float(d.get("battery_nominal_voltage_v", battery_nominal_voltage_v)))
+	battery_ocv_full_v = maxf(1.0, float(d.get("battery_ocv_full_v", battery_ocv_full_v)))
+	battery_capacity_kwh = maxf(0.01, float(d.get("battery_capacity_kwh", battery_capacity_kwh)))
+	inverter_tau_s = maxf(0.0, float(d.get("inverter_tau_s", inverter_tau_s)))
 	
 	var dm_str = str(d.get("drive_mode", "FOUR_WD"))
 	match dm_str:
@@ -323,6 +425,12 @@ func _load_aero_json(file_path: String) -> void:
 	cl_a = float(d.get("cl_a", cl_a))
 	aero_balance_front = clampf(float(d.get("aero_balance_front", aero_balance_front)), 0.0, 1.0)
 	cp_height = float(d.get("cp_height", cp_height))
+	static_ride_height_front = maxf(0.001, float(d.get("static_ride_height_front", static_ride_height_front)))
+	static_ride_height_rear = maxf(0.001, float(d.get("static_ride_height_rear", static_ride_height_rear)))
+	if d.has("stall_ride_height_front"):
+		aero_stall_ride_height_front = maxf(0.001, float(d.get("stall_ride_height_front", aero_stall_ride_height_front)))
+	elif d.has("aero_stall_ride_height_front"):
+		aero_stall_ride_height_front = maxf(0.001, float(d.get("aero_stall_ride_height_front", aero_stall_ride_height_front)))
 	if d.has("cl_a_front") and d.has("cl_a_rear"):
 		_has_explicit_axle_cl = true
 		_cl_a_front_explicit = float(d.get("cl_a_front", 0.0))
@@ -345,12 +453,22 @@ func get_cl_a_rear() -> float:
 		return _cl_a_rear_explicit
 	return cl_a * (1.0 - clampf(aero_balance_front, 0.0, 1.0))
 
+## Returns total vehicle yaw inertia (kg*m^2): sprung Izz + unsprung Steiner corners + 4 * wheel_assembly_inertia.
+func get_total_izz() -> float:
+	var m_u: float = maxf(unsprung_mass, 0.0)
+	var half_wf: float = 0.5 * track_width_f
+	var half_wr: float = 0.5 * track_width_r
+	var steiner_f: float = 2.0 * m_u * (a_cog * a_cog + half_wf * half_wf)
+	var steiner_r: float = 2.0 * m_u * (b_cog * b_cog + half_wr * half_wr)
+	return maxf(izz + steiner_f + steiner_r + 4.0 * maxf(wheel_assembly_inertia, 0.0), 1e-3)
+
 ## Returns effective reflected wheel rotational inertia: I_eff = I_wheel + G^2 * I_rotor (kg*m^2).
 func get_effective_wheel_inertia() -> float:
 	return maxf(wheel_assembly_inertia + gear_ratio * gear_ratio * motor_rotor_inertia, 1e-4)
 
 ## Recalculates longitudinal CoG distances, roll-center geometry, and effective wheel inertia.
 func update_derived_geometry() -> void:
+	front_weight_distribution = 1.0 - weight_dist_r
 	a_cog = wheelbase * weight_dist_r
 	b_cog = wheelbase * (1.0 - weight_dist_r)
 	roll_center_height_cg = (1.0 - weight_dist_r) * roll_center_height_front + weight_dist_r * roll_center_height_rear
