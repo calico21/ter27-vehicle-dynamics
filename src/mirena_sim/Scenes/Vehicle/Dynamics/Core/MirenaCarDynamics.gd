@@ -48,6 +48,7 @@ var tv_yaw_moment_req: float = 0.0
 @export_range(0.5, 5.0, 0.05) var steering_speed: float = 1.8
 @export_range(0.0, 0.5, 0.01) var steering_filter: float = 0.12
 @export_range(0.0, 1.0, 0.01) var speed_sensitivity: float = 0.25
+@export_range(12.0, 35.0, 0.5) var v_ref_mps: float = 28.0
 @export_range(1.0, 3.0, 0.05) var throttle_gamma: float = 1.25
 @export_range(1.0, 3.0, 0.05) var brake_gamma: float = 1.4
 @export_range(0.0, 1.0, 0.05) var rumble_effects: float = 0.7
@@ -111,6 +112,9 @@ var gas: float = 0.0
 var steering: float = 0.0
 var brake: float = 0.0
 var _steer_smoothed: float = 0.0
+var _raw_steer_in: float = 0.0
+var _raw_throttle_in: float = 0.0
+var _raw_brake_in: float = 0.0
 var _joy_vibrating: bool = false
 
 # --- ECU TV v3 Live Telemetry (visible in Godot Remote Inspector) ---
@@ -323,7 +327,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				if _tv_overlay != null:
 					_tv_overlay.sync_from_ecu()
 				_update_minimal_hud()
-		elif event.keycode == KEY_F8:
+		elif event.keycode == KEY_F10:
 			if _tv_overlay != null:
 				_tv_overlay.toggle_visibility()
 		elif event.keycode == KEY_F9:
@@ -523,9 +527,38 @@ func _sync_gamepad_settings() -> void:
 	gamepad.steering_speed = steering_speed
 	gamepad.steering_filter = steering_filter
 	gamepad.speed_sensitivity = speed_sensitivity
+	gamepad.v_ref_mps = v_ref_mps
 	gamepad.throttle_gamma = throttle_gamma
 	gamepad.brake_gamma = brake_gamma
 	gamepad.rumble_effects = rumble_effects
+
+func get_live_gamepad_params() -> Dictionary:
+	return gamepad.get_live_gamepad_params()
+
+func set_live_gamepad_param(key: String, val: float) -> void:
+	gamepad.set_live_gamepad_param(key, val)
+	match key:
+		"steering_deadzone":
+			steering_deadzone = gamepad.steering_deadzone
+		"steering_gamma":
+			steering_gamma = gamepad.steering_gamma
+		"steering_speed":
+			steering_speed = gamepad.steering_speed
+		"steering_filter":
+			steering_filter = gamepad.steering_filter
+		"speed_sensitivity":
+			speed_sensitivity = gamepad.speed_sensitivity
+		"v_ref_mps":
+			v_ref_mps = gamepad.v_ref_mps
+		"throttle_gamma":
+			throttle_gamma = gamepad.throttle_gamma
+		"brake_gamma":
+			brake_gamma = gamepad.brake_gamma
+		"rumble_effects":
+			rumble_effects = gamepad.rumble_effects
+
+func save_gamepad_config_to_json(path: String = "res://Scenes/Vehicle/Dynamics/Core/Config/gamepad.json") -> bool:
+	return gamepad.save_gamepad_config_to_json(path)
 
 func _stop_all_joy_vibration() -> void:
 	for joy_id in Input.get_connected_joypads():
@@ -573,11 +606,14 @@ func _process_manual_pilot(delta: float) -> void:
 
 		var joy_throttle: float = gamepad.normalize_trigger(Input.get_joy_axis(joy_id, JOY_AXIS_TRIGGER_RIGHT), false)
 		var joy_brake: float = gamepad.normalize_trigger(Input.get_joy_axis(joy_id, JOY_AXIS_TRIGGER_LEFT), true)
+		_raw_steer_in = raw_x if absf(raw_x) > 0.002 or is_zero_approx(kb_steer) else kb_steer
+		_raw_throttle_in = maxf(kb_throttle, joy_throttle)
+		_raw_brake_in = maxf(maxf(kb_brake, joy_brake), ebs_in)
 		if is_wheel:
-			self.gas = clampf(maxf(kb_throttle, joy_throttle), 0.0, 1.0)
-			self.brake = clampf(maxf(maxf(kb_brake, joy_brake), ebs_in), 0.0, 1.0)
+			self.gas = clampf(_raw_throttle_in, 0.0, 1.0)
+			self.brake = clampf(_raw_brake_in, 0.0, 1.0)
 		else:
-			self.gas = gamepad.shape_throttle(maxf(kb_throttle, joy_throttle))
+			self.gas = gamepad.shape_throttle(_raw_throttle_in)
 			self.brake = maxf(gamepad.shape_brake(maxf(kb_brake, joy_brake)), ebs_in)
 
 		if model != null:
@@ -597,8 +633,11 @@ func _process_manual_pilot(delta: float) -> void:
 			wheel_ffb.detect_input_device_from_name("")
 		var steer_rate = manual_steer_return_rate if (absf(kb_steer) < absf(_steer_smoothed) or kb_steer * _steer_smoothed < 0.0) else manual_steer_rate
 		_steer_smoothed = _smooth_steer(_steer_smoothed, kb_steer, delta, steer_rate)
+		_raw_steer_in = kb_steer
+		_raw_throttle_in = kb_throttle
+		_raw_brake_in = maxf(kb_brake, ebs_in)
 		self.gas = kb_throttle
-		self.brake = maxf(kb_brake, ebs_in)
+		self.brake = _raw_brake_in
 		if _joy_vibrating:
 			_stop_all_joy_vibration()
 
@@ -832,14 +871,14 @@ func _setup_minimal_hud() -> void:
 	_hud_layer.add_child(panel)
 	add_child(_hud_layer)
 	_tv_overlay = TvLiveTuningOverlayScript.new()
-	if model != null and model.ecu_tv_v3 != null:
-		_tv_overlay.bind_ecu(model.ecu_tv_v3)
+	_tv_overlay.bind_car(model.ecu_tv_v3 if model != null else null, gamepad, self)
 	add_child(_tv_overlay)
 	_update_minimal_hud()
 
 func _update_minimal_hud() -> void:
 	if _tv_overlay != null and model != null:
 		_tv_overlay.update_telemetry(tv_wz_ref, model.angular_velocity_ros.z, tv_beta_est_deg, tv_mz_req, tv_tc_active)
+		_tv_overlay.update_input_telemetry(_raw_steer_in, _steer_smoothed, _raw_throttle_in, self.gas, _raw_brake_in, self.brake)
 	if _hud_label == null:
 		return
 	var kmh: float = linear_velocity.length() * 3.6
@@ -852,7 +891,7 @@ func _update_minimal_hud() -> void:
 	if model != null and model.hv_state != null:
 		hv_str = "   |   %3.0f V (%.0f%% SoC)" % [model.hv_state.v_dc, model.hv_state.soc * 100.0]
 	var dev_str: String = "  |  WHEEL 1:1" if (wheel_ffb != null and wheel_ffb.active_device_mode == WheelFFBControllerScript.InputDeviceMode.WHEEL) else ""
-	_hud_label.text = "%5.1f km/h   |   %4.1f / 80.0 kW%s\n%s%s%s%s%s" % [
+	_hud_label.text = "%5.1f km/h   |   %4.1f / 80.0 kW%s\n%s%s%s%s%s  |  [F10] Live Tuning" % [
 		kmh, tv_elec_power_kw, hv_str, mode_str, map_str, tc_str, dev_str, rec_str
 	]
 

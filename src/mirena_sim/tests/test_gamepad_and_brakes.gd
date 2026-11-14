@@ -198,6 +198,23 @@ static func run() -> Dictionary:
 		failed += 1
 		errors.append("WheelFFBController FFB torque failed: tau_pos=%.3f norm_pos=%.3f tau_neg=%.3f norm_neg=%.3f" % [tau_pos, norm_pos, tau_neg, ffb.ffb_normalized])
 
+	# 9. Live gamepad param tuning & JSON save/reload
+	var gp_live := GamepadController.new()
+	gp_live.set_live_gamepad_param("steering_gamma", 1.5)
+	gp_live.set_live_gamepad_param("v_ref_mps", 20.0)
+	var live_path := "user://test_gamepad_live.json"
+	var saved_ok := gp_live.save_gamepad_config_to_json(live_path)
+	var gp_reloaded := GamepadController.new()
+	var loaded_ok := gp_reloaded.load_from_json(live_path)
+	var p_reloaded := gp_reloaded.get_live_gamepad_params()
+	if saved_ok and loaded_ok and is_equal_approx(float(p_reloaded.get("steering_gamma", 0.0)), 1.5) and is_equal_approx(float(p_reloaded.get("v_ref_mps", 0.0)), 20.0):
+		passed += 1
+	else:
+		failed += 1
+		errors.append("Gamepad live param save/reload failed: saved=%s loaded=%s gamma=%s v_ref=%s" % [
+			str(saved_ok), str(loaded_ok), str(p_reloaded.get("steering_gamma", -1.0)), str(p_reloaded.get("v_ref_mps", -1.0))
+		])
+
 	return {
 		"name": "test_gamepad_and_brakes",
 		"passed": passed,

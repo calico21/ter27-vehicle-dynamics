@@ -15,6 +15,7 @@ var steering_gamma: float = 2.2
 var steering_speed: float = 1.8
 var steering_filter: float = 0.12
 var speed_sensitivity: float = 0.25
+var v_ref_mps: float = V_REF_MPS
 var throttle_gamma: float = 1.25
 var brake_gamma: float = 1.4
 var rumble_effects: float = 0.7
@@ -47,6 +48,7 @@ func load_from_json(file_path: String = DEFAULT_CONFIG_PATH) -> bool:
 	steering_speed = clampf(float(d.get("steering_speed", steering_speed)), 0.5, 5.0)
 	steering_filter = clampf(float(d.get("steering_filter", steering_filter)), 0.0, 0.5)
 	speed_sensitivity = clampf(float(d.get("speed_sensitivity", speed_sensitivity)), 0.0, 1.0)
+	v_ref_mps = clampf(float(d.get("v_ref_mps", v_ref_mps)), 12.0, 35.0)
 	throttle_gamma = clampf(float(d.get("throttle_gamma", throttle_gamma)), 1.0, 3.0)
 	brake_gamma = clampf(float(d.get("brake_gamma", brake_gamma)), 1.0, 3.0)
 	rumble_effects = clampf(float(d.get("rumble_effects", rumble_effects)), 0.0, 1.0)
@@ -90,10 +92,58 @@ static func apply_gamma(u: float, gamma: float) -> float:
 		return 0.0
 	return signf(clamped) * pow(absf(clamped), maxf(gamma, 0.01))
 
-## Speed-sensitive steering attenuation factor: 1 / (1 + k * (|vx| / 20.0)^2).
+## Speed-sensitive steering attenuation factor: 1 / (1 + k * (|vx| / v_ref_mps)^2).
 func compute_speed_factor(vx_mps: float) -> float:
-	var ratio: float = absf(vx_mps) / V_REF_MPS
+	var ratio: float = absf(vx_mps) / maxf(v_ref_mps, 1.0)
 	return 1.0 / (1.0 + maxf(speed_sensitivity, 0.0) * ratio * ratio)
+
+## Returns a Dictionary snapshot of all live-tunable gamepad/wheel parameters.
+func get_live_gamepad_params() -> Dictionary:
+	return {
+		"steering_deadzone": steering_deadzone,
+		"steering_gamma": steering_gamma,
+		"steering_speed": steering_speed,
+		"steering_filter": steering_filter,
+		"speed_sensitivity": speed_sensitivity,
+		"v_ref_mps": v_ref_mps,
+		"throttle_gamma": throttle_gamma,
+		"brake_gamma": brake_gamma,
+		"rumble_effects": rumble_effects
+	}
+
+## Updates a single gamepad/wheel parameter in-place without resetting the scene.
+func set_live_gamepad_param(key: String, val: float) -> void:
+	match key:
+		"steering_deadzone":
+			steering_deadzone = clampf(val, 0.0, 0.15)
+		"steering_gamma":
+			steering_gamma = clampf(val, 1.0, 3.5)
+		"steering_speed":
+			steering_speed = clampf(val, 0.5, 4.0)
+		"steering_filter":
+			steering_filter = clampf(val, 0.0, 0.40)
+		"speed_sensitivity":
+			speed_sensitivity = clampf(val, 0.0, 0.90)
+		"v_ref_mps":
+			v_ref_mps = clampf(val, 12.0, 35.0)
+		"throttle_gamma":
+			throttle_gamma = clampf(val, 1.0, 2.5)
+		"brake_gamma":
+			brake_gamma = clampf(val, 1.0, 2.5)
+		"rumble_effects":
+			rumble_effects = clampf(val, 0.0, 1.0)
+
+## Saves the current gamepad/wheel parameters to JSON.
+func save_gamepad_config_to_json(file_path: String = DEFAULT_CONFIG_PATH) -> bool:
+	var dir_path: String = file_path.get_base_dir()
+	if not dir_path.is_empty():
+		DirAccess.make_dir_recursive_absolute(dir_path)
+	var f := FileAccess.open(file_path, FileAccess.WRITE)
+	if f == null:
+		return false
+	f.store_string(JSON.stringify(get_live_gamepad_params(), "  "))
+	f.close()
+	return true
 
 ## Full Assetto Corsa steering chain:
 ## deadzone -> gamma -> speed_sensitivity -> steering_speed (35% faster return) -> steering_filter.
