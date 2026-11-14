@@ -24,6 +24,10 @@ static var _cone_scene = preload("res://Scenes/Track/Cone/cone.tscn")
 var track_gen = TrackGenerator.new()
 signal track_loaded
 
+# Surface Grip Map (optional per-track variable friction zones in Godot world XZ)
+var grip_zones: Array = []
+var default_surface_mu: float = 1.0
+
 # ROS node to manage tracks
 var _node: Object
 var _track_pub : Object
@@ -79,7 +83,8 @@ func _publish_full_map():
 	_map_pub.publish(msg)
 
 func _publish_track():
-	if not Sim.track: return
+	var sim_node: Node = get_node_or_null("/root/Sim")
+	if sim_node == null or not sim_node.get("track"): return
 	var msg = _new_ros_msg("RosMirenaCommonTrack")
 	msg.header.frame_id = "debug_map"
 	msg.header.stamp = _node.now()
@@ -106,6 +111,7 @@ func _to_ent(cone: Node3D, global : bool = false) -> Object:
 	
 func create_track():
 	clear_track()
+	parse_grip_map({})
 	# Update curve and path
 	track_curve = track_gen.generate()
 	track_path.curve = track_curve
@@ -191,6 +197,10 @@ func load_track(path : String):
 	var json = JSON.new()
 	json.parse(file.get_as_text())
 	var data = json.data
+	if typeof(data) == TYPE_DICTIONARY:
+		parse_grip_map(data)
+	else:
+		parse_grip_map({})
 	
 	# Load Cones
 	if data.has("cones"):
@@ -231,7 +241,96 @@ func load_track(path : String):
 	track_loaded.emit()
 
 func clear_track():
+	grip_zones.clear()
+	default_surface_mu = 1.0
 	for n in $Gates.get_children(): n.queue_free()
+
+## Parses optional "surface_grip" or "grip_zones" definitions from a loaded track JSON Dictionary.
+func parse_grip_map(track_data: Dictionary) -> void:
+	grip_zones.clear()
+	default_surface_mu = 1.0
+	if track_data.is_empty():
+		return
+
+	var raw_zones: Array = []
+	if track_data.has("surface_grip"):
+		var sg: Variant = track_data["surface_grip"]
+		if sg is Dictionary:
+			default_surface_mu = clampf(float(sg.get("default_mu_scale", sg.get("default_surface_mu", 1.0))), 0.05, 2.0)
+			var z_candidate: Variant = sg.get("zones", sg.get("grip_zones", []))
+			if z_candidate is Array:
+				raw_zones = z_candidate
+		elif sg is Array:
+			raw_zones = sg
+			default_surface_mu = clampf(float(track_data.get("default_mu_scale", 1.0)), 0.05, 2.0)
+	elif track_data.has("grip_zones"):
+		default_surface_mu = clampf(float(track_data.get("default_mu_scale", track_data.get("default_surface_mu", 1.0))), 0.05, 2.0)
+		var gz: Variant = track_data["grip_zones"]
+		if gz is Array:
+			raw_zones = gz
+
+	for z in raw_zones:
+		if z is Dictionary:
+			grip_zones.append(z.duplicate(true))
+
+## Returns surface friction multiplier at world position (Godot XZ plane).
+func get_surface_mu_at(world_pos: Vector3) -> float:
+	return eval_grip_zones(world_pos, grip_zones, default_surface_mu)
+
+## Evaluates surface friction multiplier for a list of grip zones with smoothstep feathering.
+static func eval_grip_zones(world_pos: Vector3, zones: Array, default_mu: float = 1.0) -> float:
+	var mu: float = clampf(default_mu, 0.05, 2.0)
+	if zones.is_empty():
+		return mu
+
+	for zone_var in zones:
+		if not (zone_var is Dictionary):
+			continue
+		var z: Dictionary = zone_var
+		var shape_type: String = str(z.get("type", z.get("shape", ""))).to_lower()
+		var zone_mu: float = clampf(float(z.get("mu_scale", mu)), 0.05, 2.0)
+		var feather_m: float = maxf(float(z.get("feather_m", 1.0)), 0.0)
+
+		var d_out: float = INF
+		match shape_type:
+			"circle":
+				var cx: float = float(z.get("cx", 0.0))
+				var cz: float = float(z.get("cz", 0.0))
+				var radius: float = maxf(float(z.get("radius", 0.0)), 0.0)
+				var dist: float = Vector2(world_pos.x - cx, world_pos.z - cz).length()
+				d_out = dist - radius
+			"annulus":
+				var cx_a: float = float(z.get("cx", 0.0))
+				var cz_a: float = float(z.get("cz", 0.0))
+				var r_in: float = maxf(float(z.get("inner_radius", 0.0)), 0.0)
+				var r_out: float = maxf(float(z.get("outer_radius", r_in)), r_in)
+				var dist_a: float = Vector2(world_pos.x - cx_a, world_pos.z - cz_a).length()
+				d_out = maxf(r_in - dist_a, dist_a - r_out)
+			"rect":
+				var x0: float = float(z.get("min_x", 0.0))
+				var x1: float = float(z.get("max_x", 0.0))
+				var z0: float = float(z.get("min_z", 0.0))
+				var z1: float = float(z.get("max_z", 0.0))
+				var min_x: float = minf(x0, x1)
+				var max_x: float = maxf(x0, x1)
+				var min_z: float = minf(z0, z1)
+				var max_z: float = maxf(z0, z1)
+				var dx: float = maxf(min_x - world_pos.x, maxf(0.0, world_pos.x - max_x))
+				var dz: float = maxf(min_z - world_pos.z, maxf(0.0, world_pos.z - max_z))
+				d_out = sqrt(dx * dx + dz * dz)
+			_:
+				continue
+
+		var weight: float = 0.0
+		if d_out <= 0.0:
+			weight = 1.0
+		elif feather_m > 1e-6 and d_out < feather_m:
+			weight = 1.0 - smoothstep(0.0, feather_m, d_out)
+
+		if weight > 0.0:
+			mu = lerpf(mu, zone_mu, weight)
+
+	return clampf(mu, 0.05, 2.0)
 
 func get_gate_positions() -> Array[Transform3D]:
 	var length = track_curve.get_baked_length()

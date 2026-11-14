@@ -39,6 +39,21 @@ func reset() -> void:
 	for c in corners:
 		c.reset()
 
+## Synchronizes derived geometry, static preload, and corner kinematic alignment
+## from VehicleConfig in real time without resetting chassis or corner travel states.
+func sync_from_config(config: VehicleConfig) -> void:
+	if config == null:
+		return
+	config.update_derived_geometry()
+	if corners.size() < 4:
+		_init_corners()
+	for i in range(4):
+		var c: SuspensionCorner = corners[i]
+		var is_front: bool = (i < 2)
+		c.static_preload = compute_static_preload(i, config)
+		c.camber_rad = compute_corner_camber_iso(c.delta_z, is_front, c.is_right, config)
+		c.toe_rad = compute_corner_toe_iso(c.delta_z, is_front, c.is_right, config)
+
 ## Evaluates all 4 corners given wheel compressions (m), velocities (m/s), and grounded flags.
 ## Returns the updated Array[SuspensionCorner] (FL, FR, RL, RR).
 func evaluate_from_corners(
@@ -355,6 +370,7 @@ static func compute_ground_camber_iso(
 ## Returns ISO 8855 toe angle offset tau (rad) for corner at travel delta_z (m).
 static func compute_corner_toe_iso(delta_z: float, is_front: bool, is_right: bool, config: VehicleConfig) -> float:
 	var table: Array = config.toe_table_front if is_front else config.toe_table_rear
-	var toe_in_vehicle: float = lookup_1d_table(table, delta_z)
+	var static_toe_deg: float = config.toe_front_deg if is_front else config.toe_rear_deg
+	var toe_in_vehicle: float = lookup_1d_table(table, delta_z) + deg_to_rad(static_toe_deg)
 	# Positive toe-in: left points right (CW around +Z => -tau), right points left (CCW => +tau)
 	return toe_in_vehicle if is_right else -toe_in_vehicle

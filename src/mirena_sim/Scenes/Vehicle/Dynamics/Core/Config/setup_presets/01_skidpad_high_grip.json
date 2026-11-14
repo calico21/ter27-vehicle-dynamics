@@ -1,0 +1,20 @@
+{
+	"name": "Skidpad High Grip",
+	"description": "Balance neutro-agresivo para radio constante de 9.125 m con mayor camber y estabilidad trasera",
+	"author": "TeR27 Vehicle Dynamics",
+	"params": {
+		"spring_stiffness_front": 38000.0,
+		"spring_stiffness_rear": 50000.0,
+		"arb_stiffness_front": 4800.0,
+		"arb_stiffness_rear": 6200.0,
+		"static_camber_front_deg": -2.6,
+		"static_camber_rear_deg": -2.0,
+		"toe_front_deg": -0.1,
+		"toe_rear_deg": 0.25,
+		"brake_bias_front": 0.58,
+		"aero_balance_front": 0.47,
+		"regen_blending_enabled": true,
+		"static_ride_height_front": 0.032,
+		"static_ride_height_rear": 0.034
+	}
+}

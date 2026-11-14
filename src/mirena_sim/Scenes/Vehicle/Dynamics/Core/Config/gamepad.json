@@ -4,7 +4,7 @@
   "speed_sensitivity": 0.25,
   "steering_deadzone": 0.06,
   "steering_filter": 0.06,
-  "steering_gamma": 2.2,
+  "steering_gamma": 2.0,
   "steering_speed": 2.5,
   "throttle_gamma": 1.5,
   "v_ref_mps": 28.0

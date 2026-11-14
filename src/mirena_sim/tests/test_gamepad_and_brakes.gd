@@ -20,7 +20,7 @@ static func run() -> Dictionary:
 		failed += 1
 		errors.append("Failed to load gamepad.json")
 
-	if is_equal_approx(gp.steering_deadzone, 0.06) and is_equal_approx(gp.steering_gamma, 2.2) and is_equal_approx(gp.speed_sensitivity, 0.25):
+	if is_equal_approx(gp.steering_deadzone, 0.06) and is_equal_approx(gp.steering_gamma, 2.0) and is_equal_approx(gp.speed_sensitivity, 0.25):
 		passed += 1
 	else:
 		failed += 1

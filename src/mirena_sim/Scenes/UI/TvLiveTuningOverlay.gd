@@ -1,6 +1,9 @@
 extends CanvasLayer
 class_name TvLiveTuningOverlay
 
+const VehicleConfigScript = preload("../Vehicle/Dynamics/Core/VehicleConfig.gd")
+const TireModelScript = preload("../Vehicle/Dynamics/Tires/TireModel.gd")
+
 const TV_SLIDER_SPECS := [
 	{"key": "live_k_us", "label": "k_us (Understeer)", "min": 0.0, "max": 0.025, "step": 0.0005, "fmt": "%.4f"},
 	{"key": "live_max_mz", "label": "max_mz (Nm)", "min": 200.0, "max": 2500.0, "step": 25.0, "fmt": "%.0f"},
@@ -22,6 +25,19 @@ const GP_SLIDER_SPECS := [
 	{"key": "throttle_gamma", "label": "throttle_gamma", "min": 1.00, "max": 2.50, "step": 0.05, "fmt": "%.2f"},
 	{"key": "brake_gamma", "label": "brake_gamma", "min": 1.00, "max": 2.50, "step": 0.05, "fmt": "%.2f"},
 	{"key": "rumble_effects", "label": "rumble_effects", "min": 0.00, "max": 1.00, "step": 0.05, "fmt": "%.2f"}
+]
+
+const CHASSIS_SLIDER_SPECS := [
+	{"key": "spring_stiffness_front", "label": "k_spring_F (N/m)", "min": 20000.0, "max": 80000.0, "step": 500.0, "fmt": "%.0f"},
+	{"key": "spring_stiffness_rear", "label": "k_spring_R (N/m)", "min": 25000.0, "max": 90000.0, "step": 500.0, "fmt": "%.0f"},
+	{"key": "arb_stiffness_front", "label": "k_arb_F (Nm/rad)", "min": 1000.0, "max": 15000.0, "step": 100.0, "fmt": "%.0f"},
+	{"key": "arb_stiffness_rear", "label": "k_arb_R (Nm/rad)", "min": 1000.0, "max": 15000.0, "step": 100.0, "fmt": "%.0f"},
+	{"key": "static_camber_front_deg", "label": "Camber F (deg)", "min": -4.5, "max": 0.0, "step": 0.1, "fmt": "%+.1f"},
+	{"key": "static_camber_rear_deg", "label": "Camber R (deg)", "min": -4.0, "max": 0.0, "step": 0.1, "fmt": "%+.1f"},
+	{"key": "toe_front_deg", "label": "Toe F (deg)", "min": -1.0, "max": 1.0, "step": 0.05, "fmt": "%+.2f"},
+	{"key": "toe_rear_deg", "label": "Toe R (deg)", "min": -0.5, "max": 1.5, "step": 0.05, "fmt": "%+.2f"},
+	{"key": "brake_bias_front", "label": "Brake Bias F", "min": 0.45, "max": 0.80, "step": 0.01, "fmt": "%.2f"},
+	{"key": "aero_balance_front", "label": "Aero Balance F", "min": 0.35, "max": 0.65, "step": 0.01, "fmt": "%.2f"}
 ]
 
 var _ecu = null
@@ -51,6 +67,17 @@ var _brk_filt_bar: ProgressBar = null
 var _gp_telem_label: Label = null
 var _gp_status_label: Label = null
 
+var _setup_sliders: Dictionary = {}
+var _setup_val_labels: Dictionary = {}
+var _setup_dropdown: OptionButton = null
+var _setup_name_edit: LineEdit = null
+var _setup_presets_cache: Array[Dictionary] = []
+var _active_setup_path: String = ""
+var _pinn_tire_check: CheckBox = null
+var _regen_blend_check: CheckBox = null
+var _chassis_telem_label: Label = null
+var _setup_status_label: Label = null
+
 var _syncing: bool = false
 
 
@@ -76,6 +103,7 @@ func bind_car(ecu, gamepad, car = null) -> void:
 	_car = car
 	sync_from_ecu()
 	sync_from_gamepad()
+	sync_from_setup()
 
 
 func toggle_visibility() -> void:
@@ -83,10 +111,13 @@ func toggle_visibility() -> void:
 	if visible:
 		sync_from_ecu()
 		sync_from_gamepad()
+		sync_from_setup()
 
 
 func is_text_input_focused() -> bool:
-	return _map_name_edit != null and _map_name_edit.has_focus()
+	var tv_focused := _map_name_edit != null and _map_name_edit.has_focus()
+	var setup_focused := _setup_name_edit != null and _setup_name_edit.has_focus()
+	return tv_focused or setup_focused
 
 
 func sync_from_ecu() -> void:
@@ -122,6 +153,27 @@ func sync_from_gamepad() -> void:
 	_syncing = false
 
 
+func sync_from_setup() -> void:
+	_refresh_setup_dropdown()
+	var params: Dictionary = {}
+	if _car != null and _car.has_method("get_setup_params"):
+		params = _car.get_setup_params()
+	elif _car != null and _car.get("config") != null and _car.config.has_method("get_setup_params"):
+		params = _car.config.get_setup_params()
+	_syncing = true
+	for spec in CHASSIS_SLIDER_SPECS:
+		var k: String = spec["key"]
+		if params.has(k) and _setup_sliders.has(k):
+			var v := float(params[k])
+			(_setup_sliders[k] as HSlider).value = v
+			(_setup_val_labels[k] as Label).text = spec["fmt"] % v
+	if _pinn_tire_check != null:
+		_pinn_tire_check.button_pressed = TireModelScript.enable_neural_correction
+	if _regen_blend_check != null and params.has("regen_blending_enabled"):
+		_regen_blend_check.button_pressed = bool(params["regen_blending_enabled"])
+	_syncing = false
+
+
 func update_telemetry(wz_ref: float, wz: float, beta_deg: float, mz_req: float, tc_active: bool) -> void:
 	if not visible or _telem_label == null:
 		return
@@ -149,6 +201,31 @@ func update_input_telemetry(raw_steer: float, filt_steer: float, raw_th: float, 
 	_gp_telem_label.text = "Steer %+5.2f -> %+5.2f | Gas %4.2f -> %4.2f | Brk %4.2f -> %4.2f" % [
 		raw_steer, filt_steer, raw_th, filt_th, raw_brk, filt_brk
 	]
+
+
+func update_chassis_telemetry(imo_temps: Array, disc_temps: Array, surface_mu: float) -> void:
+	if not visible or _chassis_telem_label == null:
+		return
+	var fl_i := _format_imo(imo_temps, 0)
+	var fr_i := _format_imo(imo_temps, 1)
+	var rl_i := _format_imo(imo_temps, 2)
+	var rr_i := _format_imo(imo_temps, 3)
+	var d_fl := float(disc_temps[0]) if disc_temps.size() > 0 else 40.0
+	var d_fr := float(disc_temps[1]) if disc_temps.size() > 1 else 40.0
+	var d_rl := float(disc_temps[2]) if disc_temps.size() > 2 else 40.0
+	var d_rr := float(disc_temps[3]) if disc_temps.size() > 3 else 40.0
+	_chassis_telem_label.text = "Neumaticos I/M/O (C): FL %s | FR %s\n                      RL %s | RR %s\nDiscos (C): FL %3.0f | FR %3.0f | RL %3.0f | RR %3.0f | Surface Mu: %.2f" % [
+		fl_i, fr_i, rl_i, rr_i, d_fl, d_fr, d_rl, d_rr, surface_mu
+	]
+
+
+func _format_imo(imo_temps: Array, idx: int) -> String:
+	if idx >= imo_temps.size():
+		return "--/--/--"
+	var corner = imo_temps[idx]
+	if corner is Array and corner.size() >= 3:
+		return "%2.0f/%2.0f/%2.0f" % [float(corner[0]), float(corner[1]), float(corner[2])]
+	return "--/--/--"
 
 
 func _build_ui() -> void:
@@ -187,6 +264,7 @@ func _build_ui() -> void:
 
 	_build_tv_tab()
 	_build_gamepad_tab()
+	_build_chassis_tab()
 
 
 func _build_tv_tab() -> void:
@@ -568,3 +646,262 @@ func _on_save_gp_json_pressed() -> void:
 		ok = _gamepad.save_gamepad_config_to_json()
 	if _gp_status_label != null:
 		_gp_status_label.text = "Guardado en gamepad.json." if ok else "Error al guardar gamepad.json."
+
+
+func _build_chassis_tab() -> void:
+	var vbox := VBoxContainer.new()
+	vbox.name = "Chasis / Set-up"
+	vbox.add_theme_constant_override("separation", 5)
+	_tabs.add_child(vbox)
+
+	var preset_row := HBoxContainer.new()
+	preset_row.add_theme_constant_override("separation", 6)
+	vbox.add_child(preset_row)
+
+	_setup_dropdown = OptionButton.new()
+	_setup_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_setup_dropdown.focus_mode = Control.FOCUS_NONE
+	_setup_dropdown.item_selected.connect(_on_setup_selected)
+	preset_row.add_child(_setup_dropdown)
+
+	var btn_refresh := Button.new()
+	btn_refresh.text = "↻"
+	btn_refresh.tooltip_text = "Refrescar carpeta setup_presets/"
+	btn_refresh.focus_mode = Control.FOCUS_NONE
+	btn_refresh.pressed.connect(_refresh_setup_dropdown)
+	preset_row.add_child(btn_refresh)
+
+	var save_row := HBoxContainer.new()
+	save_row.add_theme_constant_override("separation", 6)
+	vbox.add_child(save_row)
+
+	_setup_name_edit = LineEdit.new()
+	_setup_name_edit.placeholder_text = "Nombre del preset..."
+	_setup_name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_setup_name_edit.text_submitted.connect(func(_t: String): _setup_name_edit.release_focus())
+	save_row.add_child(_setup_name_edit)
+
+	var btn_save := Button.new()
+	btn_save.text = "Guardar"
+	btn_save.focus_mode = Control.FOCUS_NONE
+	btn_save.pressed.connect(_on_setup_save_pressed)
+	save_row.add_child(btn_save)
+
+	var btn_save_as := Button.new()
+	btn_save_as.text = "Guardar Como"
+	btn_save_as.focus_mode = Control.FOCUS_NONE
+	btn_save_as.pressed.connect(_on_setup_save_as_pressed)
+	save_row.add_child(btn_save_as)
+
+	var btn_reset_base := Button.new()
+	btn_reset_base.text = "Reset a Baseline"
+	btn_reset_base.focus_mode = Control.FOCUS_NONE
+	btn_reset_base.pressed.connect(_on_setup_reset_baseline_pressed)
+	save_row.add_child(btn_reset_base)
+
+	for spec in CHASSIS_SLIDER_SPECS:
+		var k: String = spec["key"]
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		vbox.add_child(row)
+
+		var lbl := Label.new()
+		lbl.text = spec["label"]
+		lbl.custom_minimum_size = Vector2(150, 0)
+		lbl.add_theme_font_size_override("font_size", 12)
+		row.add_child(lbl)
+
+		var slider := HSlider.new()
+		slider.min_value = spec["min"]
+		slider.max_value = spec["max"]
+		slider.step = spec["step"]
+		slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		slider.focus_mode = Control.FOCUS_NONE
+		slider.value_changed.connect(_on_chassis_slider_changed.bind(k, spec["fmt"]))
+		row.add_child(slider)
+		_setup_sliders[k] = slider
+
+		var val_lbl := Label.new()
+		val_lbl.custom_minimum_size = Vector2(58, 0)
+		val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		val_lbl.add_theme_font_size_override("font_size", 12)
+		row.add_child(val_lbl)
+		_setup_val_labels[k] = val_lbl
+
+	var toggle_row := HBoxContainer.new()
+	toggle_row.add_theme_constant_override("separation", 12)
+	vbox.add_child(toggle_row)
+
+	_pinn_tire_check = CheckBox.new()
+	_pinn_tire_check.text = "PINN Tire (TeR_Tire)"
+	_pinn_tire_check.focus_mode = Control.FOCUS_NONE
+	_pinn_tire_check.toggled.connect(_on_pinn_tire_toggled)
+	toggle_row.add_child(_pinn_tire_check)
+
+	_regen_blend_check = CheckBox.new()
+	_regen_blend_check.text = "Brake Blending Regen"
+	_regen_blend_check.focus_mode = Control.FOCUS_NONE
+	_regen_blend_check.toggled.connect(_on_regen_blend_toggled)
+	toggle_row.add_child(_regen_blend_check)
+
+	_chassis_telem_label = Label.new()
+	_chassis_telem_label.text = "Neumaticos I/M/O (C): FL 58/58/58 | FR 58/58/58\n                      RL 58/58/58 | RR 58/58/58\nDiscos (C): FL  40 | FR  40 | RL  40 | RR  40 | Surface Mu: 1.50"
+	_chassis_telem_label.add_theme_font_size_override("font_size", 11)
+	vbox.add_child(_chassis_telem_label)
+
+	_setup_status_label = Label.new()
+	_setup_status_label.text = ""
+	_setup_status_label.add_theme_font_size_override("font_size", 11)
+	_setup_status_label.add_theme_color_override("font_color", Color(0.65, 0.95, 0.65))
+	vbox.add_child(_setup_status_label)
+
+
+func _get_car_config():
+	if _car != null:
+		return _car.get("config")
+	return null
+
+
+func _refresh_setup_dropdown() -> void:
+	if _setup_dropdown == null:
+		return
+	_setup_presets_cache = VehicleConfigScript.list_setup_presets()
+	_setup_dropdown.clear()
+	var sel_idx := 0
+	for i in range(_setup_presets_cache.size()):
+		var entry: Dictionary = _setup_presets_cache[i]
+		_setup_dropdown.add_item("%s (%s)" % [String(entry["name"]), String(entry["filename"])], i)
+		if String(entry["path"]) == _active_setup_path:
+			sel_idx = i
+	if not _setup_presets_cache.is_empty():
+		_setup_dropdown.select(sel_idx)
+		if _active_setup_path == "":
+			_active_setup_path = String(_setup_presets_cache[sel_idx]["path"])
+		if _setup_name_edit != null and not _setup_name_edit.has_focus():
+			_setup_name_edit.text = String(_setup_presets_cache[sel_idx]["name"])
+
+
+func _on_chassis_slider_changed(val: float, key: String, fmt: String) -> void:
+	if _syncing:
+		return
+	if _setup_val_labels.has(key):
+		(_setup_val_labels[key] as Label).text = fmt % val
+	if _car != null and _car.has_method("apply_live_setup_param"):
+		_car.apply_live_setup_param(key, val)
+	else:
+		var cfg = _get_car_config()
+		if cfg != null and cfg.has_method("apply_setup_params"):
+			cfg.apply_setup_params({key: val})
+
+
+func _on_pinn_tire_toggled(toggled_on: bool) -> void:
+	if _syncing:
+		return
+	TireModelScript.enable_neural_correction = toggled_on
+	if _car != null and _car.has_method("apply_live_setup_param"):
+		_car.apply_live_setup_param("pinn_tire_enabled", toggled_on)
+	if _setup_status_label != null:
+		_setup_status_label.text = "PINN Tire (TeR_Tire): %s" % ("ON" if toggled_on else "OFF")
+
+
+func _on_regen_blend_toggled(toggled_on: bool) -> void:
+	if _syncing:
+		return
+	if _car != null and _car.has_method("apply_live_setup_param"):
+		_car.apply_live_setup_param("regen_blending_enabled", toggled_on)
+	else:
+		var cfg = _get_car_config()
+		if cfg != null and cfg.has_method("apply_setup_params"):
+			cfg.apply_setup_params({"regen_blending_enabled": toggled_on})
+	if _setup_status_label != null:
+		_setup_status_label.text = "Brake Blending Regen: %s" % ("ON" if toggled_on else "OFF")
+
+
+func _on_setup_selected(idx: int) -> void:
+	if idx < 0 or idx >= _setup_presets_cache.size():
+		return
+	var entry: Dictionary = _setup_presets_cache[idx]
+	var path: String = String(entry["path"])
+	var data: Dictionary = VehicleConfigScript.load_setup_preset(path)
+	var params: Dictionary = data.get("params", entry.get("params", {}))
+	if params.is_empty():
+		return
+	if _car != null and _car.has_method("apply_setup_preset"):
+		_car.apply_setup_preset(params)
+	else:
+		var cfg = _get_car_config()
+		if cfg != null and cfg.has_method("apply_setup_params"):
+			cfg.apply_setup_params(params)
+	_active_setup_path = path
+	sync_from_setup()
+	if _setup_status_label != null:
+		_setup_status_label.text = "Cargado: %s" % String(entry["filename"])
+
+
+func _on_setup_save_pressed() -> void:
+	var cfg = _get_car_config()
+	if cfg == null or not cfg.has_method("save_setup_preset"):
+		return
+	var preset_name := _setup_name_edit.text.strip_edges() if _setup_name_edit != null else ""
+	var stem := _active_setup_path.get_file().get_basename() if _active_setup_path != "" else ""
+	if preset_name == "":
+		preset_name = stem if stem != "" else "custom_setup"
+	var saved: String = cfg.save_setup_preset(preset_name, "", stem)
+	if saved != "":
+		_active_setup_path = saved
+		_refresh_setup_dropdown()
+		if _setup_status_label != null:
+			_setup_status_label.text = "Guardado: " + saved.get_file()
+
+
+func _on_setup_save_as_pressed() -> void:
+	var cfg = _get_car_config()
+	if cfg == null or not cfg.has_method("save_setup_preset"):
+		return
+	var preset_name := _setup_name_edit.text.strip_edges() if _setup_name_edit != null else ""
+	if preset_name == "":
+		preset_name = "custom_setup_%d" % int(Time.get_unix_time_from_system())
+	var saved: String = cfg.save_setup_preset(preset_name, "", "")
+	if saved != "":
+		_active_setup_path = saved
+		_refresh_setup_dropdown()
+		if _setup_status_label != null:
+			_setup_status_label.text = "Nuevo set-up: " + saved.get_file()
+
+
+func _on_setup_reset_baseline_pressed() -> void:
+	var baseline_path := ""
+	for entry in _setup_presets_cache:
+		if String(entry["filename"]) == "00_baseline_ter27":
+			baseline_path = String(entry["path"])
+			break
+	if baseline_path == "":
+		baseline_path = VehicleConfigScript.get_setup_presets_dir().rstrip("/") + "/00_baseline_ter27.json"
+	var data: Dictionary = VehicleConfigScript.load_setup_preset(baseline_path)
+	var params: Dictionary = data.get("params", {})
+	if params.is_empty():
+		params = {
+			"spring_stiffness_front": 35000.0,
+			"spring_stiffness_rear": 48000.0,
+			"arb_stiffness_front": 4500.0,
+			"arb_stiffness_rear": 5500.0,
+			"static_camber_front_deg": -2.0,
+			"static_camber_rear_deg": -1.5,
+			"toe_front_deg": 0.0,
+			"toe_rear_deg": 0.0,
+			"brake_bias_front": 0.58,
+			"aero_balance_front": 0.48,
+			"regen_blending_enabled": true,
+			"static_ride_height_front": 0.035,
+			"static_ride_height_rear": 0.035
+		}
+	if _car != null and _car.has_method("apply_setup_preset"):
+		_car.apply_setup_preset(params)
+	else:
+		var cfg = _get_car_config()
+		if cfg != null and cfg.has_method("apply_setup_params"):
+			cfg.apply_setup_params(params)
+	_active_setup_path = baseline_path
+	sync_from_setup()
+	if _setup_status_label != null:
+		_setup_status_label.text = "Baseline TeR27 restaurado."

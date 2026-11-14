@@ -11,7 +11,7 @@ const VehicleTelemetry = preload("VehicleTelemetry.gd")
 
 const TELEMETRY_DIR: String = "user://telemetry/"
 const FLUSH_INTERVAL_SAMPLES: int = 50
-const CSV_HEADER: String = "time,dist_m,vx,vy,wz,wz_ref,beta_deg,ax,ay,steer_deg,gas,brake,map_id,mz_req,T_fl,T_fr,T_rl,T_rr,kappa_fl,kappa_fr,kappa_rl,kappa_rr,tire_temp_fl,tire_temp_fr,tire_temp_rl,tire_temp_rr,v_dc,i_dc,power_kw,energy_kwh,fz_fl,fz_fr,fz_rl,fz_rr"
+const CSV_HEADER: String = "time,dist_m,vx,vy,wz,wz_ref,beta_deg,ax,ay,steer_deg,gas,brake,map_id,mz_req,T_fl,T_fr,T_rl,T_rr,kappa_fl,kappa_fr,kappa_rl,kappa_rr,tire_temp_fl,tire_temp_fr,tire_temp_rl,tire_temp_rr,v_dc,i_dc,power_kw,energy_kwh,fz_fl,fz_fr,fz_rl,fz_rr,brake_bias_front,regen_blending_enabled,disc_temp_fl,disc_temp_fr,disc_temp_rl,disc_temp_rr,surface_mu_fl,surface_mu_fr,surface_mu_rl,surface_mu_rr,regen_power_kw"
 
 ## Target logging frequency in Hz (typically 100.0 - 200.0 Hz).
 var sample_rate_hz: float = 200.0:
@@ -174,6 +174,12 @@ func record_step(
 	var mz_req: float = float(tv_info["mz_req"])
 
 	var temps: Array[float] = VehicleTelemetry.extract_tire_temps(model, hv_merged)
+	var bs_info: Dictionary = VehicleTelemetry.extract_brake_and_surface_state(model, hv_merged)
+	var disc_temps: Array = bs_info["disc_temp"]
+	var surf_mus: Array = bs_info["surface_mu"]
+	var bias_front: float = float(bs_info["brake_bias_front"])
+	var regen_en_int: int = 1 if bool(bs_info["regen_blending_enabled"]) else 0
+	var regen_kw: float = float(bs_info["regen_power_kw"])
 
 	var t_vals: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	var k_vals: Array[float] = [0.0, 0.0, 0.0, 0.0]
@@ -197,10 +203,17 @@ func record_step(
 			k_vals[0], k_vals[1], k_vals[2], k_vals[3]
 		]
 	) + (
-		"%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.3f,%.5f,%.1f,%.1f,%.1f,%.1f" % [
+		"%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.3f,%.5f,%.1f,%.1f,%.1f,%.1f," % [
 			temps[0], temps[1], temps[2], temps[3],
 			float(hv["v_dc"]), float(hv["i_dc"]), float(hv["power_kw"]), float(hv["energy_kwh"]),
 			fz_vals[0], fz_vals[1], fz_vals[2], fz_vals[3]
+		]
+	) + (
+		"%.4f,%d,%.2f,%.2f,%.2f,%.2f,%.4f,%.4f,%.4f,%.4f,%.3f" % [
+			bias_front, regen_en_int,
+			float(disc_temps[0]), float(disc_temps[1]), float(disc_temps[2]), float(disc_temps[3]),
+			float(surf_mus[0]), float(surf_mus[1]), float(surf_mus[2]), float(surf_mus[3]),
+			regen_kw
 		]
 	)
 

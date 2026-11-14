@@ -98,6 +98,8 @@ var _syncing_compliance: bool = false
 @export var kpi_angle_deg: float = 10.0
 @export var static_camber_front_deg: float = -2.0
 @export var static_camber_rear_deg: float = -1.5
+@export var toe_front_deg: float = -0.15
+@export var toe_rear_deg: float = 0.20
 
 # Optimum Kinematics 1D tables stored internally as [[delta_z_m, angle_rad], ...]
 var camber_table_front: Array = []
@@ -131,7 +133,15 @@ var toe_table_rear: Array = []
 
 # --- Brakes ---
 @export var brake_mu: float = 1.30
-@export var brake_bias_front: float = 0.7659
+@export var brake_bias_front: float = 0.58
+@export var regen_blending_enabled: bool = true
+@export var p_max_charge_w: float = 25000.0
+@export var regen_min_speed_mps: float = 1.5
+@export var disc_ambient_temp_c: float = 40.0
+@export var disc_max_temp_c: float = 650.0
+@export var disc_thermal_mass_j_k: float = 1350.0
+@export var disc_conv_base_w_k: float = 12.0
+@export var disc_conv_speed_coeff: float = 1.8
 
 # --- Tires ---
 @export var wheel_radius: float = 0.2032
@@ -298,6 +308,8 @@ func _load_suspension_json(file_path: String) -> void:
 	var has_static_r: bool = d.has("static_camber_rear_deg")
 	static_camber_front_deg = float(d.get("static_camber_front_deg", static_camber_front_deg))
 	static_camber_rear_deg = float(d.get("static_camber_rear_deg", static_camber_rear_deg))
+	toe_front_deg = float(d.get("toe_front_deg", 0.0)) if d.has("toe_front_deg") else 0.0
+	toe_rear_deg = float(d.get("toe_rear_deg", 0.0)) if d.has("toe_rear_deg") else 0.0
 	camber_table_front = _load_camber_table(d, "camber_table_front_deg", "camber_gain_front_deg_per_10mm", static_camber_front_deg, has_static_f)
 	camber_table_rear = _load_camber_table(d, "camber_table_rear_deg", "camber_gain_rear_deg_per_10mm", static_camber_rear_deg, has_static_r)
 	toe_table_front = _parse_kinematic_table_deg(d.get("toe_table_front_deg", []))
@@ -414,7 +426,15 @@ func _load_brakes_json(file_path: String) -> void:
 	if d.is_empty():
 		return
 	brake_mu = float(d.get("brake_mu", brake_mu))
-	brake_bias_front = float(d.get("brake_bias_front", brake_bias_front))
+	brake_bias_front = clampf(float(d.get("brake_bias_front", brake_bias_front)), 0.0, 1.0)
+	regen_blending_enabled = bool(d.get("regen_blending_enabled", regen_blending_enabled))
+	p_max_charge_w = maxf(0.0, float(d.get("p_max_charge_w", p_max_charge_w)))
+	regen_min_speed_mps = maxf(0.0, float(d.get("regen_min_speed_mps", regen_min_speed_mps)))
+	disc_ambient_temp_c = float(d.get("disc_ambient_temp_c", disc_ambient_temp_c))
+	disc_max_temp_c = maxf(disc_ambient_temp_c + 10.0, float(d.get("disc_max_temp_c", disc_max_temp_c)))
+	disc_thermal_mass_j_k = maxf(1.0, float(d.get("disc_thermal_mass_j_k", disc_thermal_mass_j_k)))
+	disc_conv_base_w_k = maxf(0.0, float(d.get("disc_conv_base_w_k", disc_conv_base_w_k)))
+	disc_conv_speed_coeff = maxf(0.0, float(d.get("disc_conv_speed_coeff", disc_conv_speed_coeff)))
 
 func _load_aero_json(file_path: String) -> void:
 	var d = _read_json_file(file_path)
@@ -496,3 +516,173 @@ func get_static_axle_loads() -> Dictionary:
 		"wheel_rl": fz_rear_axle * 0.5,
 		"wheel_rr": fz_rear_axle * 0.5
 	}
+
+static func _sync_camber_table_static(table: Array, static_deg: float) -> Array:
+	var target_rad: float = deg_to_rad(static_deg)
+	if table.is_empty():
+		return [[0.0, target_rad]]
+	var base_zero_rad: float = _lookup_table_rad(table, 0.0)
+	var offset_rad: float = target_rad - base_zero_rad
+	if absf(offset_rad) > 1e-7:
+		for pt in table:
+			pt[1] = float(pt[1]) + offset_rad
+	return table
+
+static func _sanitize_preset_stem(raw_name: String) -> String:
+	var s := raw_name.strip_edges().to_lower()
+	if s.ends_with(".json"):
+		s = s.substr(0, s.length() - 5)
+	var out := ""
+	for i in range(s.length()):
+		var ch := s[i]
+		if (ch >= "a" and ch <= "z") or (ch >= "0" and ch <= "9"):
+			out += ch
+		elif ch == " " or ch == "-" or ch == "_":
+			if not out.ends_with("_"):
+				out += "_"
+	return out.trim_prefix("_").trim_suffix("_")
+
+## Returns the directory containing built-in mechanical setup preset JSON files.
+static func get_setup_presets_dir() -> String:
+	var candidates: Array[String] = [
+		"res://Scenes/Vehicle/Dynamics/Core/Config/setup_presets/",
+		"src/mirena_sim/Scenes/Vehicle/Dynamics/Core/Config/setup_presets/",
+		"Scenes/Vehicle/Dynamics/Core/Config/setup_presets/",
+		"Core/Config/setup_presets/"
+	]
+	for d in candidates:
+		var abs_d: String = ProjectSettings.globalize_path(d) if d.begins_with("res://") else d
+		if DirAccess.dir_exists_absolute(d) or DirAccess.dir_exists_absolute(abs_d):
+			return d
+	return "res://Scenes/Vehicle/Dynamics/Core/Config/setup_presets/"
+
+## Scans setup_presets/ and user://setup_presets/ for .json presets sorted alphabetically.
+static func list_setup_presets() -> Array[Dictionary]:
+	var entries: Array[Dictionary] = []
+	var seen_paths: Dictionary = {}
+	var dirs: Array[String] = [get_setup_presets_dir(), "user://setup_presets/"]
+	for dir_path in dirs:
+		var norm_dir: String = dir_path.rstrip("/") + "/"
+		var d := DirAccess.open(norm_dir)
+		if d == null:
+			continue
+		d.list_dir_begin()
+		var fname: String = d.get_next()
+		while fname != "":
+			if not d.current_is_dir() and fname.to_lower().ends_with(".json"):
+				var full_path: String = norm_dir + fname
+				if not seen_paths.has(full_path):
+					seen_paths[full_path] = true
+					var meta: Dictionary = load_setup_preset(full_path)
+					var base_name: String = fname.get_basename()
+					var params: Dictionary = meta.get("params", {}) if (meta.get("params") is Dictionary) else {}
+					entries.append({
+						"name": String(meta.get("name", base_name)),
+						"description": String(meta.get("description", "")),
+						"path": full_path,
+						"filename": base_name,
+						"params": params
+					})
+			fname = d.get_next()
+		d.list_dir_end()
+	entries.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return String(a["path"]).get_file() < String(b["path"]).get_file()
+	)
+	return entries
+
+## Returns the 10 key mechanical setup parameters plus regen/ride-height options.
+func get_setup_params() -> Dictionary:
+	return {
+		"spring_stiffness_front": spring_stiffness_front,
+		"spring_stiffness_rear": spring_stiffness_rear,
+		"arb_stiffness_front": arb_stiffness_front,
+		"arb_stiffness_rear": arb_stiffness_rear,
+		"static_camber_front_deg": static_camber_front_deg,
+		"static_camber_rear_deg": static_camber_rear_deg,
+		"toe_front_deg": toe_front_deg,
+		"toe_rear_deg": toe_rear_deg,
+		"brake_bias_front": brake_bias_front,
+		"aero_balance_front": aero_balance_front,
+		"regen_blending_enabled": regen_blending_enabled,
+		"static_ride_height_front": static_ride_height_front,
+		"static_ride_height_rear": static_ride_height_rear
+	}
+
+## Applies mechanical setup parameters in-place and updates derived geometry.
+func apply_setup_params(params: Dictionary) -> void:
+	var p: Dictionary = params
+	if params.has("params") and params["params"] is Dictionary:
+		p = params["params"]
+	if p.has("spring_stiffness_front"):
+		spring_stiffness_front = maxf(1000.0, float(p["spring_stiffness_front"]))
+	if p.has("spring_stiffness_rear"):
+		spring_stiffness_rear = maxf(1000.0, float(p["spring_stiffness_rear"]))
+	if p.has("arb_stiffness_front"):
+		arb_stiffness_front = maxf(0.0, float(p["arb_stiffness_front"]))
+	if p.has("arb_stiffness_rear"):
+		arb_stiffness_rear = maxf(0.0, float(p["arb_stiffness_rear"]))
+	if p.has("static_camber_front_deg"):
+		static_camber_front_deg = clampf(float(p["static_camber_front_deg"]), -10.0, 5.0)
+		camber_table_front = _sync_camber_table_static(camber_table_front, static_camber_front_deg)
+	if p.has("static_camber_rear_deg"):
+		static_camber_rear_deg = clampf(float(p["static_camber_rear_deg"]), -10.0, 5.0)
+		camber_table_rear = _sync_camber_table_static(camber_table_rear, static_camber_rear_deg)
+	if p.has("toe_front_deg"):
+		toe_front_deg = clampf(float(p["toe_front_deg"]), -5.0, 5.0)
+	if p.has("toe_rear_deg"):
+		toe_rear_deg = clampf(float(p["toe_rear_deg"]), -5.0, 5.0)
+	if p.has("brake_bias_front"):
+		brake_bias_front = clampf(float(p["brake_bias_front"]), 0.0, 1.0)
+	if p.has("aero_balance_front"):
+		aero_balance_front = clampf(float(p["aero_balance_front"]), 0.0, 1.0)
+		_has_explicit_axle_cl = false
+	if p.has("regen_blending_enabled"):
+		regen_blending_enabled = bool(p["regen_blending_enabled"])
+	if p.has("static_ride_height_front"):
+		static_ride_height_front = maxf(0.001, float(p["static_ride_height_front"]))
+	if p.has("static_ride_height_rear"):
+		static_ride_height_rear = maxf(0.001, float(p["static_ride_height_rear"]))
+	update_derived_geometry()
+
+## Loads and parses a setup preset JSON file.
+static func load_setup_preset(path: String) -> Dictionary:
+	if path == "" or not FileAccess.file_exists(path):
+		return {}
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return {}
+	var parsed = JSON.parse_string(f.get_as_text())
+	f.close()
+	if parsed is Dictionary:
+		return parsed
+	return {}
+
+## Saves current mechanical setup parameters to setup_presets/ (or user://setup_presets/ fallback).
+func save_setup_preset(preset_name: String, description: String = "", file_stem: String = "") -> String:
+	var stem: String = _sanitize_preset_stem(file_stem if file_stem.strip_edges() != "" else preset_name)
+	if stem == "":
+		stem = "custom_setup_%d" % int(Time.get_unix_time_from_system())
+	var display_name: String = preset_name.strip_edges()
+	if display_name == "":
+		display_name = stem
+	var payload: Dictionary = {
+		"name": display_name,
+		"description": description,
+		"author": "TeR27 Vehicle Dynamics",
+		"params": get_setup_params()
+	}
+	var json_text: String = JSON.stringify(payload, "\t") + "\n"
+	var res_dir: String = get_setup_presets_dir().rstrip("/") + "/"
+	var abs_res_dir: String = ProjectSettings.globalize_path(res_dir) if res_dir.begins_with("res://") else res_dir
+	DirAccess.make_dir_recursive_absolute(abs_res_dir)
+	var target_path: String = res_dir + stem + ".json"
+	var f := FileAccess.open(target_path, FileAccess.WRITE)
+	if f == null:
+		DirAccess.make_dir_recursive_absolute("user://setup_presets")
+		target_path = "user://setup_presets/" + stem + ".json"
+		f = FileAccess.open(target_path, FileAccess.WRITE)
+	if f == null:
+		return ""
+	f.store_string(json_text)
+	f.close()
+	return target_path

@@ -18,6 +18,7 @@ const SuspensionCorner = preload("../Suspension/SuspensionCorner.gd")
 const SuspensionSystem = preload("../Suspension/SuspensionSystem.gd")
 const AeroModel = preload("../Aerodynamics/AeroModel.gd")
 const ChassisDynamics = preload("../Chassis/ChassisDynamics.gd")
+const BrakeModel = preload("../Brakes/BrakeModel.gd")
 
 var config: VehicleConfig
 var wheels: Array[WheelDynamics] = []
@@ -25,6 +26,7 @@ var suspension: SuspensionSystem
 var torque_vectoring: TorqueVectoring
 var ecu_tv_v3: EcuTorqueVectoringV3
 var hv_state: DrivetrainModel.HVPowertrainState
+var brake_state: BrakeModel.BrakeState
 var _prev_ax_ros: float = 0.0
 var chassis_state: ChassisDynamics.State6DOF
 var inputs: VehicleInputs
@@ -57,6 +59,7 @@ func _init(cfg: VehicleConfig = null) -> void:
 	torque_vectoring = TorqueVectoring.new()
 	ecu_tv_v3 = EcuTorqueVectoringV3.new()
 	hv_state = DrivetrainModel.HVPowertrainState.new(config)
+	brake_state = BrakeModel.BrakeState.new(config.disc_ambient_temp_c)
 	chassis_state = ChassisDynamics.State6DOF.new(config.h_cog)
 	_init_wheels()
 
@@ -249,6 +252,22 @@ func step_forces(
 			wheels[i].is_grounded = true
 			toe_offsets[i] = SuspensionSystem.compute_corner_toe_iso(0.0, i < 2, wheels[i].is_right_side, config)
 	
+	# 2b. Blended Hydraulic + Regenerative Braking & 1-Node Disc Thermal Update
+	var brake_res: Dictionary = BrakeModel.compute_blended_braking(
+		in_inputs,
+		config,
+		brake_state,
+		w_omegas,
+		normal_forces,
+		u,
+		dt if advance_tv else 0.0,
+		hv_state
+	)
+	if brake_res.has("total_torques"):
+		var blended_trqs: Array = brake_res["total_torques"]
+		for i in range(4):
+			brake_trqs[i] = float(blended_trqs[i])
+
 	# 3. Kinematics, Slips, Forces and Wheel Spin per Wheel
 	var steer_angle = in_inputs.steer_angle
 	var total_wheel_force_ros = Vector3.ZERO
@@ -262,6 +281,12 @@ func step_forces(
 		var r_pos: Vector3 = get_wheel_pos_ros(i)
 		if ground_contacts.size() >= 4 and ground_contacts[i] is Dictionary:
 			r_pos = ground_contacts[i].get("r_pos_ros", r_pos)
+			if ground_contacts[i].has("surface_mu"):
+				w.surface_mu_scale = float(ground_contacts[i]["surface_mu"])
+			else:
+				w.surface_mu_scale = 1.0
+		else:
+			w.surface_mu_scale = 1.0
 		var v_hub = local_v_ros + local_w_ros.cross(r_pos)
 		w.v_hub_chassis = v_hub
 		
@@ -357,7 +382,10 @@ func step_forces(
 		"wz_ref": ecu_tv_v3.last_wz_ref if ecu_tv_v3 != null else 0.0,
 		"z_front": z_front_dyn,
 		"z_rear": z_rear_dyn,
-		"aero_front_stalled": bool(aero.get("front_stalled", false))
+		"aero_front_stalled": bool(aero.get("front_stalled", false)),
+		"disc_temps": brake_state.disc_temp.duplicate() if brake_state != null else [40.0, 40.0, 40.0, 40.0],
+		"regen_power_kw": (brake_state.p_regen_w / 1000.0) if brake_state != null else 0.0,
+		"surface_mu": [wheels[0].surface_mu_scale, wheels[1].surface_mu_scale, wheels[2].surface_mu_scale, wheels[3].surface_mu_scale]
 	}
 
 ## Unified 14-DOF standalone step (6-DOF Rigid-Body Chassis via RK2 Heun + 4 Wheels + 4 Suspension Corners).

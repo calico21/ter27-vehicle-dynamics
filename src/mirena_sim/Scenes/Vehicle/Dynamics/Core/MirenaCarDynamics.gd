@@ -134,6 +134,7 @@ var ffb_torque_nm: float = 0.0
 var _hud_layer: CanvasLayer = null
 var _hud_label: Label = null
 var _tv_overlay: TvLiveTuningOverlayScript = null
+var _last_step_res: Dictionary = {}
 
 var slam_cones: Array = []
 var hit_cones: Array = []
@@ -417,20 +418,31 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 			delta_z_dot[i] = 0.0
 	
 	# 4. Build ground contacts in ISO/ROS frame and delegate suspension + tire physics to VehicleDynamicsModel
+	var track_node: Node = null
+	var sim_root: Node = get_node_or_null("/root/Sim")
+	if sim_root != null and "track" in sim_root and sim_root.get("track") != null:
+		track_node = sim_root.get("track")
+	elif get_parent() != null and get_parent().has_node("Track"):
+		track_node = get_parent().get_node("Track")
 	var ground_contacts: Array = []
 	for i in range(4):
 		var r_pos_ros: Vector3 = model.get_wheel_pos_ros(i)
+		var surface_mu_i: float = 1.0
 		if grounded[i]:
 			var r_from_com_world: Vector3 = hit_pts[i] - (state.transform.origin + state.center_of_mass)
 			r_pos_ros = VehicleConfigScript.godot_to_ros_vec(inv_basis * r_from_com_world)
+			if track_node != null and track_node.has_method("get_surface_mu_at"):
+				surface_mu_i = float(track_node.call("get_surface_mu_at", hit_pts[i]))
 		ground_contacts.append({
 			"grounded": grounded[i],
 			"delta_z": delta_z[i],
 			"delta_z_dot": delta_z_dot[i],
-			"r_pos_ros": r_pos_ros
+			"r_pos_ros": r_pos_ros,
+			"surface_mu": surface_mu_i
 		})
 	
 	var step_res: Dictionary = model.step_forces(inputs, local_v_ros, local_w_ros, ground_contacts, dt)
+	_last_step_res = step_res
 	if model.ecu_tv_v3 != null:
 		tv_vy_est = model.ecu_tv_v3.ekf_x[0]
 		tv_beta_est_deg = rad_to_deg(model.ecu_tv_v3.ekf_beta_est)
@@ -564,6 +576,109 @@ func set_live_gamepad_param(key: String, val: float) -> void:
 
 func save_gamepad_config_to_json(path: String = "res://Scenes/Vehicle/Dynamics/Core/Config/gamepad.json") -> bool:
 	return gamepad.save_gamepad_config_to_json(path)
+
+func get_setup_params() -> Dictionary:
+	if config == null:
+		return {}
+	return config.get_setup_params()
+
+func apply_live_setup_param(key: String, val: Variant) -> void:
+	if key == "pinn_tire_enabled":
+		TireModelScript.enable_neural_correction = bool(val)
+		return
+	if config == null:
+		return
+	config.apply_setup_params({key: val})
+	_sync_setup_to_model()
+
+func apply_setup_preset(params: Dictionary) -> void:
+	if config == null:
+		return
+	config.apply_setup_params(params)
+	_sync_setup_to_model()
+
+func _sync_setup_to_model() -> void:
+	if config == null:
+		return
+	if model != null and model.suspension != null:
+		model.suspension.sync_from_config(config)
+	mass = config.mass
+	inertia = Vector3(config.iyy, config.get_total_izz(), config.ixx)
+
+func _collect_imo_temps() -> Array:
+	var out: Array = []
+	if model == null:
+		return out
+	for i in range(mini(4, model.wheels.size())):
+		var w = model.wheels[i]
+		out.append([w.t_zone_inner_c, w.t_zone_mid_c, w.t_zone_outer_c])
+	return out
+
+func _collect_disc_temps() -> Array[float]:
+	var amb: float = config.disc_ambient_temp_c if config != null else 40.0
+	var out: Array[float] = [amb, amb, amb, amb]
+	for k in ["disc_temps_c", "disc_temps", "disc_temp", "brake_disc_temps"]:
+		if _last_step_res.has(k) and _last_step_res[k] is Array:
+			var arr: Array = _last_step_res[k]
+			for i in range(mini(4, arr.size())):
+				out[i] = float(arr[i])
+			return out
+	if model != null:
+		var b_state = model.get("brake_state")
+		if b_state != null:
+			var bs_temps = b_state.get("disc_temp")
+			if bs_temps is Array and bs_temps.size() >= 4:
+				for i in range(4):
+					out[i] = float(bs_temps[i])
+				return out
+		var m_discs = model.get("brake_disc_temps")
+		if m_discs is Array and m_discs.size() >= 4:
+			for i in range(4):
+				out[i] = float(m_discs[i])
+			return out
+		for i in range(mini(4, model.wheels.size())):
+			var w = model.wheels[i]
+			var dt_val = w.get("disc_temp_c")
+			if dt_val == null:
+				dt_val = w.get("brake_disc_temp_c")
+			if dt_val != null:
+				out[i] = float(dt_val)
+	if telemetry != null and telemetry.get("disc_temp") is Array:
+		var t_discs: Array = telemetry.get("disc_temp")
+		for i in range(mini(4, t_discs.size())):
+			out[i] = float(t_discs[i])
+	return out
+
+func _get_active_surface_mu() -> float:
+	if _last_step_res.has("surface_mu"):
+		var s_mu = _last_step_res["surface_mu"]
+		if s_mu is Array and s_mu.size() > 0:
+			var sum_mu: float = 0.0
+			for v in s_mu:
+				sum_mu += float(v)
+			return sum_mu / float(s_mu.size())
+		return float(s_mu)
+	if model != null:
+		var m_mu = model.get("surface_mu")
+		if m_mu != null:
+			return float(m_mu)
+		if model.wheels.size() >= 4:
+			var sum_w: float = 0.0
+			var has_w_mu := false
+			for w in model.wheels:
+				var w_mu = w.get("surface_mu_scale")
+				if w_mu == null:
+					w_mu = w.get("surface_mu")
+				if w_mu != null:
+					has_w_mu = true
+					sum_w += float(w_mu)
+			if has_w_mu:
+				return sum_w / float(model.wheels.size())
+	if model != null and model.ecu_tv_v3 != null and tv_mu_est.size() >= 4:
+		return 0.25 * (tv_mu_est[0] + tv_mu_est[1] + tv_mu_est[2] + tv_mu_est[3])
+	if config != null:
+		return config.surface_grip_scale
+	return 1.0
 
 func _stop_all_joy_vibration() -> void:
 	for joy_id in Input.get_connected_joypads():
@@ -884,6 +999,8 @@ func _update_minimal_hud() -> void:
 	if _tv_overlay != null and model != null:
 		_tv_overlay.update_telemetry(tv_wz_ref, model.angular_velocity_ros.z, tv_beta_est_deg, tv_mz_req, tv_tc_active)
 		_tv_overlay.update_input_telemetry(_raw_steer_in, _steer_smoothed, _raw_throttle_in, self.gas, _raw_brake_in, self.brake)
+		if _tv_overlay.has_method("update_chassis_telemetry"):
+			_tv_overlay.update_chassis_telemetry(_collect_imo_temps(), _collect_disc_temps(), _get_active_surface_mu())
 	if _hud_label == null:
 		return
 	var kmh: float = linear_velocity.length() * 3.6
@@ -932,6 +1049,7 @@ func reset_position() -> void:
 	cone_hit.emit(0)
 	
 	model.reset()
+	_last_step_res.clear()
 	if wheel_ffb != null:
 		wheel_ffb.reset()
 	if telemetry_recorder != null and telemetry_recorder.is_recording:

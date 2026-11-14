@@ -1,0 +1,20 @@
+{
+	"name": "Baseline TeR27",
+	"description": "Configuracion base actual del TeR27 (muelles, ARB, camber, aero y reparto de frenada 58/42)",
+	"author": "TeR27 Vehicle Dynamics",
+	"params": {
+		"spring_stiffness_front": 35000.0,
+		"spring_stiffness_rear": 48000.0,
+		"arb_stiffness_front": 4500.0,
+		"arb_stiffness_rear": 5500.0,
+		"static_camber_front_deg": -2.0,
+		"static_camber_rear_deg": -1.5,
+		"toe_front_deg": 0.0,
+		"toe_rear_deg": 0.0,
+		"brake_bias_front": 0.58,
+		"aero_balance_front": 0.48,
+		"regen_blending_enabled": true,
+		"static_ride_height_front": 0.035,
+		"static_ride_height_rear": 0.035
+	}
+}

@@ -367,5 +367,40 @@
 	  { "x": -0.007, "y": 19.0 },
 	  { "x": 0.0, "y": 20.0 }
 	]
+  },
+  "surface_grip": {
+	"default_mu_scale": 0.86,
+	"zones": [
+	  {
+		"name": "skidpad_right_circle",
+		"type": "annulus",
+		"cx": 0.0,
+		"cz": -9.25,
+		"inner_radius": 7.6,
+		"outer_radius": 10.6,
+		"mu_scale": 1.0,
+		"feather_m": 1.0
+	  },
+	  {
+		"name": "skidpad_left_circle",
+		"type": "annulus",
+		"cx": 0.0,
+		"cz": 9.25,
+		"inner_radius": 7.6,
+		"outer_radius": 10.6,
+		"mu_scale": 1.0,
+		"feather_m": 1.0
+	  },
+	  {
+		"name": "skidpad_center_corridor",
+		"type": "rect",
+		"min_x": -21.5,
+		"max_x": 15.5,
+		"min_z": -1.7,
+		"max_z": 1.7,
+		"mu_scale": 1.0,
+		"feather_m": 1.0
+	  }
+	]
   }
 }

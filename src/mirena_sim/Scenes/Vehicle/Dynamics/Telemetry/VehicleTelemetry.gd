@@ -51,6 +51,13 @@ var i_dc: float = 0.0
 var power_kw: float = 0.0
 var energy_kwh: float = 0.0
 
+# Brake Blending, Disc Thermal & Surface Grip Telemetry
+var brake_bias_front: float = 0.58
+var regen_blending_enabled: bool = true
+var disc_temp: Array[float] = [40.0, 40.0, 40.0, 40.0]
+var surface_mu: Array[float] = [1.0, 1.0, 1.0, 1.0]
+var regen_power_kw: float = 0.0
+
 ## Resets all telemetry fields to nominal resting defaults.
 func reset() -> void:
 	timestamp = 0.0
@@ -72,6 +79,9 @@ func reset() -> void:
 	i_dc = 0.0
 	power_kw = 0.0
 	energy_kwh = 0.0
+	brake_bias_front = 0.58
+	regen_blending_enabled = true
+	regen_power_kw = 0.0
 	for i in range(4):
 		wheel_omega[i] = 0.0
 		drive_torques[i] = 0.0
@@ -82,6 +92,8 @@ func reset() -> void:
 		tire_kappa[i] = 0.0
 		tire_alpha[i] = 0.0
 		tire_temp[i] = 25.0
+		disc_temp[i] = 40.0
+		surface_mu[i] = 1.0
 
 ## Computes chassis sideslip angle in degrees from body velocities (ISO +X fwd, +Y left).
 static func compute_beta_deg(vx_mps: float, vy_mps: float) -> float:
@@ -251,6 +263,75 @@ static func extract_hv_state(
 	var e_kwh_fb: float = prev_energy_kwh + (p_kw_fb * maxf(dt, 0.0) / 3600.0)
 	return {"v_dc": v_dc_fb, "i_dc": i_dc_fb, "power_kw": p_kw_fb, "energy_kwh": e_kwh_fb, "authoritative": false}
 
+## Safely extracts brake blending, disc temperatures, and per-wheel surface grip from model or step_result.
+static func extract_brake_and_surface_state(model: VehicleDynamicsModel, extra: Dictionary = {}) -> Dictionary:
+	var forces_data: Dictionary = extra.get("forces", {}) if extra.get("forces") is Dictionary else {}
+	var bias_val: float = 0.58
+	if extra.has("brake_bias_front"):
+		bias_val = float(extra["brake_bias_front"])
+	elif forces_data.has("brake_bias_front"):
+		bias_val = float(forces_data["brake_bias_front"])
+	elif model != null and model.config != null:
+		bias_val = float(model.config.brake_bias_front)
+
+	var regen_en: bool = true
+	if extra.has("regen_blending_enabled"):
+		regen_en = bool(extra["regen_blending_enabled"])
+	elif forces_data.has("regen_blending_enabled"):
+		regen_en = bool(forces_data["regen_blending_enabled"])
+	elif model != null and model.config != null:
+		var cfg_regen: Variant = model.config.get("regen_blending_enabled")
+		if typeof(cfg_regen) == TYPE_BOOL:
+			regen_en = bool(cfg_regen)
+
+	var brake_state_obj: Variant = extra.get("brake_state", forces_data.get("brake_state", null))
+	if brake_state_obj == null and model != null and "brake_state" in model:
+		brake_state_obj = model.get("brake_state")
+
+	var disc_temps_out: Array[float] = [40.0, 40.0, 40.0, 40.0]
+	var dt_arr: Variant = extra.get("disc_temps", extra.get("disc_temp", forces_data.get("disc_temps", forces_data.get("disc_temp", null))))
+	if dt_arr is Array and dt_arr.size() >= 4:
+		for i in range(4):
+			disc_temps_out[i] = float(dt_arr[i])
+	elif brake_state_obj != null:
+		var bs_temps: Variant = brake_state_obj.get("disc_temp", null) if brake_state_obj is Dictionary else brake_state_obj.get("disc_temp")
+		if bs_temps is Array and bs_temps.size() >= 4:
+			for i in range(4):
+				disc_temps_out[i] = float(bs_temps[i])
+
+	var regen_kw: float = 0.0
+	if extra.has("regen_power_kw"):
+		regen_kw = float(extra["regen_power_kw"])
+	elif forces_data.has("regen_power_kw"):
+		regen_kw = float(forces_data["regen_power_kw"])
+	elif extra.has("p_regen_w"):
+		regen_kw = float(extra["p_regen_w"]) * 0.001
+	elif forces_data.has("p_regen_w"):
+		regen_kw = float(forces_data["p_regen_w"]) * 0.001
+	elif brake_state_obj != null:
+		var p_reg_raw: Variant = brake_state_obj.get("p_regen_w", null) if brake_state_obj is Dictionary else brake_state_obj.get("p_regen_w")
+		if typeof(p_reg_raw) == TYPE_FLOAT or typeof(p_reg_raw) == TYPE_INT:
+			regen_kw = float(p_reg_raw) * 0.001
+
+	var surf_mu_out: Array[float] = [1.0, 1.0, 1.0, 1.0]
+	var sm_arr: Variant = extra.get("surface_mu", extra.get("surface_mus", forces_data.get("surface_mu", forces_data.get("surface_mus", null))))
+	if sm_arr is Array and sm_arr.size() >= 4:
+		for i in range(4):
+			surf_mu_out[i] = float(sm_arr[i])
+	elif model != null:
+		for i in range(mini(4, model.wheels.size())):
+			var w = model.wheels[i]
+			if w != null and "surface_mu" in w:
+				surf_mu_out[i] = float(w.get("surface_mu"))
+
+	return {
+		"brake_bias_front": bias_val,
+		"regen_blending_enabled": regen_en,
+		"disc_temp": disc_temps_out,
+		"surface_mu": surf_mu_out,
+		"regen_power_kw": regen_kw,
+	}
+
 ## Updates telemetry fields directly from the simulated vehicle model.
 func update_from_model(model: VehicleDynamicsModel, linear_accel_ros: Vector3, steer_rad: float, last_step_data: Dictionary = {}) -> void:
 	vx = model.linear_velocity_ros.x
@@ -297,6 +378,13 @@ func update_from_model(model: VehicleDynamicsModel, linear_accel_ros: Vector3, s
 	power_kw = float(hv_info["power_kw"])
 	energy_kwh = float(hv_info["energy_kwh"])
 
+	var bs_info: Dictionary = extract_brake_and_surface_state(model, last_step_data)
+	brake_bias_front = float(bs_info["brake_bias_front"])
+	regen_blending_enabled = bool(bs_info["regen_blending_enabled"])
+	disc_temp = bs_info["disc_temp"]
+	surface_mu = bs_info["surface_mu"]
+	regen_power_kw = float(bs_info["regen_power_kw"])
+
 ## Formats telemetry as a Dictionary matching CSV columns for validation scripts.
 func to_dict() -> Dictionary:
 	return {
@@ -322,5 +410,12 @@ func to_dict() -> Dictionary:
 		"alpha_rl": tire_alpha[2], "alpha_rr": tire_alpha[3],
 		"tire_temp_fl": tire_temp[0], "tire_temp_fr": tire_temp[1],
 		"tire_temp_rl": tire_temp[2], "tire_temp_rr": tire_temp[3],
-		"v_dc": v_dc, "i_dc": i_dc, "power_kw": power_kw, "energy_kwh": energy_kwh
+		"v_dc": v_dc, "i_dc": i_dc, "power_kw": power_kw, "energy_kwh": energy_kwh,
+		"brake_bias_front": brake_bias_front,
+		"regen_blending_enabled": regen_blending_enabled,
+		"disc_temp_fl": disc_temp[0], "disc_temp_fr": disc_temp[1],
+		"disc_temp_rl": disc_temp[2], "disc_temp_rr": disc_temp[3],
+		"surface_mu_fl": surface_mu[0], "surface_mu_fr": surface_mu[1],
+		"surface_mu_rl": surface_mu[2], "surface_mu_rr": surface_mu[3],
+		"regen_power_kw": regen_power_kw
 	}

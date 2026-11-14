@@ -100,6 +100,7 @@ var t_zone_mid_c: float = THERM_INIT_C
 var t_zone_outer_c: float = THERM_INIT_C
 var t_track_c: float = THERM_TRACK_DEFAULT_C
 var thermal_mu_factor: float = 1.0
+var surface_mu_scale: float = 1.0
 var slip_power_w: float = 0.0
 
 static func _cfg_float(config: VehicleConfig, prop: String, default_val: float) -> float:
@@ -209,7 +210,9 @@ func compute_forces(normal_force: float, config: VehicleConfig) -> void:
 		v_longitudinal,
 		TireModel.enable_neural_correction,
 		is_right_side,
-		thermal_mu_factor
+		thermal_mu_factor,
+		t_surf_c,
+		surface_mu_scale
 	)
 	
 	F_x = tire_res["Fx"]
@@ -397,4 +400,5 @@ func reset() -> void:
 	t_zone_outer_c = THERM_INIT_C
 	t_track_c = THERM_TRACK_DEFAULT_C
 	thermal_mu_factor = 1.0
+	surface_mu_scale = 1.0
 	slip_power_w = 0.0
