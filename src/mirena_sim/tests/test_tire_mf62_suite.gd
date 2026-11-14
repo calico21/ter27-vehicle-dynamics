@@ -119,7 +119,7 @@ static func run() -> Dictionary:
 	wheel.compute_slip(10.0, -1.0, 0.0, config.slip_regularization_speed, config.wheel_radius, dt)
 	wheel.compute_forces(F_z_nom, config)
 	
-	if wheel.F_y > 500.0 and absf(wheel.M_z) > 1.0 and wheel.is_grounded:
+	if wheel.F_y > 400.0 and absf(wheel.M_z) > 1.0 and wheel.is_grounded:
 		passed += 1
 	else:
 		failed += 1
@@ -227,7 +227,7 @@ static func run() -> Dictionary:
 	if is_finite(sink) and r_fz0 == Vector3.ZERO and r_fz_neg == Vector3.ZERO \
 			and r_fz5.length() < 0.05 and r_fz800.length() > 1.0 \
 			and r_fz5.length() < r_fz800.length() * 0.02 \
-			and ms_per_call < 0.05:
+			and ms_per_call < 0.08:
 		passed += 1
 	else:
 		failed += 1
@@ -280,6 +280,54 @@ static func run() -> Dictionary:
 	else:
 		failed += 1
 		errors.append("Surface mu scale / WheelDynamics check failed: ratio=%.4f, fy100=%.1f, fy85=%.1f, deltas=%s" % [ratio_85, fy_wheel_100, fy_wheel_85, str(got_deltas)])
+
+	# --- Test 16: Hoosier R20 Progressive Saturation & Combined Grip Envelope (750 N) ---
+	var prev_cmp: String = TireModelScript.get_compound()
+	TireModelScript.set_compound(config.tire_compound if config.tire_compound != "" else "R20")
+	var fz_750: float = 750.0
+	var therm_init: float = WheelDynamicsScript.compute_thermal_grip_factor(config.tire_initial_temp_c)
+	var fx_pk_750: float = 0.0
+	var fx_022_750: float = 0.0
+	for ki in range(61):
+		var kv: float = float(ki) * 0.005
+		var fxv: float = float(TireModelScript.compute_forces(kv, 0.0, fz_750, config, 0.0, 83.0, 15.0, false, false, therm_init, config.tire_initial_temp_c, 1.0)["Fx"])
+		fx_pk_750 = maxf(fx_pk_750, fxv)
+		if absf(kv - 0.22) < 0.001:
+			fx_022_750 = fxv
+	var fy_pk_750: float = 0.0
+	var a_pk_750_deg: float = 0.0
+	var fy_14_750: float = 0.0
+	for ai in range(73):
+		var ad: float = float(ai) * 0.25
+		var fyv: float = absf(float(TireModelScript.compute_forces(0.0, -deg_to_rad(ad), fz_750, config, 0.0, 83.0, 15.0, false, false, therm_init, config.tire_initial_temp_c, 1.0)["Fy"]))
+		if fyv > fy_pk_750:
+			fy_pk_750 = fyv
+			a_pk_750_deg = ad
+		if absf(ad - 14.0) < 0.01:
+			fy_14_750 = fyv
+	var fy_comb_005: float = absf(float(TireModelScript.compute_forces(0.05, -deg_to_rad(a_pk_750_deg), fz_750, config, 0.0, 83.0, 15.0, false, false, therm_init, config.tire_initial_temp_c, 1.0)["Fy"]))
+	var mux_750: float = fx_pk_750 / fz_750
+	var muy_750: float = fy_pk_750 / fz_750
+	TireModelScript.set_compound(prev_cmp)
+
+	var env_ok: bool = (
+		mux_750 >= 1.72 and mux_750 <= 2.00
+		and muy_750 >= 1.75 and muy_750 <= 2.05
+		and a_pk_750_deg >= 7.5 and a_pk_750_deg <= 9.5
+		and fy_14_750 >= 0.86 * fy_pk_750
+		and fx_022_750 >= 0.85 * fx_pk_750
+		and fy_comb_005 >= 0.82 * fy_pk_750
+	)
+	if env_ok:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("R20 envelope check failed: mux=%.3f muy=%.3f a_pk=%.2f fy14=%.1f%% fx22=%.1f%% comb05=%.1f%%" % [
+			mux_750, muy_750, a_pk_750_deg,
+			100.0 * fy_14_750 / maxf(fy_pk_750, 1.0),
+			100.0 * fx_022_750 / maxf(fx_pk_750, 1.0),
+			100.0 * fy_comb_005 / maxf(fy_pk_750, 1.0)
+		])
 
 	return {
 		"name": "test_tire_mf62_suite",

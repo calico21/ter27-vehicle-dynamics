@@ -154,7 +154,8 @@ var toe_table_rear: Array = []
 @export var slip_regularization_speed: float = 0.5
 @export var tire_vertical_stiffness: float = 115000.0
 @export var track_temp_c: float = 28.0
-@export var tire_initial_temp_c: float = 58.0
+@export var tire_initial_temp_c: float = 55.0
+@export var tire_compound: String = "R20"
 ## Canonical MF 6.2 friction scaling factors (Calspan TTC belt -> real asphalt track grip).
 @export var lambda_mux: float = 0.95
 @export var lambda_muy: float = 0.90
@@ -379,6 +380,7 @@ func _load_tires_json(file_path: String) -> void:
 	tire_vertical_stiffness = maxf(1.0, float(d.get("tire_vertical_stiffness", tire_vertical_stiffness)))
 	track_temp_c = float(d.get("track_temp_c", track_temp_c))
 	tire_initial_temp_c = float(d.get("tire_initial_temp_c", tire_initial_temp_c))
+	tire_compound = String(d.get("tire_compound", tire_compound))
 	if d.has("surface_grip_scale"):
 		surface_grip_scale = clampf(float(d.get("surface_grip_scale", surface_grip_scale)), 0.1, 1.5)
 	lambda_mux = clampf(float(d.get("lambda_mux", surface_grip_scale)), 0.1, 1.5)

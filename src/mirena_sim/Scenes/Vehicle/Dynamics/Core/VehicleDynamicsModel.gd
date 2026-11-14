@@ -52,6 +52,8 @@ func _init(cfg: VehicleConfig = null) -> void:
 		config = cfg
 	else:
 		config = VehicleConfig.new()
+	if config.tire_compound != "" and TireModel.get_compound() != config.tire_compound:
+		TireModel.set_compound(config.tire_compound)
 	
 	inputs = VehicleInputs.new()
 	_last_input_tv_map_id = inputs.tv_map_id

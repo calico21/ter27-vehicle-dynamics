@@ -9,7 +9,7 @@ const VehicleConfig = preload("../Core/VehicleConfig.gd")
 const TireModel = preload("TireModel.gd")
 const Pacejka62 = preload("MF62/Pacejka62.gd")
 
-const THERM_INIT_C: float = 58.0
+const THERM_INIT_C: float = 55.0
 const THERM_TRACK_DEFAULT_C: float = 28.0
 const THERM_ETA_FRICTION: float = 0.65
 const THERM_C_ZONE_J_K: float = 420.0
@@ -295,19 +295,22 @@ func set_tire_temperature(surf_c: float, core_c: float = -999.0) -> void:
 	t_core_c = surf_c if core_c < -900.0 else core_c
 	thermal_mu_factor = compute_thermal_grip_factor(t_surf_c)
 
-## Computes tire grip multiplier from tread surface temperature (C) for Hoosier R25B.
+## Computes tire grip multiplier from tread surface temperature (C) for Hoosier R20/R25B.
 static func compute_thermal_grip_factor(temp_c: float) -> float:
 	if temp_c <= 25.0:
-		return clampf(0.76 + (temp_c - 25.0) * 0.0032, 0.68, 0.76)
-	if temp_c < 55.0:
-		var u: float = (temp_c - 25.0) / 30.0
+		return clampf(0.88 + (temp_c - 25.0) * 0.0020, 0.80, 0.88)
+	if temp_c < 45.0:
+		var u: float = (temp_c - 25.0) / 20.0
 		var s: float = u * u * (3.0 - 2.0 * u)
-		return lerpf(0.76, 1.00, s)
-	if temp_c <= 72.0:
+		return lerpf(0.88, 0.98, s)
+	if temp_c < 55.0:
+		var u2: float = (temp_c - 45.0) / 10.0
+		return lerpf(0.98, 1.00, u2)
+	if temp_c <= 80.0:
 		return 1.00
-	if temp_c <= 85.0:
-		return 1.00 - 0.03 * ((temp_c - 72.0) / 13.0)
-	return maxf(0.68, 0.97 - 0.0075 * (temp_c - 85.0))
+	if temp_c <= 95.0:
+		return lerpf(1.00, 0.95, (temp_c - 80.0) / 15.0)
+	return maxf(0.75, 0.95 - 0.006 * (temp_c - 95.0))
 
 ## Advances 3-zone tread surface + core carcass thermal model over dt (s).
 func step_thermal(dt: float, config: VehicleConfig = null) -> void:
