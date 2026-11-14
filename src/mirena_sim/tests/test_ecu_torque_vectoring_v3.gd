@@ -220,8 +220,8 @@ static func run() -> Dictionary:
 		and ecu_maps.get_map_name() == "AUTOCROSS_NEUTRAL"
 		and is_equal_approx(ecu_maps.k_us_active, 0.0018)
 		and is_equal_approx(ecu_maps.tv_max_mz_active, 750.0)
-		and is_equal_approx(ecu_maps.tc_kp_active, 21.0)
-		and is_equal_approx(ecu_maps.min_fx_reserve_active, 0.10)
+		and is_equal_approx(ecu_maps.tc_kp_active, 22.5)
+		and is_equal_approx(ecu_maps.min_fx_reserve_active, 0.06)
 	)
 	ecu_maps.set_map(EcuTV3.TVMap.OPEN_4WD)
 	var m0_ok: bool = (
@@ -235,17 +235,17 @@ static func run() -> Dictionary:
 	var m1_ok: bool = (
 		ecu_maps.active_map_id == EcuTV3.TVMap.ENDURANCE_SAFE
 		and is_equal_approx(ecu_maps.k_us_active, 0.0030)
-		and is_equal_approx(ecu_maps.tv_max_mz_active, 450.0)
-		and is_equal_approx(ecu_maps.tc_kp_active, 24.0)
-		and is_equal_approx(ecu_maps.min_fx_reserve_active, 0.06)
+		and is_equal_approx(ecu_maps.tv_max_mz_active, 550.0)
+		and is_equal_approx(ecu_maps.tc_kp_active, 28.0)
+		and is_equal_approx(ecu_maps.min_fx_reserve_active, 0.08)
 	)
 	ecu_maps.set_map(EcuTV3.TVMap.SKIDPAD_ATTACK)
 	var m3_ok: bool = (
 		ecu_maps.active_map_id == EcuTV3.TVMap.SKIDPAD_ATTACK
 		and is_equal_approx(ecu_maps.k_us_active, 0.0008)
-		and is_equal_approx(ecu_maps.tv_max_mz_active, 1050.0)
-		and is_equal_approx(ecu_maps.tc_kp_active, 18.5)
-		and is_equal_approx(ecu_maps.min_fx_reserve_active, 0.14)
+		and is_equal_approx(ecu_maps.tv_max_mz_active, 850.0)
+		and is_equal_approx(ecu_maps.tc_kp_active, 20.0)
+		and is_equal_approx(ecu_maps.min_fx_reserve_active, 0.05)
 	)
 	ecu_maps.set_custom_parameters(0.019, 600.0, 22.5, 0.08)
 	var custom_ok: bool = (

@@ -191,7 +191,6 @@ func step_forces(
 					for i in range(4):
 						tv_trqs[i] *= p_scale
 			drive_trqs = tv_trqs
-		brake_trqs = BrakeModel.compute_brake_torques(in_inputs, config)
 	else:
 		var torques = compute_drivetrain_torques(in_inputs, u, dt, advance_tv)
 		drive_trqs = torques["drive"]

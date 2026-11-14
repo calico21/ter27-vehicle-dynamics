@@ -44,7 +44,7 @@ var tv_yaw_moment_req: float = 0.0
 
 @export_group("Assetto Corsa Gamepad Settings")
 @export_range(0.0, 0.30, 0.01) var steering_deadzone: float = 0.06
-@export_range(1.0, 4.0, 0.05) var steering_gamma: float = 2.2
+@export_range(1.0, 4.0, 0.05) var steering_gamma: float = 2.0
 @export_range(0.5, 5.0, 0.05) var steering_speed: float = 1.8
 @export_range(0.0, 0.5, 0.01) var steering_filter: float = 0.12
 @export_range(0.0, 1.0, 0.01) var speed_sensitivity: float = 0.25

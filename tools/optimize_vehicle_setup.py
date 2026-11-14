@@ -29,6 +29,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from _godot_runner import extract_result_json, find_godot_binary
+
 import numpy as np
 
 try:
@@ -153,15 +155,7 @@ class EvalJob:
 
 def resolve_godot_bin(requested: str | None) -> str:
     """Resolve Godot binary path from CLI flag, PATH, or standard install."""
-    if requested:
-        return requested
-    found = shutil.which("godot")
-    if found:
-        return found
-    fallback = Path.home() / ".gemini" / "antigravity" / "bin" / "godot"
-    if fallback.exists():
-        return str(fallback)
-    return "godot"
+    return find_godot_binary(requested)
 
 
 def load_baseline_from_config(project_dir: Path) -> dict[str, float]:
@@ -223,12 +217,7 @@ def generate_lhs_samples(n_samples: int, seed: int) -> list[dict[str, float]]:
 
 def _extract_result_json(stdout_text: str) -> dict[str, Any] | None:
     """Parse SETUP_OPT_RESULT:{...} line emitted by eval_setup_candidate.gd."""
-    for line in stdout_text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith(RESULT_PREFIX):
-            payload = stripped[len(RESULT_PREFIX) :].strip()
-            return json.loads(payload)
-    return None
+    return extract_result_json(stdout_text, RESULT_PREFIX)
 
 
 def compute_physical_penalty(metrics: dict[str, Any]) -> tuple[bool, float]:

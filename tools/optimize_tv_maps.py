@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from _godot_runner import extract_result_json, find_godot_binary
+
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_PROJECT_DIR = REPO_ROOT / "src" / "mirena_sim"

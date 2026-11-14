@@ -26,17 +26,17 @@ const TV_MAP_PROFILES: Dictionary = {
 		"rear_split": 0.65,
 		"k_us": 0.0018,
 		"max_mz": 0.0,
-		"tc_kp": 23.113,
-		"min_fx_reserve": 0.08
+		"tc_kp": 0.0,
+		"min_fx_reserve": 0.0
 	},
 	TVMap.ENDURANCE_SAFE: {
 		"name": "ENDURANCE_SAFE",
 		"front_split": 0.35,
 		"rear_split": 0.65,
 		"k_us": 0.0030,
-		"max_mz": 450.0,
-		"tc_kp": 24.0,
-		"min_fx_reserve": 0.06
+		"max_mz": 550.0,
+		"tc_kp": 28.0,
+		"min_fx_reserve": 0.08
 	},
 	TVMap.AUTOCROSS_NEUTRAL: {
 		"name": "AUTOCROSS_NEUTRAL",
@@ -44,17 +44,17 @@ const TV_MAP_PROFILES: Dictionary = {
 		"rear_split": 0.65,
 		"k_us": 0.0018,
 		"max_mz": 750.0,
-		"tc_kp": 21.0,
-		"min_fx_reserve": 0.10
+		"tc_kp": 22.5,
+		"min_fx_reserve": 0.06
 	},
 	TVMap.SKIDPAD_ATTACK: {
 		"name": "SKIDPAD_ATTACK",
 		"front_split": 0.35,
 		"rear_split": 0.65,
 		"k_us": 0.0008,
-		"max_mz": 1050.0,
-		"tc_kp": 18.5,
-		"min_fx_reserve": 0.14
+		"max_mz": 850.0,
+		"tc_kp": 20.0,
+		"min_fx_reserve": 0.05
 	}
 }
 
@@ -122,7 +122,7 @@ const GP_TC_ALPHA_KAPPA_LP: float = 0.85
 const GP_TC_ALPHA_MU_EMA: float = 0.008
 const GP_TC_MU_LO: float = 0.40
 const GP_TC_MU_HI: float = 2.20
-const GP_TC_MU_NOM: float = 1.90
+const GP_TC_MU_NOM: float = GP_MU_NOM
 const GP_TC_MU_TAU_RECOVERY: float = 4.0
 const GP_TC_V_MIN: float = 1.5
 const GP_TC_CLAMP_BETA: float = 50.0
@@ -191,10 +191,18 @@ var active_map_path: String = ""
 var active_map_filename: String = ""
 var active_map_display_name: String = ""
 var _available_tv_maps: Array[Dictionary] = []
-var k_us_active: float = 0.011
-var tv_max_mz_active: float = 750.0
-var tc_kp_active: float = 21.0
-var min_fx_reserve_active: float = 0.10
+var k_us_active: float:
+	get: return live_k_us
+	set(v): live_k_us = v
+var tv_max_mz_active: float:
+	get: return live_max_mz
+	set(v): live_max_mz = v
+var tc_kp_active: float:
+	get: return live_tc_kp
+	set(v): live_tc_kp = v
+var min_fx_reserve_active: float:
+	get: return live_min_fx_reserve
+	set(v): live_min_fx_reserve = v
 var front_split_active: float = 0.35
 var rear_split_active: float = 0.65
 var open_4wd_tc_enabled: bool = false
