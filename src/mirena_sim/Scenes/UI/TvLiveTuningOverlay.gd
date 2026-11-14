@@ -55,6 +55,11 @@ func _ready() -> void:
 	visible = false
 
 
+func _input(event: InputEvent) -> void:
+	if visible and (event is InputEventJoypadMotion or event is InputEventJoypadButton):
+		get_viewport().set_input_as_handled()
+
+
 func bind_ecu(ecu) -> void:
 	_ecu = ecu
 	sync_from_ecu()
@@ -167,6 +172,7 @@ func _build_ui() -> void:
 
 	_tabs = TabContainer.new()
 	_tabs.focus_mode = Control.FOCUS_NONE
+	_tabs.get_tab_bar().focus_mode = Control.FOCUS_NONE
 	main_vbox.add_child(_tabs)
 
 	_build_tv_tab()
