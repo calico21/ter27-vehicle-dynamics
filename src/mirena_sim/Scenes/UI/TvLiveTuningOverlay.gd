@@ -12,7 +12,13 @@ const TV_SLIDER_SPECS := [
 	{"key": "live_k_beta", "label": "k_beta (Nm/rad)", "min": 0.0, "max": 12000.0, "step": 100.0, "fmt": "%.0f"},
 	{"key": "live_throttle_mz_cut", "label": "throttle_mz_cut", "min": 0.0, "max": 1.0, "step": 0.05, "fmt": "%.2f"},
 	{"key": "front_drive_bias", "label": "front_drive_bias", "min": 0.0, "max": 1.0, "step": 0.05, "fmt": "%.2f"},
-	{"key": "can_latency_ms", "label": "can_latency_ms", "min": 0.0, "max": 50.0, "step": 1.0, "fmt": "%.1f"}
+	{"key": "can_latency_ms", "label": "can_latency_ms", "min": 0.0, "max": 50.0, "step": 1.0, "fmt": "%.1f"},
+	{"key": "control_law_mode", "label": "Law (0=V3, 1=SMC)", "min": 0.0, "max": 1.0, "step": 1.0, "fmt": "%.0f"},
+	{"key": "live_smc_k_gain", "label": "smc_k_gain (Nm)", "min": 200.0, "max": 2000.0, "step": 25.0, "fmt": "%.0f"},
+	{"key": "live_smc_k_ffd", "label": "smc_k_ffd (Nms/r)", "min": 0.0, "max": 500.0, "step": 10.0, "fmt": "%.0f"},
+	{"key": "live_smc_lambda_beta", "label": "smc_lambda_beta", "min": 0.0, "max": 12.0, "step": 0.2, "fmt": "%.1f"},
+	{"key": "live_smc_phi", "label": "smc_phi (rad/s)", "min": 0.03, "max": 0.50, "step": 0.01, "fmt": "%.2f"},
+	{"key": "live_smc_tc_kappa_base", "label": "smc_tc_kappa_base", "min": 0.015, "max": 0.12, "step": 0.005, "fmt": "%.3f"}
 ]
 
 const GP_SLIDER_SPECS := [

@@ -23,6 +23,9 @@ const CHANNEL_CATALOG: Array[Dictionary] = [
 	{"key": "p_mz", "name": "p_mz [Nm]", "color": Color(1.00, 0.80, 0.25)},
 	{"key": "i_mz", "name": "i_mz [Nm]", "color": Color(0.75, 0.55, 1.00)},
 	{"key": "beta_mz", "name": "beta_mz [Nm]", "color": Color(1.00, 0.42, 0.48)},
+	{"key": "smc_s", "name": "smc_s [rad/s]", "color": Color(0.95, 0.45, 1.00)},
+	{"key": "kappa_lim_FL", "name": "kappa_lim_FL [-]", "color": Color(0.45, 0.95, 0.75)},
+	{"key": "kappa_lim_RL", "name": "kappa_lim_RL [-]", "color": Color(0.75, 0.95, 0.45)},
 	{"key": "T_cmd_FL", "name": "T_cmd_FL [Nm]", "color": Color(0.30, 1.00, 0.55)},
 	{"key": "T_cmd_FR", "name": "T_cmd_FR [Nm]", "color": Color(1.00, 0.80, 0.25)},
 	{"key": "T_cmd_RL", "name": "T_cmd_RL [Nm]", "color": Color(0.70, 0.55, 1.00)},
@@ -1016,12 +1019,15 @@ func update_from_car(car: Node, dt: float) -> void:
 	var beta_std_deg := rad_to_deg(atan2(vy_std, maxf(absf(v_ros.x), 1.0)))
 
 	if _yaw_label != null and ecu != null:
+		var law_tag: String = "V4_SMC" if int(ecu.control_law_mode) == 1 else "V3_PID"
 		_yaw_label.text = (
-			"wz ref/real/ekf: %+5.2f / %+5.2f / %+5.2f rad/s\n"
+			"[%s] S=%+5.3f rad/s | k_lim=%.3f\n"
+			+ "wz ref/real/ekf: %+5.2f / %+5.2f / %+5.2f rad/s\n"
 			+ "beta real / ekf: %+5.2f / %+5.2f +-%.2f deg\n"
 			+ "vy_ekf / vy_ss : %+5.2f / %+5.2f m/s (std=%.3f)\n"
 			+ "Gains Kp/Ki/Kd : %.0f / %.0f / %.1f"
 		) % [
+			law_tag, float(ecu.last_smc_s), float(ecu.last_tc_kappa_lim[0]),
 			wz_ref, w_ros.z, wz_ekf,
 			beta_real, beta_ekf, beta_std_deg,
 			float(ecu.ekf_x[0]), float(ecu.last_vy_ss), vy_std,
@@ -1122,6 +1128,9 @@ func update_from_car(car: Node, dt: float) -> void:
 			"p_mz": float(ecu.last_p_mz) if ecu != null else 0.0,
 			"i_mz": float(ecu.last_i_mz) if ecu != null else 0.0,
 			"beta_mz": float(ecu.last_beta_mz) if ecu != null else 0.0,
+			"smc_s": float(ecu.last_smc_s) if ecu != null else 0.0,
+			"kappa_lim_FL": float(ecu.last_tc_kappa_lim[0]) if ecu != null else 0.045,
+			"kappa_lim_RL": float(ecu.last_tc_kappa_lim[2]) if ecu != null else 0.045,
 			"T_cmd_FL": float(drv_trqs[0]) if drv_trqs.size() > 0 else 0.0,
 			"T_cmd_FR": float(drv_trqs[1]) if drv_trqs.size() > 1 else 0.0,
 			"T_cmd_RL": float(drv_trqs[2]) if drv_trqs.size() > 2 else 0.0,
@@ -1220,6 +1229,8 @@ func _collect_all_vars(model, ecu, wheels: Array, hv, b_state, v_ros: Vector3, w
 		_latest_vars.append(["ekf_beta", "%.3f deg" % rad_to_deg(float(ecu.ekf_beta_est))])
 		_latest_vars.append(["mz_ff/p/i/beta", "%.1f / %.1f / %.1f / %.1f Nm" % [ecu.last_ff_mz, ecu.last_p_mz, ecu.last_i_mz, ecu.last_beta_mz]])
 		_latest_vars.append(["mz_raw/req", "%.1f / %.1f Nm" % [ecu.last_mz_raw, ecu.last_mz_req]])
+		_latest_vars.append(["smc_s", "%.4f rad/s" % float(ecu.last_smc_s)])
+		_latest_vars.append(["tc_kappa_lim_fl..rr", "%.3f/%.3f/%.3f/%.3f" % [ecu.last_tc_kappa_lim[0], ecu.last_tc_kappa_lim[1], ecu.last_tc_kappa_lim[2], ecu.last_tc_kappa_lim[3]]])
 		_latest_vars.append(["tc_cut_fl..rr", "%.1f/%.1f/%.1f/%.1f Nm" % [ecu.last_tc_cut_nm[0], ecu.last_tc_cut_nm[1], ecu.last_tc_cut_nm[2], ecu.last_tc_cut_nm[3]]])
 	for i in range(mini(4, wheels.size())):
 		var w = wheels[i]

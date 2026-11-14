@@ -301,6 +301,13 @@ static func run(verbose: bool = false) -> Dictionary:
 	else:
 		failed += 1
 
+	# G) V3 AL-QP (03_skidpad_attack) vs V4 SMC Hybrid (05_smc_pivot_4wd) A/B Benchmark
+	var v4_ok: bool = _run_v3_vs_v4_benchmark(cfg, tracks, verbose, errors)
+	if v4_ok:
+		passed += 1
+	else:
+		failed += 1
+
 	if verbose:
 		print("----------------------------------------------------------------------------------")
 		print("TV Characterization Summary: %d/%d assertions PASSED." % [passed, passed + failed])
@@ -555,6 +562,9 @@ static func _apply_tv_profile(
 
 	inputs.ecu_driving_mode = 1
 	if ecu != null:
+		if custom_params.has("map_file") and ecu.has_method("load_tv_map_from_file"):
+			ecu.call("load_tv_map_from_file", String(custom_params["map_file"]))
+			return
 		if ecu.has_method("set_map"):
 			ecu.call("set_map", map_id)
 		if has_custom and ecu.has_method("set_custom_parameters"):
@@ -885,6 +895,11 @@ static func _init_metrics_accumulator(model: VehicleDynamicsModelScript) -> Dict
 		"alpha_samples": 0,
 		"energy_kwh": 0.0,
 		"max_abs_mz_req": 0.0,
+		"max_kappa": 0.0,
+		"slew_sq_sum": 0.0,
+		"slew_count": 0,
+		"prev_trqs": [0.0, 0.0, 0.0, 0.0],
+		"has_prev_trqs": false,
 		"srr_dir": 0,
 		"srr_ext": 0.0,
 		"srr_initialized": false,
@@ -932,6 +947,19 @@ static func _accumulate_metrics(
 	# Track max |mz_req| (to assert OPEN_4WD == 0)
 	var tv_info: Dictionary = VehicleTelemetryScript.extract_tv_state(model, inputs.steer_angle, step_res)
 	acc["max_abs_mz_req"] = maxf(float(acc["max_abs_mz_req"]), absf(float(tv_info["mz_req"])))
+
+	for wi in range(mini(4, model.wheels.size())):
+		acc["max_kappa"] = maxf(float(acc["max_kappa"]), absf(float(model.wheels[wi].kappa)))
+	if bool(acc["has_prev_trqs"]) and dt > 1e-6:
+		var pt: Array = acc["prev_trqs"]
+		var s2 := 0.0
+		for wi in range(4):
+			var d_rate := (float(d_trqs[wi]) - float(pt[wi])) / dt
+			s2 += d_rate * d_rate
+		acc["slew_sq_sum"] = float(acc["slew_sq_sum"]) + s2 * 0.25
+		acc["slew_count"] = int(acc["slew_count"]) + 1
+	acc["prev_trqs"] = [float(d_trqs[0]), float(d_trqs[1]), float(d_trqs[2]), float(d_trqs[3])]
+	acc["has_prev_trqs"] = true
 
 	# SAE J2944 hysteresis-gap Steering Reversal Rate (> 2 deg)
 	var steer_deg: float = rad_to_deg(inputs.steer_angle)
@@ -1009,12 +1037,16 @@ static func _finalize_metrics(
 	var used_temps: Array[float] = final_temps if thermal_live else acc["proxy_temps"]
 	var mean_temp_c: float = 0.25 * (used_temps[0] + used_temps[1] + used_temps[2] + used_temps[3])
 
+	var slew_rms := sqrt(float(acc["slew_sq_sum"]) / float(maxi(int(acc["slew_count"]), 1)))
+
 	return {
 		"sector_time_s": t_elapsed,
 		"dist_m": dist_traveled,
 		"wz_rmse_rads": wz_rmse,
 		"peak_beta_deg": float(acc["peak_beta_deg"]),
 		"rear_stability_ratio": rear_stab,
+		"max_kappa": float(acc["max_kappa"]),
+		"slew_rms": slew_rms,
 		"energy_kwh": energy_kwh,
 		"efficiency_kwh_km": eff_kwh_km,
 		"srr_per_min": srr_per_min,
@@ -1136,3 +1168,65 @@ static func _verify_telemetry_export(cfg: VehicleConfigScript, errors: Array) ->
 			errors.append("VehicleTelemetry.to_dict() missing key '%s'" % required_key)
 			return false
 	return true
+
+static func _run_v3_vs_v4_benchmark(
+	cfg: VehicleConfigScript,
+	tracks: Array[Dictionary],
+	verbose: bool,
+	errors: Array
+) -> bool:
+	var skidpad_trk: Dictionary = {}
+	for t in tracks:
+		if String(t["id"]).to_lower() == "skidpad":
+			skidpad_trk = t
+			break
+	if skidpad_trk.is_empty():
+		errors.append("V3 vs V4 benchmark: skidpad track not found")
+		return false
+
+	var v3_path := "res://Scenes/Vehicle/Dynamics/Core/Config/tv_maps/03_skidpad_attack.json"
+	var v4_path := "res://Scenes/Vehicle/Dynamics/Core/Config/tv_maps/05_smc_pivot_4wd.json"
+
+	var sk_v3 := _run_track_benchmark(cfg, skidpad_trk, 3, {"map_file": v3_path})
+	var sk_v4 := _run_track_benchmark(cfg, skidpad_trk, 3, {"map_file": v4_path})
+	var sl_v3 := _run_iso_maneuver(cfg, "slalom", 3, {"map_file": v3_path})
+	var sl_v4 := _run_iso_maneuver(cfg, "slalom", 3, {"map_file": v4_path})
+
+	if verbose:
+		print("[V3 AL-QP vs V4 SMC HYBRID — A/B BENCHMARK]")
+		print("  %-26s | %7s | %8s | %8s | %8s | %9s | %s" % [
+			"Scenario / Map", "Time(s)", "wzRMSE", "PkBeta", "MaxKappa", "SlewRMS", "Status"
+		])
+		print("  " + "-".repeat(92))
+		var rows := [
+			["Skidpad | 03_skidpad_attack", sk_v3],
+			["Skidpad | 05_smc_pivot_4wd ", sk_v4],
+			["Slalom  | 03_skidpad_attack", sl_v3],
+			["Slalom  | 05_smc_pivot_4wd ", sl_v4]
+		]
+		for row in rows:
+			var m: Dictionary = row[1]
+			var st := "OK" if (bool(m.get("completed", false)) and bool(m.get("finite_ok", false))) else "FAIL"
+			print("  %-26s | %7.3f | %8.4f | %7.2f° | %8.4f | %9.1f | %s" % [
+				row[0],
+				float(m.get("sector_time_s", 0.0)),
+				float(m.get("wz_rmse_rads", 0.0)),
+				float(m.get("peak_beta_deg", 0.0)),
+				float(m.get("max_kappa", 0.0)),
+				float(m.get("slew_rms", 0.0)),
+				st
+			])
+		print("")
+
+	var ok := true
+	for pair in [["skidpad_v4", sk_v4], ["slalom_v4", sl_v4]]:
+		var m: Dictionary = pair[1]
+		if not bool(m.get("completed", false)) or not bool(m.get("finite_ok", false)):
+			ok = false
+			errors.append("V4 SMC failed on %s: completed=%s finite=%s reason=%s" % [
+				pair[0], str(m.get("completed")), str(m.get("finite_ok")), str(m.get("abort_reason", ""))
+			])
+		if float(m.get("peak_beta_deg", 99.0)) > 15.0:
+			ok = false
+			errors.append("V4 SMC excessive sideslip on %s: peak_beta=%.2f deg" % [pair[0], float(m.get("peak_beta_deg", 0.0))])
+	return ok
