@@ -80,6 +80,13 @@ var raycasts: Array[RayCast3D] = []
 var wheel_mesh_nodes: Array[Node3D] = []
 var _wheel_base_yaws: Array[float] = [PI, PI, PI, PI]
 
+# --- 3D Wheel Force & Saturation Arrows ---
+var wheel_arrows_enabled: bool = false
+var _wheel_arrow_roots: Array[Node3D] = []
+var _wheel_arrow_shafts: Array[Node3D] = []
+var _wheel_arrow_tips: Array[Node3D] = []
+var _wheel_arrow_mats: Array[StandardMaterial3D] = []
+
 # --- ROS Configuration & Variables ---
 @export var frame_id: String = "car/cog"
 @export var wheel_speed_rate: float = 100.0
@@ -253,6 +260,7 @@ func _setup_raycasts_and_wheels() -> void:
 			w_node.position.z = ray_mount_positions[i].z
 			w_node.position.y = ray_mount_positions[i].y - ray_rest_lengths[i] + config.wheel_radius
 		wheel_mesh_nodes.append(w_node)
+	_setup_wheel_force_arrows()
 
 static func _new_ros_msg(msg_name: String) -> Object:
 	var s = load("res://addons/rclgd/gen/%s.gd" % msg_name)
@@ -336,6 +344,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				if _tv_overlay != null:
 					_tv_overlay.sync_from_ecu()
 				_update_minimal_hud()
+		elif event.keycode == KEY_F8:
+			toggle_wheel_arrows()
 		elif event.keycode == KEY_F10:
 			if _tv_overlay != null:
 				_tv_overlay.toggle_visibility()
@@ -513,6 +523,9 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 		
 		# Visual Wheel Mesh Transform Update
 		_update_wheel_visual(i, ray, delta_w, w.rotation_angle)
+
+	if wheel_arrows_enabled:
+		_update_wheel_force_arrows(wheel_forces_ros, normal_forces, grounded)
 	
 	# 6. Aerodynamic Drag & Downforce
 	var f_aero_godot_local: Vector3 = VehicleConfigScript.ros_to_godot_vec(step_res["aero_force_ros"])
@@ -543,6 +556,137 @@ func _update_wheel_visual(index: int, ray: RayCast3D, delta_w: float, roll_angle
 	# Steering yaw rotation for front wheels (+delta_w = CCW / left turn)
 	if index == 0 or index == 1:
 		w_node.rotation.y = _wheel_base_yaws[index] + delta_w
+
+func _setup_wheel_force_arrows() -> void:
+	for n in _wheel_arrow_roots:
+		if is_instance_valid(n):
+			n.queue_free()
+	_wheel_arrow_roots.clear()
+	_wheel_arrow_shafts.clear()
+	_wheel_arrow_tips.clear()
+	_wheel_arrow_mats.clear()
+
+	var shaft_mesh := CylinderMesh.new()
+	shaft_mesh.top_radius = 0.024
+	shaft_mesh.bottom_radius = 0.024
+	shaft_mesh.height = 1.0
+	shaft_mesh.radial_segments = 10
+
+	var tip_mesh := CylinderMesh.new()
+	tip_mesh.top_radius = 0.0
+	tip_mesh.bottom_radius = 0.062
+	tip_mesh.height = 0.18
+	tip_mesh.radial_segments = 12
+
+	for i in range(4):
+		var root := Node3D.new()
+		root.name = "WheelForceArrow_%d" % i
+		root.visible = wheel_arrows_enabled
+		if i < ray_mount_positions.size():
+			root.position = Vector3(ray_mount_positions[i].x, 0.06, ray_mount_positions[i].z)
+		add_child(root)
+
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.albedo_color = Color(0.0627, 0.7255, 0.5059)
+		mat.emission_enabled = true
+		mat.emission = mat.albedo_color
+		mat.emission_energy_multiplier = 1.35
+
+		var shaft_pivot := Node3D.new()
+		root.add_child(shaft_pivot)
+		var shaft_mi := MeshInstance3D.new()
+		shaft_mi.mesh = shaft_mesh
+		shaft_mi.material_override = mat
+		shaft_mi.rotation.x = -PI * 0.5
+		shaft_mi.position = Vector3(0.0, 0.0, -0.5)
+		shaft_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		shaft_pivot.add_child(shaft_mi)
+
+		var tip_mi := MeshInstance3D.new()
+		tip_mi.mesh = tip_mesh
+		tip_mi.material_override = mat
+		tip_mi.rotation.x = -PI * 0.5
+		tip_mi.position = Vector3(0.0, 0.0, -1.09)
+		tip_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		root.add_child(tip_mi)
+
+		_wheel_arrow_roots.append(root)
+		_wheel_arrow_shafts.append(shaft_pivot)
+		_wheel_arrow_tips.append(tip_mi)
+		_wheel_arrow_mats.append(mat)
+
+func set_wheel_arrows_enabled(enabled: bool) -> void:
+	wheel_arrows_enabled = enabled
+	if enabled and _wheel_arrow_roots.is_empty():
+		_setup_wheel_force_arrows()
+	for root in _wheel_arrow_roots:
+		if is_instance_valid(root):
+			root.visible = enabled
+	if _telemetry_inspector != null and _telemetry_inspector.has_method("sync_wheel_arrows_button"):
+		_telemetry_inspector.sync_wheel_arrows_button(wheel_arrows_enabled)
+
+func toggle_wheel_arrows() -> bool:
+	set_wheel_arrows_enabled(not wheel_arrows_enabled)
+	return wheel_arrows_enabled
+
+static func compute_wheel_saturation(fx: float, fy: float, fz: float, mu_eff: float) -> float:
+	var f_res := sqrt(fx * fx + fy * fy)
+	var f_cap := maxf(mu_eff * fz, 1.0)
+	return clampf(f_res / f_cap, 0.0, 1.2)
+
+static func saturation_to_color(eta: float) -> Color:
+	var col_green := Color(0.0627, 0.7255, 0.5059) # #10B981
+	var col_amber := Color(0.9608, 0.6196, 0.0431) # #F59E0B
+	var col_red := Color(0.9373, 0.2667, 0.2667)   # #EF4444
+	if eta <= 0.55:
+		return col_green
+	if eta <= 0.80:
+		return col_green.lerp(col_amber, (eta - 0.55) / 0.25)
+	if eta < 0.98:
+		return col_amber.lerp(col_red, (eta - 0.80) / 0.18)
+	return col_red
+
+func _update_wheel_force_arrows(wheel_forces_ros: Array, normal_forces: Array, grounded: Array) -> void:
+	if not wheel_arrows_enabled:
+		return
+	if _wheel_arrow_roots.size() < 4:
+		_setup_wheel_force_arrows()
+	for i in range(4):
+		var root := _wheel_arrow_roots[i]
+		if not is_instance_valid(root):
+			continue
+		var is_g: bool = bool(grounded[i]) if i < grounded.size() else true
+		if not is_g or i >= wheel_forces_ros.size():
+			root.visible = false
+			continue
+		var f_ros: Vector3 = wheel_forces_ros[i]
+		var f_planar_godot: Vector3 = VehicleConfigScript.ros_to_godot_vec(Vector3(f_ros.x, f_ros.y, 0.0))
+		var f_res := sqrt(f_ros.x * f_ros.x + f_ros.y * f_ros.y)
+		if f_res < 15.0:
+			root.visible = false
+			continue
+
+		root.visible = true
+		var y_pos := 0.06
+		if i < wheel_mesh_nodes.size() and wheel_mesh_nodes[i] != null:
+			y_pos = wheel_mesh_nodes[i].position.y - config.wheel_radius + 0.06
+		if i < ray_mount_positions.size():
+			root.position = Vector3(ray_mount_positions[i].x, y_pos, ray_mount_positions[i].z)
+		root.rotation.y = atan2(-f_planar_godot.x, -f_planar_godot.z)
+
+		var total_len := clampf(f_res / 1800.0, 0.18, 2.2)
+		var shaft_len := maxf(0.05, total_len - 0.18)
+		_wheel_arrow_shafts[i].scale = Vector3(1.0, 1.0, shaft_len)
+		_wheel_arrow_tips[i].position = Vector3(0.0, 0.0, -(shaft_len + 0.09))
+
+		var fz: float = float(normal_forces[i]) if i < normal_forces.size() else 0.0
+		var mu_eff: float = 1.5 * (float(model.wheels[i].surface_mu_scale) if (model != null and i < model.wheels.size()) else 1.0)
+		var eta := compute_wheel_saturation(f_ros.x, f_ros.y, fz, mu_eff)
+		var col := saturation_to_color(eta)
+		var mat := _wheel_arrow_mats[i]
+		mat.albedo_color = col
+		mat.emission = col
 
 # --- Pilot Logic ---
 func _process_no_pilot() -> void:
@@ -1006,6 +1150,8 @@ func _setup_minimal_hud() -> void:
 	_tv_overlay.bind_car(model.ecu_tv_v3 if model != null else null, gamepad, self)
 	add_child(_tv_overlay)
 	_telemetry_inspector = TelemetryInspectorOverlayScript.new()
+	if _telemetry_inspector.has_method("bind_car"):
+		_telemetry_inspector.bind_car(self)
 	add_child(_telemetry_inspector)
 	_update_minimal_hud()
 
