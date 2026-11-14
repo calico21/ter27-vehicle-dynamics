@@ -251,6 +251,22 @@ var last_wz_ref: float = 0.0
 var last_mz_req: float = 0.0
 var tc_active: bool = false
 
+# ── Internal 8-Stage X-Ray Telemetry (zero-alloc in-place updates) ──────────
+var last_vy_ss: float = 0.0
+var last_ff_mz: float = 0.0
+var last_p_mz: float = 0.0
+var last_i_mz: float = 0.0
+var last_beta_mz: float = 0.0
+var last_mz_raw: float = 0.0
+var last_kp: float = 0.0
+var last_ki: float = 0.0
+var last_kd: float = 0.0
+var last_fz_est: Array[float] = [0.0, 0.0, 0.0, 0.0]
+var last_fy_est: Array[float] = [0.0, 0.0, 0.0, 0.0]
+var last_t_nominal: Array[float] = [0.0, 0.0, 0.0, 0.0]
+var last_t_qp: Array[float] = [0.0, 0.0, 0.0, 0.0]
+var last_tc_cut_nm: Array[float] = [0.0, 0.0, 0.0, 0.0]
+
 func _init() -> void:
 	sil_bridge = TvSilBridgeScript.new(false)
 	set_map(TVMap.AUTOCROSS_NEUTRAL)
@@ -291,6 +307,21 @@ func reset() -> void:
 	last_wz_ref = 0.0
 	last_mz_req = 0.0
 	tc_active = false
+	last_vy_ss = 0.0
+	last_ff_mz = 0.0
+	last_p_mz = 0.0
+	last_i_mz = 0.0
+	last_beta_mz = 0.0
+	last_mz_raw = 0.0
+	last_kp = 0.0
+	last_ki = 0.0
+	last_kd = 0.0
+	for i in range(4):
+		last_fz_est[i] = 0.0
+		last_fy_est[i] = 0.0
+		last_t_nominal[i] = 0.0
+		last_t_qp[i] = 0.0
+		last_tc_cut_nm[i] = 0.0
 	_reset_ring_buffers()
 	if sil_bridge != null and sil_bridge.is_using_native_sil():
 		sil_bridge.gp_tv_init(null)
@@ -748,6 +779,7 @@ func gp_ekf_update_kinematic_ss(ax_f: float, ay_f: float, wz_raw: float, vx: flo
 	var vx_safe: float = maxf(absf(vx), 0.5)
 	var wz_corr: float = wz_raw - ekf_x[1]
 	var vy_ss: float = clampf((GP_LR * wz_corr) - ((GP_MASS * ay_f * GP_LF * vx_safe) / (GP_WB * GP_C_ALPHA_R)), -3.0, 3.0)
+	last_vy_ss = vy_ss
 
 	var a_total_g: float = sqrt(ax_f * ax_f + ay_f * ay_f) / GP_GRAVITY
 	var excess_g: float = clampf(a_total_g - 0.85, 0.0, 2.5)
@@ -1356,7 +1388,21 @@ func _gp_tv_step(
 			tc_active = false
 		gp_ekf_update_friction()
 
+		last_ff_mz = 0.0
+		last_p_mz = 0.0
+		last_i_mz = 0.0
+		last_beta_mz = 0.0
+		last_mz_raw = 0.0
+		last_mz_req = 0.0
+		last_kp = 0.0
+		last_ki = 0.0
+		last_kd = 0.0
 		for i in range(4):
+			last_fz_est[i] = fz_est[i]
+			last_fy_est[i] = fy_est[i]
+			last_t_nominal[i] = t_open[i]
+			last_t_qp[i] = t_open[i]
+			last_tc_cut_nm[i] = 0.0
 			t_qp_prev[i] = t_open[i]
 			t_out_prev[i] = t_open[i]
 			last_t_cmd[i] = t_open[i]
@@ -1377,6 +1423,9 @@ func _gp_tv_step(
 	var mu_scale: float = clampf(mu_avg / GP_MU_NOM, 0.4, 1.0)
 	kp *= mu_scale
 	ki *= mu_scale
+	last_kp = kp
+	last_ki = ki
+	last_kd = kd
 
 	var wz_err: float = wz_ref - wz_corr
 	var delta_dot: float = (delta_dz - delta_prev) / dt
@@ -1399,8 +1448,15 @@ func _gp_tv_step(
 
 	# Gate only pro-turn feedforward; keep stabilizing feedback active during oversteer/countersteer
 	var ff_mz: float = kd * delta_dot * (vx_safe / 10.0) * os_gate * counter_steer_factor
-	var fb_mz: float = kp * wz_err + ki * wz_int + beta_term
+	var p_mz: float = kp * wz_err
+	var i_mz: float = ki * wz_int
+	var fb_mz: float = p_mz + i_mz + beta_term
 	var mz_raw: float = ff_mz + fb_mz
+	last_ff_mz = ff_mz
+	last_p_mz = p_mz
+	last_i_mz = i_mz
+	last_beta_mz = beta_term
+	last_mz_raw = mz_raw
 
 	var spin_sign: float = 1.0 if wz_corr > 1e-4 else (-1.0 if wz_corr < -1e-4 else 0.0)
 	var stab_limit: float = maxf(tv_max_mz_active, 1000.0)
@@ -1477,14 +1533,28 @@ func _gp_tv_step(
 	var max_delta_t: float = GP_TV_RATE_LIMIT * dt
 	var t_cmd: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	for i in range(4):
+		last_fz_est[i] = fz_est[i]
+		last_fy_est[i] = fy_est[i]
+		last_t_nominal[i] = t_nominal[i]
+		last_t_qp[i] = qp_result[i]
 		var d_t: float = clampf(qp_result[i] - t_qp_prev[i], -max_delta_t, max_delta_t)
 		var tv_final: float = t_qp_prev[i] + d_t
 		t_qp_prev[i] = tv_final
 		t_cmd[i] = tv_final
 
+	var t_pre_tc_0: float = t_cmd[0]
+	var t_pre_tc_1: float = t_cmd[1]
+	var t_pre_tc_2: float = t_cmd[2]
+	var t_pre_tc_3: float = t_cmd[3]
+
 	# Stage 8: 4WD Adaptive RLS Traction Control
 	gp_tc_step_4wd(t_cmd, omega, vx, vy_est, wz_corr, fz_est, dt, wheel_steers, brake_norm, tc_kp_active)
 	gp_ekf_update_friction()
+
+	last_tc_cut_nm[0] = maxf(0.0, t_pre_tc_0 - t_cmd[0])
+	last_tc_cut_nm[1] = maxf(0.0, t_pre_tc_1 - t_cmd[1])
+	last_tc_cut_nm[2] = maxf(0.0, t_pre_tc_2 - t_cmd[2])
+	last_tc_cut_nm[3] = maxf(0.0, t_pre_tc_3 - t_cmd[3])
 
 	for i in range(4):
 		t_out_prev[i] = t_cmd[i]

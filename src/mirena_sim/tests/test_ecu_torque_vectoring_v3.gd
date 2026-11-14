@@ -394,6 +394,36 @@ static func run() -> Dictionary:
 			maps_list.size(), str(skid_ok), str(reloaded_custom), str(protected_ok), str(deleted_ok), cyc0, cyc1
 		])
 
+	# 15. 8-Stage X-Ray Telemetry completeness & NaN-free updates
+	var ecu_xray := EcuTV3.new()
+	ecu_xray.set_map(EcuTV3.TVMap.AUTOCROSS_NEUTRAL)
+	var w_xray: Array[float] = [60.0, 60.0, 60.0, 60.0]
+	for _s in range(10):
+		ecu_xray.step(2000.0, 0.16, 14.0, 0.2, 0.65, 9.0, 2.5, w_xray, 0.0, 0.005)
+	var xray_finite: bool = (
+		is_finite(ecu_xray.last_vy_ss)
+		and is_finite(ecu_xray.last_ff_mz)
+		and is_finite(ecu_xray.last_p_mz)
+		and is_finite(ecu_xray.last_i_mz)
+		and is_finite(ecu_xray.last_beta_mz)
+		and is_finite(ecu_xray.last_mz_raw)
+		and is_finite(ecu_xray.last_mz_req)
+		and ecu_xray.last_kp > 0.0
+		and ecu_xray.last_fz_est.size() == 4
+		and ecu_xray.last_fy_est.size() == 4
+		and ecu_xray.last_t_nominal.size() == 4
+		and ecu_xray.last_t_qp.size() == 4
+		and ecu_xray.last_tc_cut_nm.size() == 4
+		and ecu_xray.last_fz_est[0] > 100.0
+	)
+	if xray_finite and absf(ecu_xray.last_mz_raw) > 1.0:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("8-stage X-Ray telemetry failed: finite=%s kp=%.1f mz_raw=%.1f fz0=%.1f" % [
+			str(xray_finite), ecu_xray.last_kp, ecu_xray.last_mz_raw, ecu_xray.last_fz_est[0]
+		])
+
 	return {
 		"name": "test_ecu_torque_vectoring_v3",
 		"passed": passed,

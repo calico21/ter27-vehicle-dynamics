@@ -24,6 +24,7 @@ const ChassisDynamicsScript = preload("../Chassis/ChassisDynamics.gd")
 const VehicleTelemetryScript = preload("../Telemetry/VehicleTelemetry.gd")
 const TelemetryRecorderScript = preload("../Telemetry/TelemetryRecorder.gd")
 const TvLiveTuningOverlayScript = preload("../../../UI/TvLiveTuningOverlay.gd")
+const TelemetryInspectorOverlayScript = preload("../../../UI/TelemetryInspectorOverlay.gd")
 
 signal cone_hit(count: int)
 enum PilotMode { NO_PILOT, MANUAL, ROS, TRACK_RAIL }
@@ -134,6 +135,7 @@ var ffb_torque_nm: float = 0.0
 var _hud_layer: CanvasLayer = null
 var _hud_label: Label = null
 var _tv_overlay: TvLiveTuningOverlayScript = null
+var _telemetry_inspector: TelemetryInspectorOverlayScript = null
 var _last_step_res: Dictionary = {}
 
 var slam_cones: Array = []
@@ -319,7 +321,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			print("[ECU Mode]: %s" % mode_name)
 			_update_minimal_hud()
 		elif event.keycode == KEY_F6:
-			if _tv_overlay != null and _tv_overlay.has_method("is_text_input_focused") and _tv_overlay.is_text_input_focused():
+			var overlay_typing := (
+				(_tv_overlay != null and _tv_overlay.has_method("is_text_input_focused") and _tv_overlay.is_text_input_focused())
+				or (_telemetry_inspector != null and _telemetry_inspector.has_method("is_text_input_focused") and _telemetry_inspector.is_text_input_focused())
+			)
+			if overlay_typing:
 				return
 			if model != null and model.ecu_tv_v3 != null:
 				tv_map_id = model.ecu_tv_v3.cycle_map()
@@ -333,6 +339,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.keycode == KEY_F10:
 			if _tv_overlay != null:
 				_tv_overlay.toggle_visibility()
+		elif event.keycode == KEY_F11:
+			if _telemetry_inspector != null:
+				_telemetry_inspector.toggle_visibility()
+		elif event.keycode == KEY_F12:
+			if _telemetry_inspector != null and _telemetry_inspector.visible:
+				_telemetry_inspector.toggle_freeze()
 		elif event.keycode == KEY_F9:
 			if telemetry_recorder != null:
 				var rec_map_name := tv_map_name
@@ -993,10 +1005,14 @@ func _setup_minimal_hud() -> void:
 	_tv_overlay = TvLiveTuningOverlayScript.new()
 	_tv_overlay.bind_car(model.ecu_tv_v3 if model != null else null, gamepad, self)
 	add_child(_tv_overlay)
+	_telemetry_inspector = TelemetryInspectorOverlayScript.new()
+	add_child(_telemetry_inspector)
 	_update_minimal_hud()
 
 func _update_minimal_hud() -> void:
-	if _tv_overlay != null and model != null:
+	if _telemetry_inspector != null and _telemetry_inspector.visible:
+		_telemetry_inspector.update_from_car(self, 1.0 / 60.0)
+	if _tv_overlay != null and _tv_overlay.visible and model != null:
 		_tv_overlay.update_telemetry(tv_wz_ref, model.angular_velocity_ros.z, tv_beta_est_deg, tv_mz_req, tv_tc_active)
 		_tv_overlay.update_input_telemetry(_raw_steer_in, _steer_smoothed, _raw_throttle_in, self.gas, _raw_brake_in, self.brake)
 		if _tv_overlay.has_method("update_chassis_telemetry"):
@@ -1014,7 +1030,7 @@ func _update_minimal_hud() -> void:
 	if model != null and model.hv_state != null:
 		hv_str = "   |   %3.0f V (%.0f%% SoC)" % [model.hv_state.v_dc, model.hv_state.soc * 100.0]
 	var dev_str: String = "  |  WHEEL 1:1" if (wheel_ffb != null and wheel_ffb.active_device_mode == WheelFFBControllerScript.InputDeviceMode.WHEEL) else ""
-	_hud_label.text = "%5.1f km/h   |   %4.1f / 80.0 kW%s\n%s%s%s%s%s  |  [F10] Live Tuning" % [
+	_hud_label.text = "%5.1f km/h   |   %4.1f / 80.0 kW%s\n%s%s%s%s%s  |  [F10] Live Tuning  |  [F11] Telemetry X-Ray" % [
 		kmh, tv_elec_power_kw, hv_str, mode_str, map_str, tc_str, dev_str, rec_str
 	]
 
