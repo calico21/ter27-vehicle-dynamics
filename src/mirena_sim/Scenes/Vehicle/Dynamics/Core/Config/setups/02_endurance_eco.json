@@ -1,0 +1,25 @@
+{
+	"name": "Endurance Eco 56kW",
+	"description": "Eficiencia energética y estabilidad térmica para 22 km de Endurance",
+	"mechanical": {
+		"spring_rate_front_n_m": 42000.0,
+		"spring_rate_rear_n_m": 44000.0,
+		"arb_stiffness_front_nm_rad": 3800.0,
+		"arb_stiffness_rear_nm_rad": 3400.0,
+		"static_camber_front_deg": -1.7,
+		"static_camber_rear_deg": -1.1,
+		"brake_bias_front": 0.58,
+		"ride_height_front_m": 0.034,
+		"ride_height_rear_m": 0.037
+	},
+	"electronic": {
+		"tv_map_filename": "01_endurance_safe",
+		"control_law_mode": 0,
+		"grip_cap": 0.87,
+		"smc_k_gain": 820.0,
+		"smc_lambda_beta": 7.2,
+		"smc_k_ffd": 65.0,
+		"smc_tc_kappa_base": 0.048,
+		"eco_power_cap_kw": 56.0
+	}
+}

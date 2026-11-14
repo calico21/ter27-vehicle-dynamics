@@ -3,6 +3,7 @@ class_name TvLiveTuningOverlay
 
 const VehicleConfigScript = preload("../Vehicle/Dynamics/Core/VehicleConfig.gd")
 const TireModelScript = preload("../Vehicle/Dynamics/Tires/TireModel.gd")
+const SetupManagerScript = preload("../Vehicle/Dynamics/Core/SetupManager.gd")
 
 const TV_SLIDER_SPECS := [
 	{"key": "live_k_us", "label": "k_us (Understeer)", "min": 0.0, "max": 0.025, "step": 0.0005, "fmt": "%.4f"},
@@ -89,6 +90,9 @@ var _setup_dropdown: OptionButton = null
 var _setup_name_edit: LineEdit = null
 var _setup_presets_cache: Array[Dictionary] = []
 var _active_setup_path: String = ""
+var _setup_mgr := SetupManagerScript.new()
+var _chk_reset_on_apply: CheckBox = null
+var _setup_diff_label: Label = null
 var _pinn_tire_check: CheckBox = null
 var _regen_blend_check: CheckBox = null
 var _chassis_telem_label: Label = null
@@ -773,6 +777,28 @@ func _build_chassis_tab() -> void:
 	btn_reset_base.pressed.connect(_on_setup_reset_baseline_pressed)
 	save_row.add_child(btn_reset_base)
 
+	var apply_row := HBoxContainer.new()
+	apply_row.add_theme_constant_override("separation", 6)
+	vbox.add_child(apply_row)
+
+	var btn_apply := Button.new()
+	btn_apply.text = "Aplicar Set-up"
+	btn_apply.focus_mode = Control.FOCUS_NONE
+	btn_apply.pressed.connect(_on_apply_unified_setup_pressed)
+	apply_row.add_child(btn_apply)
+
+	_chk_reset_on_apply = CheckBox.new()
+	_chk_reset_on_apply.text = "Reset en Meta"
+	_chk_reset_on_apply.focus_mode = Control.FOCUS_NONE
+	apply_row.add_child(_chk_reset_on_apply)
+
+	_setup_diff_label = Label.new()
+	_setup_diff_label.add_theme_font_size_override("font_size", 11)
+	_setup_diff_label.add_theme_color_override("font_color", Color(0.96, 0.72, 0.25))
+	_setup_diff_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_setup_diff_label.text = "Diffs vs Base: sin cambios"
+	vbox.add_child(_setup_diff_label)
+
 	for spec in CHASSIS_SLIDER_SPECS:
 		var k: String = spec["key"]
 		var row := HBoxContainer.new()
@@ -839,7 +865,13 @@ func _get_car_config():
 func _refresh_setup_dropdown() -> void:
 	if _setup_dropdown == null:
 		return
-	_setup_presets_cache = VehicleConfigScript.list_setup_presets()
+	var unified: Array[Dictionary] = _setup_mgr.list_presets()
+	var legacy: Array[Dictionary] = VehicleConfigScript.list_setup_presets()
+	_setup_presets_cache = []
+	for e in unified:
+		_setup_presets_cache.append(e)
+	for e in legacy:
+		_setup_presets_cache.append(e)
 	_setup_dropdown.clear()
 	var sel_idx := 0
 	for i in range(_setup_presets_cache.size()):
@@ -853,6 +885,42 @@ func _refresh_setup_dropdown() -> void:
 			_active_setup_path = String(_setup_presets_cache[sel_idx]["path"])
 		if _setup_name_edit != null and not _setup_name_edit.has_focus():
 			_setup_name_edit.text = String(_setup_presets_cache[sel_idx]["name"])
+	if _setup_mgr.base_snapshot.is_empty():
+		_setup_mgr.set_base_from_car(_get_car_config(), _ecu, "Baseline")
+	_refresh_setup_diffs()
+
+func _on_apply_unified_setup_pressed() -> void:
+	if _setup_dropdown == null or _setup_presets_cache.is_empty():
+		return
+	var idx: int = _setup_dropdown.selected
+	if idx < 0 or idx >= _setup_presets_cache.size():
+		return
+	var path: String = String(_setup_presets_cache[idx]["path"])
+	var reset_cb := Callable()
+	if _chk_reset_on_apply != null and _chk_reset_on_apply.button_pressed and _car != null and _car.has_method("reset_to_start_line"):
+		reset_cb = Callable(_car, "reset_to_start_line")
+	var ok: bool = _setup_mgr.load_preset(path, _get_car_config(), _ecu, reset_cb)
+	if not ok and _car != null and _car.has_method("load_setup_preset"):
+		ok = _car.load_setup_preset(path)
+	sync_from_ecu()
+	_refresh_setup_diffs()
+	if _setup_status_label != null:
+		_setup_status_label.text = "Set-up aplicado: %s" % String(_setup_presets_cache[idx]["name"]) if ok else "Error aplicando set-up"
+
+func _refresh_setup_diffs() -> void:
+	if _setup_diff_label == null:
+		return
+	var cur_snap: Dictionary = SetupManagerScript.capture_from_car(_get_car_config(), _ecu)
+	var diffs: Array[Dictionary] = _setup_mgr.compute_diffs_vs_base(cur_snap)
+	if diffs.is_empty():
+		_setup_diff_label.text = "Diffs vs %s: sin cambios" % _setup_mgr.base_preset_name
+		_setup_diff_label.add_theme_color_override("font_color", Color(0.45, 0.90, 0.65))
+		return
+	var parts: Array[String] = []
+	for d in diffs:
+		parts.append("%s: %s -> %s %s" % [String(d["label"]), String(d["base"]), String(d["current"]), String(d["unit"])])
+	_setup_diff_label.text = "Diffs vs %s:\n  %s" % [_setup_mgr.base_preset_name, "\n  ".join(parts)]
+	_setup_diff_label.add_theme_color_override("font_color", Color(0.96, 0.72, 0.25))
 
 
 func _on_chassis_slider_changed(val: float, key: String, fmt: String) -> void:
@@ -866,6 +934,7 @@ func _on_chassis_slider_changed(val: float, key: String, fmt: String) -> void:
 		var cfg = _get_car_config()
 		if cfg != null and cfg.has_method("apply_setup_params"):
 			cfg.apply_setup_params({key: val})
+	_refresh_setup_diffs()
 
 
 func _on_pinn_tire_toggled(toggled_on: bool) -> void:
