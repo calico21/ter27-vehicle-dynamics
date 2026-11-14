@@ -66,16 +66,16 @@ PARAM_NAMES: tuple[str, ...] = (
 )
 
 PARAM_BOUNDS: dict[str, tuple[float, float]] = {
-    "spring_stiffness_front": (20000.0, 70000.0),
-    "spring_stiffness_rear": (25000.0, 80000.0),
-    "arb_stiffness_front": (500.0, 14000.0),
-    "arb_stiffness_rear": (500.0, 14000.0),
-    "static_camber_front_deg": (-4.0, -0.5),
-    "static_camber_rear_deg": (-3.5, -0.2),
-    "toe_front_deg": (-0.6, 0.4),
-    "toe_rear_deg": (-0.3, 0.8),
-    "brake_bias_front": (0.52, 0.82),
-    "aero_balance_front": (0.35, 0.60),
+    "spring_stiffness_front": (30000.0, 65000.0),
+    "spring_stiffness_rear": (30000.0, 65000.0),
+    "arb_stiffness_front": (1500.0, 9000.0),
+    "arb_stiffness_rear": (1500.0, 9000.0),
+    "static_camber_front_deg": (-3.0, -0.8),
+    "static_camber_rear_deg": (-2.5, -0.5),
+    "toe_front_deg": (-0.5, 0.3),
+    "toe_rear_deg": (-0.2, 0.5),
+    "brake_bias_front": (0.54, 0.66),
+    "aero_balance_front": (0.44, 0.52),
 }
 
 PARAM_PRECISION: dict[str, int] = {
@@ -114,6 +114,9 @@ SURROGATE_METRICS: tuple[str, ...] = (
     "slalom_agility_s",
     "trail_brake_time_s",
     "trail_brake_dist_m",
+    "high_speed_beta_max_deg",
+    "high_speed_wz_rmse",
+    "brake_lockup_peak",
     "efficiency_kwh_km",
     "min_fz_n",
     "max_roll_deg",
@@ -234,28 +237,40 @@ def compute_physical_penalty(metrics: dict[str, Any]) -> tuple[bool, float]:
     min_fz = float(metrics.get("min_fz_n", 0.0))
     max_roll = float(metrics.get("max_roll_deg", 99.0))
     peak_beta = float(metrics.get("peak_beta_deg", 99.0))
+    hs_beta = float(metrics.get("high_speed_beta_max_deg", 99.0))
+    brk_lock = float(metrics.get("brake_lockup_peak", 9.9))
 
     penalty = 0.0
     if not ok:
         penalty += 10000.0
-    if not math.isfinite(min_fz) or min_fz < 40.0:
+    if not math.isfinite(min_fz) or min_fz < 110.0:
         val_fz = min_fz if math.isfinite(min_fz) else 0.0
-        penalty += 1000.0 + 50.0 * (40.0 - val_fz)
-    if not math.isfinite(max_roll) or max_roll > 1.8:
+        penalty += 1000.0 + 30.0 * (110.0 - val_fz)
+    if not math.isfinite(max_roll) or max_roll > 1.6:
         val_roll = max_roll if math.isfinite(max_roll) else 10.0
-        penalty += 1000.0 + 400.0 * (val_roll - 1.8)
-    if not math.isfinite(peak_beta) or peak_beta > 12.0:
+        penalty += 1000.0 + 400.0 * (val_roll - 1.6)
+    if not math.isfinite(peak_beta) or peak_beta > 4.5:
         val_beta = peak_beta if math.isfinite(peak_beta) else 30.0
-        penalty += 1000.0 + 150.0 * (val_beta - 12.0)
+        penalty += 1000.0 + 250.0 * (val_beta - 4.5)
+    if not math.isfinite(hs_beta) or hs_beta > 3.5:
+        val_hs = hs_beta if math.isfinite(hs_beta) else 30.0
+        penalty += 1000.0 + 300.0 * (val_hs - 3.5)
+    if not math.isfinite(brk_lock) or brk_lock > 0.16:
+        val_lock = brk_lock if math.isfinite(brk_lock) else 1.0
+        penalty += 1000.0 + 2500.0 * (val_lock - 0.16)
 
     feasible = (
         ok
         and math.isfinite(min_fz)
         and math.isfinite(max_roll)
         and math.isfinite(peak_beta)
-        and min_fz >= 40.0
-        and max_roll <= 1.8
-        and peak_beta <= 12.0
+        and math.isfinite(hs_beta)
+        and math.isfinite(brk_lock)
+        and min_fz >= 110.0
+        and max_roll <= 1.6
+        and peak_beta <= 4.5
+        and hs_beta <= 3.5
+        and brk_lock <= 0.16
     )
     return feasible, penalty
 
@@ -404,6 +419,8 @@ def compute_metric_scales(evaluated: list[dict[str, Any]]) -> dict[str, tuple[fl
         "slalom_wz_rmse_rads": 0.008,
         "trail_brake_time_s": 0.03,
         "trail_brake_dist_m": 0.25,
+        "high_speed_wz_rmse": 0.02,
+        "high_speed_beta_max_deg": 0.20,
         "efficiency_kwh_km": 0.004,
         "peak_beta_deg": 0.30,
     }
@@ -438,6 +455,8 @@ def evaluate_event_objective(
     trail_d = float(metrics.get("trail_brake_dist_m", 99.0))
     eff = float(metrics.get("efficiency_kwh_km", 9.9))
     peak_beta = float(metrics.get("peak_beta_deg", 15.0))
+    hs_wz = float(metrics.get("high_speed_wz_rmse", 9.9))
+    hs_beta = float(metrics.get("high_speed_beta_max_deg", 15.0))
     rear_lock = float(metrics.get("rear_lock_margin", 0.0))
 
     def _norm(key: str, val: float) -> float:
@@ -447,24 +466,26 @@ def evaluate_event_objective(
     rear_lock_soft = max(0.0, -rear_lock) * 5.0
 
     if event_key == "opt_skidpad_setup":
-        return skid_t + 0.25 * skid_wz + 0.02 * skid_beta + penalty
+        return skid_t + 0.25 * skid_wz + 0.02 * skid_beta + 0.03 * hs_beta + penalty
 
     if event_key == "opt_autocross_setup":
         score = (
-            0.35 * _norm("skidpad_lap_time_s", skid_t)
-            + 0.25 * _norm("slalom_wz_rmse_rads", slal_wz)
-            + 0.20 * _norm("trail_brake_time_s", trail_t)
+            0.30 * _norm("skidpad_lap_time_s", skid_t)
+            + 0.22 * _norm("slalom_wz_rmse_rads", slal_wz)
+            + 0.18 * _norm("trail_brake_time_s", trail_t)
             + 0.05 * _norm("trail_brake_dist_m", trail_d)
-            + 0.15 * _norm("peak_beta_deg", peak_beta)
+            + 0.13 * _norm("peak_beta_deg", peak_beta)
+            + 0.12 * _norm("high_speed_wz_rmse", hs_wz)
         )
         return score + 0.05 * rear_lock_soft + penalty
 
     if event_key == "opt_endurance_setup":
         score = (
-            0.40 * _norm("efficiency_kwh_km", eff)
-            + 0.25 * _norm("peak_beta_deg", peak_beta)
-            + 0.20 * _norm("slalom_wz_rmse_rads", slal_wz)
-            + 0.15 * _norm("skidpad_lap_time_s", skid_t)
+            0.35 * _norm("efficiency_kwh_km", eff)
+            + 0.22 * _norm("peak_beta_deg", peak_beta)
+            + 0.18 * _norm("slalom_wz_rmse_rads", slal_wz)
+            + 0.13 * _norm("skidpad_lap_time_s", skid_t)
+            + 0.12 * _norm("high_speed_beta_max_deg", hs_beta)
         )
         return score + 0.05 * rear_lock_soft + penalty
 
@@ -531,19 +552,34 @@ def _eval_surrogate_objective_vec(
     event_key: str,
     preds: dict[str, np.ndarray],
     scales: dict[str, tuple[float, float]],
+    u_mat: np.ndarray | None = None,
 ) -> np.ndarray:
     n = len(next(iter(preds.values())))
     min_fz = preds.get("min_fz_n", np.full(n, 200.0))
     max_roll = preds.get("max_roll_deg", np.full(n, 1.0))
     peak_beta = preds.get("peak_beta_deg", np.full(n, 3.0))
+    hs_beta = preds.get("high_speed_beta_max_deg", np.full(n, 1.5))
+    brk_lock = preds.get("brake_lockup_peak", np.full(n, 0.05))
 
     penalty = np.zeros(n, dtype=np.float64)
-    mask_fz = min_fz < 40.0
-    penalty[mask_fz] += 1000.0 + 50.0 * (40.0 - min_fz[mask_fz])
-    mask_roll = max_roll > 1.8
-    penalty[mask_roll] += 1000.0 + 400.0 * (max_roll[mask_roll] - 1.8)
-    mask_beta = peak_beta > 12.0
-    penalty[mask_beta] += 1000.0 + 150.0 * (peak_beta[mask_beta] - 12.0)
+    mask_fz = min_fz < 110.0
+    penalty[mask_fz] += 1000.0 + 30.0 * (110.0 - min_fz[mask_fz])
+    mask_roll = max_roll > 1.6
+    penalty[mask_roll] += 1000.0 + 400.0 * (max_roll[mask_roll] - 1.6)
+    mask_beta = peak_beta > 4.5
+    penalty[mask_beta] += 1000.0 + 250.0 * (peak_beta[mask_beta] - 4.5)
+    mask_hs = hs_beta > 3.5
+    penalty[mask_hs] += 1000.0 + 300.0 * (hs_beta[mask_hs] - 3.5)
+    mask_lock = brk_lock > 0.16
+    penalty[mask_lock] += 1000.0 + 2500.0 * (brk_lock[mask_lock] - 0.16)
+
+    # Gentle interior regularization to avoid L-BFGS-B pegging on flat RBF plateaus
+    interior_pen = np.zeros(n, dtype=np.float64)
+    if u_mat is not None:
+        edge_viol = np.maximum(0.0, 0.06 - u_mat) + np.maximum(0.0, u_mat - 0.94)
+        interior_pen = 0.25 * np.sum(edge_viol * edge_viol, axis=1) + 0.002 * np.sum(
+            (u_mat - 0.5) ** 2, axis=1
+        )
 
     def _norm(key: str, arr: np.ndarray) -> np.ndarray:
         lo, span = scales.get(key, (0.0, 1.0))
@@ -558,27 +594,32 @@ def _eval_surrogate_objective_vec(
     slal_wz = preds["slalom_wz_rmse_rads"]
     trail_t = preds["trail_brake_time_s"]
     trail_d = preds["trail_brake_dist_m"]
+    hs_wz = preds.get("high_speed_wz_rmse", np.zeros(n))
     eff = preds["efficiency_kwh_km"]
 
     if event_key == "opt_skidpad_setup":
-        return skid_t + 0.25 * skid_wz + 0.02 * skid_beta + penalty
+        return skid_t + 0.25 * skid_wz + 0.02 * skid_beta + 0.03 * hs_beta + interior_pen + penalty
     if event_key == "opt_autocross_setup":
         return (
-            0.35 * _norm("skidpad_lap_time_s", skid_t)
-            + 0.25 * _norm("slalom_wz_rmse_rads", slal_wz)
-            + 0.20 * _norm("trail_brake_time_s", trail_t)
+            0.30 * _norm("skidpad_lap_time_s", skid_t)
+            + 0.22 * _norm("slalom_wz_rmse_rads", slal_wz)
+            + 0.18 * _norm("trail_brake_time_s", trail_t)
             + 0.05 * _norm("trail_brake_dist_m", trail_d)
-            + 0.15 * _norm("peak_beta_deg", peak_beta)
+            + 0.13 * _norm("peak_beta_deg", peak_beta)
+            + 0.12 * _norm("high_speed_wz_rmse", hs_wz)
             + 0.05 * rear_lock_soft
+            + interior_pen
             + penalty
         )
     if event_key == "opt_endurance_setup":
         return (
-            0.40 * _norm("efficiency_kwh_km", eff)
-            + 0.25 * _norm("peak_beta_deg", peak_beta)
-            + 0.20 * _norm("slalom_wz_rmse_rads", slal_wz)
-            + 0.15 * _norm("skidpad_lap_time_s", skid_t)
+            0.35 * _norm("efficiency_kwh_km", eff)
+            + 0.22 * _norm("peak_beta_deg", peak_beta)
+            + 0.18 * _norm("slalom_wz_rmse_rads", slal_wz)
+            + 0.13 * _norm("skidpad_lap_time_s", skid_t)
+            + 0.12 * _norm("high_speed_beta_max_deg", hs_beta)
             + 0.05 * rear_lock_soft
+            + interior_pen
             + penalty
         )
     raise ValueError(f"Unknown event_key: {event_key}")
@@ -615,7 +656,7 @@ def propose_surrogate_candidates(
     proposed_u: list[np.ndarray] = []
 
     for ev in event_keys:
-        scores = _eval_surrogate_objective_vec(ev, preds_cloud, scales)
+        scores = _eval_surrogate_objective_vec(ev, preds_cloud, scales, X_cloud)
         top_idxs = np.argsort(scores)[:5]
 
         best_u = X_cloud[int(top_idxs[0])].copy()
@@ -624,7 +665,7 @@ def propose_surrogate_candidates(
         def _obj_single(u_vec: np.ndarray) -> float:
             u_c = np.clip(u_vec, 0.0, 1.0)[None, :]
             p_one = _predict_metrics_batch(models, u_c)
-            return float(_eval_surrogate_objective_vec(ev, p_one, scales)[0])
+            return float(_eval_surrogate_objective_vec(ev, p_one, scales, u_c)[0])
 
         if HAS_SCIPY and scipy_minimize is not None:
             for idx in top_idxs[:3]:
@@ -722,7 +763,7 @@ def print_comparison_table(
     print("=" * 108)
     print(
         f"Evaluations : {len(evaluated)} total | {n_ok} ok | {n_feas} feasible "
-        f"(min_fz>=40N, max_roll<=1.8deg, peak_beta<=12deg)"
+        f"(min_fz>=110N, max_roll<=1.6deg, peak_beta<=4.5deg, hs_beta<=3.5deg, brk_lock<=0.16)"
     )
     print(
         f"Surrogate   : {'SciPy RBFInterpolator (TPS) + L-BFGS-B' if HAS_SCIPY else 'NumPy Multiquadric RBF'} "
@@ -732,9 +773,9 @@ def print_comparison_table(
     bm = baseline.get("metrics", {})
     print("[METRICS COMPARISON: BASELINE vs OPTIMAL PRESETS]")
     print(
-        "  Setup                 | #  | Skid(s) | LatG  | wzRMSE | SlalRMSE | Brk(m) | Brk(s) | kWh/km | MinFz | Roll  | Beta  | Feas"
+        "  Setup                 | #   | Skid(s) | LatG  | SlalRMSE | Brk(m) | HSBeta | BrkLck | kWh/km | MinFz | Roll  | Beta  | Feas"
     )
-    print("  " + "-" * 104)
+    print("  " + "-" * 114)
 
     rows: list[tuple[str, dict[str, Any]]] = [("Baseline", baseline)]
     for ev_key in ("opt_skidpad_setup", "opt_autocross_setup", "opt_endurance_setup"):
@@ -746,13 +787,13 @@ def print_comparison_table(
         idx = entry.get("sample_index", entry.get("index", 0))
         feas_str = "YES" if m.get("feasible", False) else "NO"
         print(
-            f"  {name:21s} | {idx:2d} | "
+            f"  {name:21s} | {idx:3d} | "
             f"{float(m.get('skidpad_lap_time_s', float('nan'))):7.3f} | "
             f"{float(m.get('skidpad_lat_g', float('nan'))):5.3f} | "
-            f"{float(m.get('skidpad_wz_rmse', float('nan'))):6.4f} | "
             f"{float(m.get('slalom_wz_rmse_rads', float('nan'))):8.5f} | "
             f"{float(m.get('trail_brake_dist_m', float('nan'))):6.2f} | "
-            f"{float(m.get('trail_brake_time_s', float('nan'))):6.3f} | "
+            f"{float(m.get('high_speed_beta_max_deg', float('nan'))):5.2f}d | "
+            f"{float(m.get('brake_lockup_peak', float('nan'))):6.4f} | "
             f"{float(m.get('efficiency_kwh_km', float('nan'))):6.4f} | "
             f"{float(m.get('min_fz_n', float('nan'))):5.0f} | "
             f"{float(m.get('max_roll_deg', float('nan'))):4.2f}d | "

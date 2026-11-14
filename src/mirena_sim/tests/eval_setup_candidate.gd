@@ -478,6 +478,7 @@ static func _run_trail_braking(cfg: VehicleConfigScript, map_id: int) -> Diction
 	var max_roll_deg: float = 0.0
 	var peak_beta_deg: float = 0.0
 	var rear_lock_margin: float = 1.0
+	var brake_lockup_peak: float = 0.0
 	var brake_time_s: float = 0.0
 	var brake_dist_m: float = 0.0
 	var total_dist_m: float = 0.0
@@ -535,6 +536,8 @@ static func _run_trail_braking(cfg: VehicleConfigScript, map_id: int) -> Diction
 			var front_slip: float = maxf(0.0, -minf(model.wheels[0].kappa, model.wheels[1].kappa))
 			var rear_slip: float = maxf(0.0, -minf(model.wheels[2].kappa, model.wheels[3].kappa))
 			rear_lock_margin = minf(rear_lock_margin, front_slip - rear_slip)
+			for wi in range(4):
+				brake_lockup_peak = maxf(brake_lockup_peak, absf(model.wheels[wi].kappa))
 
 	var completed: bool = finite_ok and reached_v_end
 	if not reached_v_end:
@@ -550,7 +553,82 @@ static func _run_trail_braking(cfg: VehicleConfigScript, map_id: int) -> Diction
 		"trail_min_fz_n": min_fz_n if min_fz_n < 1e8 else 0.0,
 		"trail_max_roll_deg": max_roll_deg,
 		"rear_lock_margin": rear_lock_margin,
+		"brake_lockup_peak": brake_lockup_peak,
 		"dist_m": total_dist_m,
+		"energy_kwh": energy_kwh
+	}
+
+
+static func _run_high_speed_corner(cfg: VehicleConfigScript, map_id: int) -> Dictionary:
+	const HIGH_SPEED_RADIUS_M: float = 32.0
+	const HIGH_SPEED_MPS: float = 26.389 # 95 km/h
+	var bundle: Dictionary = _init_model_and_inputs(cfg, map_id, HIGH_SPEED_MPS)
+	var model: VehicleDynamicsModelScript = bundle["model"]
+	var inputs: VehicleInputsScript = bundle["inputs"]
+
+	var total_s: float = 4.5
+	var settle_s: float = 1.5
+	var n_steps: int = int(round(total_s / SIM_DT))
+
+	var prev_steer: float = 0.0
+	var finite_ok: bool = true
+
+	var wz_err_sq_sum: float = 0.0
+	var meas_count: int = 0
+	var min_fz_n: float = 1e9
+	var max_roll_deg: float = 0.0
+	var max_beta_deg: float = 0.0
+	var dist_m: float = 0.0
+
+	var kappa_ref: float = 1.0 / HIGH_SPEED_RADIUS_M
+	var delta_ff: float = atan(cfg.wheelbase * kappa_ref)
+
+	for k in range(n_steps):
+		if not _is_state_finite(model):
+			finite_ok = false
+			break
+
+		var t_now: float = float(k) * SIM_DT
+		var vx: float = model.chassis_state.linear_velocity.x
+		var vy: float = model.chassis_state.linear_velocity.y
+		var wz: float = model.chassis_state.angular_velocity.z
+		var speed: float = sqrt(vx * vx + vy * vy)
+
+		var ramp: float = clampf(t_now / 0.6, 0.0, 1.0)
+		var wz_target: float = ramp * HIGH_SPEED_MPS * kappa_ref
+		var e_wz: float = wz_target - wz
+		var steer_raw: float = ramp * delta_ff + 0.18 * e_wz
+		var steer_cmd: float = move_toward(prev_steer, clampf(steer_raw, -cfg.max_steer_angle, cfg.max_steer_angle), 3.5 * SIM_DT)
+		prev_steer = steer_cmd
+
+		var v_err: float = HIGH_SPEED_MPS - speed
+		var throttle_cmd: float = clampf(0.28 + 0.35 * v_err, 0.0, 1.0)
+		inputs.throttle = throttle_cmd
+		inputs.brake = 0.0
+		inputs.steer_angle = steer_cmd
+		inputs.steer_normalized = steer_cmd / maxf(cfg.max_steer_angle, 1e-5)
+
+		var step_res: Dictionary = model.step_standalone(inputs, SIM_DT, 0.0)
+		dist_m += speed * SIM_DT
+
+		if t_now >= settle_s:
+			meas_count += 1
+			wz_err_sq_sum += e_wz * e_wz
+			var fz_min_step: float = _min_array_float(step_res["normal_forces"])
+			min_fz_n = minf(min_fz_n, fz_min_step)
+			max_roll_deg = maxf(max_roll_deg, absf(rad_to_deg(model.chassis_state.roll)))
+			var beta_deg_abs: float = absf(VehicleTelemetryScript.compute_beta_deg(vx, vy))
+			max_beta_deg = maxf(max_beta_deg, beta_deg_abs)
+
+	var wz_rmse: float = sqrt(wz_err_sq_sum / float(maxi(meas_count, 1))) if finite_ok else 9.9
+	var energy_kwh: float = model.hv_state.energy_kwh if model.hv_state != null else 0.0
+	return {
+		"ok": finite_ok and meas_count > 0,
+		"high_speed_beta_max_deg": max_beta_deg,
+		"high_speed_wz_rmse": wz_rmse,
+		"high_speed_min_fz_n": min_fz_n if min_fz_n < 1e8 else 0.0,
+		"high_speed_max_roll_deg": max_roll_deg,
+		"dist_m": dist_m,
 		"energy_kwh": energy_kwh
 	}
 
@@ -564,27 +642,51 @@ static func evaluate_candidate(cli: Dictionary, t0_usec: int) -> Dictionary:
 	var m1: Dictionary = _run_skidpad(cfg, map_id)
 	var m2: Dictionary = _run_slalom(cfg, map_id)
 	var m3: Dictionary = _run_trail_braking(cfg, map_id)
+	var m4: Dictionary = _run_high_speed_corner(cfg, map_id)
 
-	var ok: bool = bool(m1["ok"]) and bool(m2["ok"]) and bool(m3["ok"])
-	var min_fz_n: float = minf(float(m1["skidpad_min_fz_n"]), minf(float(m2["slalom_min_fz_n"]), float(m3["trail_min_fz_n"])))
-	var max_roll_deg: float = maxf(float(m1["skidpad_max_roll_deg"]), maxf(float(m2["slalom_max_roll_deg"]), float(m3["trail_max_roll_deg"])))
-	var peak_beta_deg: float = maxf(float(m1["skidpad_peak_beta_deg"]), maxf(float(m2["slalom_peak_beta_deg"]), float(m3["trail_peak_beta_deg"])))
+	var ok: bool = bool(m1["ok"]) and bool(m2["ok"]) and bool(m3["ok"]) and bool(m4["ok"])
+	var min_fz_n: float = minf(
+		minf(float(m1["skidpad_min_fz_n"]), float(m2["slalom_min_fz_n"])),
+		minf(float(m3["trail_min_fz_n"]), float(m4["high_speed_min_fz_n"]))
+	)
+	var max_roll_deg: float = maxf(
+		maxf(float(m1["skidpad_max_roll_deg"]), float(m2["slalom_max_roll_deg"])),
+		maxf(float(m3["trail_max_roll_deg"]), float(m4["high_speed_max_roll_deg"]))
+	)
+	var peak_beta_deg: float = maxf(
+		maxf(float(m1["skidpad_peak_beta_deg"]), float(m2["slalom_peak_beta_deg"])),
+		maxf(float(m3["trail_peak_beta_deg"]), float(m4["high_speed_beta_max_deg"]))
+	)
+	var high_speed_beta_max_deg: float = float(m4["high_speed_beta_max_deg"])
+	var high_speed_wz_rmse: float = float(m4["high_speed_wz_rmse"])
+	var brake_lockup_peak: float = float(m3["brake_lockup_peak"])
 
-	var total_energy_kwh: float = float(m1["energy_kwh"]) + float(m2["energy_kwh"]) + float(m3["energy_kwh"])
-	var total_dist_km: float = maxf((float(m1["dist_m"]) + float(m2["dist_m"]) + float(m3["dist_m"])) / 1000.0, 1e-6)
+	var total_energy_kwh: float = float(m1["energy_kwh"]) + float(m2["energy_kwh"]) + float(m3["energy_kwh"]) + float(m4["energy_kwh"])
+	var total_dist_km: float = maxf((float(m1["dist_m"]) + float(m2["dist_m"]) + float(m3["dist_m"]) + float(m4["dist_m"])) / 1000.0, 1e-6)
 	var efficiency_kwh_km: float = total_energy_kwh / total_dist_km
 
 	var penalty: float = 0.0
 	if not ok:
 		penalty += 10000.0
-	if min_fz_n < 40.0:
-		penalty += 1000.0 + 50.0 * (40.0 - min_fz_n)
-	if max_roll_deg > 1.8:
-		penalty += 1000.0 + 400.0 * (max_roll_deg - 1.8)
-	if peak_beta_deg > 12.0:
-		penalty += 1000.0 + 150.0 * (peak_beta_deg - 12.0)
+	if min_fz_n < 110.0:
+		penalty += 1000.0 + 30.0 * (110.0 - min_fz_n)
+	if max_roll_deg > 1.6:
+		penalty += 1000.0 + 400.0 * (max_roll_deg - 1.6)
+	if peak_beta_deg > 4.5:
+		penalty += 1000.0 + 250.0 * (peak_beta_deg - 4.5)
+	if high_speed_beta_max_deg > 3.5:
+		penalty += 1000.0 + 300.0 * (high_speed_beta_max_deg - 3.5)
+	if brake_lockup_peak > 0.16:
+		penalty += 1000.0 + 2500.0 * (brake_lockup_peak - 0.16)
 
-	var feasible: bool = ok and min_fz_n >= 40.0 and max_roll_deg <= 1.8 and peak_beta_deg <= 12.0
+	var feasible: bool = (
+		ok
+		and min_fz_n >= 110.0
+		and max_roll_deg <= 1.6
+		and peak_beta_deg <= 4.5
+		and high_speed_beta_max_deg <= 3.5
+		and brake_lockup_peak <= 0.16
+	)
 	var eval_time_s: float = float(Time.get_ticks_usec() - t0_usec) * 1e-6
 
 	return {
@@ -595,6 +697,9 @@ static func evaluate_candidate(cli: Dictionary, t0_usec: int) -> Dictionary:
 		"min_fz_n": min_fz_n,
 		"max_roll_deg": max_roll_deg,
 		"peak_beta_deg": peak_beta_deg,
+		"high_speed_beta_max_deg": high_speed_beta_max_deg,
+		"high_speed_wz_rmse": high_speed_wz_rmse,
+		"brake_lockup_peak": brake_lockup_peak,
 		"skidpad_lap_time_s": float(m1["skidpad_lap_time_s"]),
 		"skidpad_lat_g": float(m1["skidpad_lat_g"]),
 		"skidpad_wz_rmse": float(m1["skidpad_wz_rmse"]),
