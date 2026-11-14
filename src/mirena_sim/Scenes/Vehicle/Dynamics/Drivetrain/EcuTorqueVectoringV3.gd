@@ -182,7 +182,15 @@ var tc_fx_prev: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var tc_kappa_opt: Array[float] = [0.11, 0.11, 0.11, 0.11]
 
 # ── Live Map Profile & Active Tunables ──────────────────────────────────────
+const TV_MAPS_RES_DIR := "res://Scenes/Vehicle/Dynamics/Core/Config/tv_maps/"
+const TV_MAPS_USER_DIR := "user://tv_maps/"
+const TV_MAP_PROTECTED_FILE := "00_open_4wd.json"
+
 var active_map_id: int = TVMap.AUTOCROSS_NEUTRAL
+var active_map_path: String = ""
+var active_map_filename: String = ""
+var active_map_display_name: String = ""
+var _available_tv_maps: Array[Dictionary] = []
 var k_us_active: float = 0.011
 var tv_max_mz_active: float = 750.0
 var tc_kp_active: float = 21.0
@@ -298,16 +306,30 @@ func set_map(map_id: int) -> void:
 	live_throttle_mz_cut = 0.40
 	_custom_params_active = false
 
-## Cycles to the next live TV map (0 -> 1 -> 2 -> 3 -> 0) and returns the new active_map_id.
+## Cycles to the next live TV map across all JSON files in tv_maps/ and returns the new index.
 func cycle_map() -> int:
-	var next_id: int = (active_map_id + 1) % 4
-	set_map(next_id)
-	return active_map_id
+	var maps: Array[Dictionary] = list_available_tv_maps()
+	if maps.is_empty():
+		var next_id: int = (active_map_id + 1) % 4
+		set_map(next_id)
+		return active_map_id
+	var cur_idx: int = -1
+	for i in range(maps.size()):
+		if String(maps[i]["path"]) == active_map_path:
+			cur_idx = i
+			break
+	if cur_idx < 0:
+		cur_idx = clampi(active_map_id, 0, maps.size() - 1)
+	var next_idx: int = (cur_idx + 1) % maps.size()
+	load_tv_map_from_file(String(maps[next_idx]["path"]))
+	return next_idx
 
 ## Returns the human-readable name of the currently active TV map profile.
 func get_map_name() -> String:
 	if _custom_params_active:
 		return "CUSTOM"
+	if active_map_display_name != "":
+		return active_map_display_name
 	if TV_MAP_PROFILES.has(active_map_id):
 		return String(TV_MAP_PROFILES[active_map_id]["name"])
 	return "UNKNOWN"
@@ -332,7 +354,9 @@ func get_live_params() -> Dictionary:
 		"live_min_fx_reserve": live_min_fx_reserve,
 		"live_tc_kp": live_tc_kp,
 		"live_k_beta": live_k_beta,
-		"live_throttle_mz_cut": live_throttle_mz_cut
+		"live_throttle_mz_cut": live_throttle_mz_cut,
+		"front_drive_bias": front_split_active,
+		"can_latency_ms": can_latency_ms
 	}
 
 ## Updates a single live TV parameter in-place without resetting EKF or thermal states.
@@ -354,19 +378,176 @@ func set_live_param(key: String, val: float) -> void:
 			live_k_beta = clampf(val, 0.0, 15000.0)
 		"live_throttle_mz_cut", "throttle_mz_cut":
 			live_throttle_mz_cut = clampf(val, 0.0, 1.0)
+		"front_drive_bias":
+			front_split_active = clampf(val, 0.0, 1.0)
+			rear_split_active = 1.0 - front_split_active
+		"can_latency_ms":
+			can_latency_ms = clampf(val, 0.0, 100.0)
+			hardware_realism_enabled = can_latency_ms > 0.0
 	_custom_params_active = true
 
 ## Exports the current live TV tuning parameters as a C/C++ #define header snippet for TeR_ECU.
 func export_c_header_snippet() -> String:
+	var dt := Time.get_datetime_string_from_system(false, true)
+	var setup_label := active_map_display_name if active_map_display_name != "" else get_map_name()
 	return (
-		"// TeR27 ECU Torque Vectoring Live Calibration (%s)\n" % get_map_name()
+		"// TeR27 ECU Torque Vectoring Live Calibration: %s (%s)\n" % [setup_label, dt]
 		+ "#define GP_K_US              %.5ff\n" % live_k_us
 		+ "#define GP_TV_MAX_MZ         %.1ff\n" % live_max_mz
 		+ "#define GP_MIN_FX_RESERVE    %.4ff\n" % live_min_fx_reserve
 		+ "#define GP_TC_KP             %.3ff\n" % live_tc_kp
 		+ "#define GP_K_BETA            %.1ff\n" % live_k_beta
 		+ "#define GP_THROTTLE_MZ_CUT   %.3ff\n" % live_throttle_mz_cut
+		+ "#define GP_FRONT_DRIVE_BIAS  %.3ff\n" % front_split_active
+		+ "#define GP_CAN_LATENCY_MS    %.1ff\n" % can_latency_ms
 	)
+
+## Scans res://.../tv_maps/ and user://tv_maps/ for .json TV setups sorted alphabetically.
+func list_available_tv_maps() -> Array[Dictionary]:
+	var entries: Array[Dictionary] = []
+	var seen_names: Dictionary = {}
+	for dir_path in [TV_MAPS_RES_DIR, TV_MAPS_USER_DIR]:
+		var d := DirAccess.open(dir_path)
+		if d == null:
+			continue
+		d.list_dir_begin()
+		var fname := d.get_next()
+		while fname != "":
+			if not d.current_is_dir() and fname.to_lower().ends_with(".json"):
+				var full_path: String = dir_path + fname
+				var meta := _read_tv_map_metadata(full_path)
+				var base_name := fname.get_basename()
+				if not seen_names.has(full_path):
+					seen_names[full_path] = true
+					entries.append({
+						"id": entries.size(),
+						"name": String(meta.get("name", base_name)),
+						"filename": base_name,
+						"path": full_path,
+						"description": String(meta.get("description", ""))
+					})
+			fname = d.get_next()
+		d.list_dir_end()
+	entries.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return String(a["filename"]) < String(b["filename"])
+	)
+	for i in range(entries.size()):
+		entries[i]["id"] = i
+	_available_tv_maps = entries
+	return entries
+
+func _read_tv_map_metadata(file_path: String) -> Dictionary:
+	var f := FileAccess.open(file_path, FileAccess.READ)
+	if f == null:
+		return {}
+	var parsed = JSON.parse_string(f.get_as_text())
+	f.close()
+	if parsed is Dictionary:
+		return parsed
+	return {}
+
+## Loads a TV setup JSON file and applies its parameters in-place without resetting EKF or thermal states.
+func load_tv_map_from_file(file_path: String) -> bool:
+	var f := FileAccess.open(file_path, FileAccess.READ)
+	if f == null:
+		return false
+	var parsed = JSON.parse_string(f.get_as_text())
+	f.close()
+	if not (parsed is Dictionary):
+		return false
+	var data: Dictionary = parsed
+	var params: Dictionary = data.get("params", {})
+	if params.has("k_us"):
+		live_k_us = clampf(float(params["k_us"]), 0.0, 0.05)
+		k_us_active = live_k_us
+	if params.has("max_mz"):
+		live_max_mz = clampf(float(params["max_mz"]), 0.0, 1500.0)
+		tv_max_mz_active = live_max_mz
+	if params.has("min_fx_reserve"):
+		live_min_fx_reserve = clampf(float(params["min_fx_reserve"]), 0.0, 0.95)
+		min_fx_reserve_active = live_min_fx_reserve
+	if params.has("tc_kp"):
+		live_tc_kp = clampf(float(params["tc_kp"]), 0.0, 60.0)
+		tc_kp_active = live_tc_kp
+	if params.has("k_beta"):
+		live_k_beta = clampf(float(params["k_beta"]), 0.0, 15000.0)
+	if params.has("throttle_mz_cut"):
+		live_throttle_mz_cut = clampf(float(params["throttle_mz_cut"]), 0.0, 1.0)
+	if params.has("front_drive_bias"):
+		front_split_active = clampf(float(params["front_drive_bias"]), 0.0, 1.0)
+		rear_split_active = 1.0 - front_split_active
+	if params.has("can_latency_ms"):
+		can_latency_ms = clampf(float(params["can_latency_ms"]), 0.0, 100.0)
+		hardware_realism_enabled = can_latency_ms > 0.0
+	active_map_path = file_path
+	active_map_filename = file_path.get_file().get_basename()
+	active_map_display_name = String(data.get("name", active_map_filename))
+	_custom_params_active = false
+	var maps: Array[Dictionary] = list_available_tv_maps()
+	for i in range(maps.size()):
+		if String(maps[i]["path"]) == file_path:
+			active_map_id = i
+			break
+	return true
+
+## Saves current live TV parameters to a JSON file in tv_maps/ and refreshes the map list.
+func save_current_tv_map_to_file(map_name: String, description: String = "", overwrite_path: String = "") -> String:
+	var target_path := overwrite_path
+	if target_path == "":
+		var sanitized := _sanitize_map_filename(map_name)
+		if sanitized == "":
+			sanitized = "custom_tv_map"
+		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(TV_MAPS_RES_DIR))
+		target_path = TV_MAPS_RES_DIR + sanitized + ".json"
+	var payload := {
+		"name": map_name if map_name.strip_edges() != "" else target_path.get_file().get_basename(),
+		"description": description,
+		"author": "TeR27 Vehicle Dynamics",
+		"params": {
+			"k_us": live_k_us,
+			"max_mz": live_max_mz,
+			"min_fx_reserve": live_min_fx_reserve,
+			"tc_kp": live_tc_kp,
+			"k_beta": live_k_beta,
+			"throttle_mz_cut": live_throttle_mz_cut,
+			"front_drive_bias": front_split_active,
+			"can_latency_ms": can_latency_ms
+		}
+	}
+	var f := FileAccess.open(target_path, FileAccess.WRITE)
+	if f == null:
+		return ""
+	f.store_string(JSON.stringify(payload, "\t") + "\n")
+	f.close()
+	active_map_path = target_path
+	active_map_filename = target_path.get_file().get_basename()
+	active_map_display_name = String(payload["name"])
+	_custom_params_active = false
+	list_available_tv_maps()
+	return target_path
+
+## Deletes a TV map JSON file, protecting 00_open_4wd.json.
+func delete_tv_map_file(file_path: String) -> bool:
+	if file_path == "" or file_path.get_file() == TV_MAP_PROTECTED_FILE:
+		return false
+	var abs_path := ProjectSettings.globalize_path(file_path)
+	var err := DirAccess.remove_absolute(abs_path)
+	if err != OK:
+		return false
+	list_available_tv_maps()
+	return true
+
+func _sanitize_map_filename(raw_name: String) -> String:
+	var s := raw_name.strip_edges().to_lower()
+	var out := ""
+	for i in range(s.length()):
+		var ch := s[i]
+		if (ch >= "a" and ch <= "z") or (ch >= "0" and ch <= "9"):
+			out += ch
+		elif ch == " " or ch == "-" or ch == "_":
+			if not out.ends_with("_"):
+				out += "_"
+	return out.strip_edges().trim_prefix("_").trim_suffix("_")
 
 ## Enables or disables CAN bus latency + 4096 PPR encoder quantization simulation.
 func set_hardware_realism(

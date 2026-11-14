@@ -496,6 +496,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="",
         help="Optional report output path (.json, .md, or stem for both).",
     )
+    parser.add_argument(
+        "--export-json-dir",
+        type=str,
+        default="",
+        help="Optional directory to export recommended TV maps as tv_maps/*.json files.",
+    )
     return parser.parse_args(argv)
 
 
@@ -572,6 +578,29 @@ def main(argv: list[str] | None = None) -> int:
 
     print_stdout_report(summary)
     write_optional_output(args.output.strip() or None, summary)
+    export_dir = args.export_json_dir.strip()
+    if export_dir and recommendations:
+        out_dir = Path(export_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for event_name, rec in recommendations.items():
+            p = rec.get("params", {})
+            payload = {
+                "name": f"Pareto {event_name.title()}",
+                "description": f"Auto-tuned Pareto recommendation for {event_name}",
+                "author": "optimize_tv_maps.py",
+                "params": {
+                    "k_us": p.get("k_us", 0.011),
+                    "max_mz": p.get("max_mz", 750.0),
+                    "min_fx_reserve": p.get("min_fx_reserve", 0.06),
+                    "tc_kp": p.get("tc_kp", 22.5),
+                    "k_beta": p.get("k_beta", 4800.0),
+                    "throttle_mz_cut": p.get("throttle_mz_cut", 0.45),
+                    "front_drive_bias": p.get("front_drive_bias", 0.35),
+                    "can_latency_ms": p.get("can_latency_ms", 12.0),
+                },
+            }
+            out_file = out_dir / f"pareto_{event_name.lower().replace(' ', '_')}.json"
+            out_file.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return 0 if feasible else 1
 
 

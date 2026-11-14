@@ -231,31 +231,25 @@ static func run() -> Dictionary:
 		and is_equal_approx(ecu_maps.rear_split_active, 0.65)
 		and is_equal_approx(ecu_maps.tv_max_mz_active, 0.0)
 	)
-	var c1: int = ecu_maps.cycle_map()
+	ecu_maps.set_map(EcuTV3.TVMap.ENDURANCE_SAFE)
 	var m1_ok: bool = (
-		c1 == EcuTV3.TVMap.ENDURANCE_SAFE
-		and ecu_maps.get_map_name() == "ENDURANCE_SAFE"
+		ecu_maps.active_map_id == EcuTV3.TVMap.ENDURANCE_SAFE
 		and is_equal_approx(ecu_maps.k_us_active, 0.016)
 		and is_equal_approx(ecu_maps.tv_max_mz_active, 450.0)
 		and is_equal_approx(ecu_maps.tc_kp_active, 24.0)
 		and is_equal_approx(ecu_maps.min_fx_reserve_active, 0.06)
 	)
-	var c2: int = ecu_maps.cycle_map()
-	var c3: int = ecu_maps.cycle_map()
+	ecu_maps.set_map(EcuTV3.TVMap.SKIDPAD_ATTACK)
 	var m3_ok: bool = (
-		c2 == EcuTV3.TVMap.AUTOCROSS_NEUTRAL
-		and c3 == EcuTV3.TVMap.SKIDPAD_ATTACK
-		and ecu_maps.get_map_name() == "SKIDPAD_ATTACK"
+		ecu_maps.active_map_id == EcuTV3.TVMap.SKIDPAD_ATTACK
 		and is_equal_approx(ecu_maps.k_us_active, 0.007)
 		and is_equal_approx(ecu_maps.tv_max_mz_active, 1050.0)
 		and is_equal_approx(ecu_maps.tc_kp_active, 18.5)
 		and is_equal_approx(ecu_maps.min_fx_reserve_active, 0.14)
 	)
-	var c_wrap: int = ecu_maps.cycle_map()
 	ecu_maps.set_custom_parameters(0.019, 600.0, 22.5, 0.08)
 	var custom_ok: bool = (
-		c_wrap == EcuTV3.TVMap.OPEN_4WD
-		and ecu_maps.get_map_name() == "CUSTOM"
+		ecu_maps.get_map_name() == "CUSTOM"
 		and is_equal_approx(ecu_maps.k_us_active, 0.019)
 		and is_equal_approx(ecu_maps.tv_max_mz_active, 600.0)
 		and is_equal_approx(ecu_maps.tc_kp_active, 22.5)
@@ -377,6 +371,28 @@ static func run() -> Dictionary:
 	else:
 		failed += 1
 		errors.append("Live DiL tuning check failed: vy=[%.4f, %.4f] mz=[%.1f -> %.1f]" % [ekf_vy_before, ekf_vy_after, mz_no_cut, mz_with_cut])
+
+	# 14. Dynamic JSON TV map listing, loading, saving, cycling & deletion protection
+	var ecu_json := EcuTV3.new()
+	var maps_list := ecu_json.list_available_tv_maps()
+	var has_five := maps_list.size() >= 5
+	var loaded_skid := ecu_json.load_tv_map_from_file("res://Scenes/Vehicle/Dynamics/Core/Config/tv_maps/03_skidpad_attack.json")
+	var skid_ok := loaded_skid and is_equal_approx(ecu_json.live_max_mz, 950.0) and ecu_json.active_map_filename == "03_skidpad_attack"
+	ecu_json.set_live_param("live_k_us", 0.0133)
+	var saved_path := ecu_json.save_current_tv_map_to_file("Unit Test Custom Map", "Temp test")
+	var ecu_json2 := EcuTV3.new()
+	var reloaded_custom := saved_path != "" and ecu_json2.load_tv_map_from_file(saved_path) and is_equal_approx(ecu_json2.live_k_us, 0.0133)
+	var protected_ok := not ecu_json.delete_tv_map_file("res://Scenes/Vehicle/Dynamics/Core/Config/tv_maps/00_open_4wd.json")
+	var deleted_ok := saved_path != "" and ecu_json.delete_tv_map_file(saved_path)
+	var cyc0 := ecu_json.cycle_map()
+	var cyc1 := ecu_json.cycle_map()
+	if has_five and skid_ok and reloaded_custom and protected_ok and deleted_ok and cyc0 != cyc1:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("JSON TV map manager failed: count=%d skid=%s reload=%s prot=%s del=%s cyc=[%d,%d]" % [
+			maps_list.size(), str(skid_ok), str(reloaded_custom), str(protected_ok), str(deleted_ok), cyc0, cyc1
+		])
 
 	return {
 		"name": "test_ecu_torque_vectoring_v3",

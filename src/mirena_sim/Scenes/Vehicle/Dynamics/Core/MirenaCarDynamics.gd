@@ -318,9 +318,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			print("[ECU Mode]: %s" % mode_name)
 			_update_minimal_hud()
 		elif event.keycode == KEY_F6:
+			if _tv_overlay != null and _tv_overlay.has_method("is_text_input_focused") and _tv_overlay.is_text_input_focused():
+				return
 			if model != null and model.ecu_tv_v3 != null:
 				tv_map_id = model.ecu_tv_v3.cycle_map()
-				tv_map_name = model.ecu_tv_v3.get_map_name()
+				tv_map_name = model.ecu_tv_v3.active_map_filename if model.ecu_tv_v3.active_map_filename != "" else model.ecu_tv_v3.get_map_name()
 				if inputs != null:
 					inputs.tv_map_id = tv_map_id
 				print("[TV Map]: %d (%s)" % [tv_map_id, tv_map_name])
@@ -332,7 +334,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				_tv_overlay.toggle_visibility()
 		elif event.keycode == KEY_F9:
 			if telemetry_recorder != null:
-				var rec_on: bool = telemetry_recorder.toggle_recording(_get_active_track_name(), tv_map_name)
+				var rec_map_name := tv_map_name
+				if model != null and model.ecu_tv_v3 != null and model.ecu_tv_v3.active_map_filename != "":
+					rec_map_name = model.ecu_tv_v3.active_map_filename
+				var rec_on: bool = telemetry_recorder.toggle_recording(_get_active_track_name(), rec_map_name)
 				if rec_on:
 					print("[Telemetry REC ON]: %s" % telemetry_recorder.get_last_file_path())
 				else:
@@ -883,7 +888,8 @@ func _update_minimal_hud() -> void:
 		return
 	var kmh: float = linear_velocity.length() * 3.6
 	var mode_str: String = "ECU TV v3 4WD [F7]" if ecu_driving_mode == 1 else "LINEAL 4WD [F7]"
-	var map_str: String = "  |  MAP %d: %s [F6]" % [tv_map_id, tv_map_name] if ecu_driving_mode == 1 else ""
+	var total_maps: int = model.ecu_tv_v3._available_tv_maps.size() if (model != null and model.ecu_tv_v3 != null and not model.ecu_tv_v3._available_tv_maps.is_empty()) else 4
+	var map_str: String = "  |  TV Map [%d/%d]: %s [F6]" % [tv_map_id + 1, total_maps, tv_map_name] if ecu_driving_mode == 1 else ""
 	var tc_str: String = "  |  TC ACTIVE" if tv_tc_active else ""
 	var rec_ind: String = telemetry_recorder.get_hud_indicator() if telemetry_recorder != null else ""
 	var rec_str: String = rec_ind if rec_ind != "" else "  |  [F9] REC"

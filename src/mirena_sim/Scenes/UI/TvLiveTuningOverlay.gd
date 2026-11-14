@@ -7,7 +7,9 @@ const TV_SLIDER_SPECS := [
 	{"key": "live_min_fx_reserve", "label": "min_fx_reserve (N)", "min": 0.0, "max": 2500.0, "step": 50.0, "fmt": "%.0f"},
 	{"key": "live_tc_kp", "label": "tc_kp", "min": 0.0, "max": 1000.0, "step": 25.0, "fmt": "%.0f"},
 	{"key": "live_k_beta", "label": "k_beta (Nm/rad)", "min": 0.0, "max": 12000.0, "step": 100.0, "fmt": "%.0f"},
-	{"key": "live_throttle_mz_cut", "label": "throttle_mz_cut", "min": 0.0, "max": 1.0, "step": 0.05, "fmt": "%.2f"}
+	{"key": "live_throttle_mz_cut", "label": "throttle_mz_cut", "min": 0.0, "max": 1.0, "step": 0.05, "fmt": "%.2f"},
+	{"key": "front_drive_bias", "label": "front_drive_bias", "min": 0.0, "max": 1.0, "step": 0.05, "fmt": "%.2f"},
+	{"key": "can_latency_ms", "label": "can_latency_ms", "min": 0.0, "max": 50.0, "step": 1.0, "fmt": "%.1f"}
 ]
 
 const GP_SLIDER_SPECS := [
@@ -36,6 +38,9 @@ var _gp_val_labels: Dictionary = {}
 
 var _telem_label: Label = null
 var _status_label: Label = null
+var _map_dropdown: OptionButton = null
+var _map_name_edit: LineEdit = null
+var _tv_maps_cache: Array[Dictionary] = []
 
 var _steer_raw_bar: ProgressBar = null
 var _steer_filt_bar: ProgressBar = null
@@ -80,9 +85,14 @@ func toggle_visibility() -> void:
 		sync_from_gamepad()
 
 
+func is_text_input_focused() -> bool:
+	return _map_name_edit != null and _map_name_edit.has_focus()
+
+
 func sync_from_ecu() -> void:
 	if _ecu == null or not _ecu.has_method("get_live_params"):
 		return
+	_refresh_tv_map_dropdown()
 	_syncing = true
 	var params: Dictionary = _ecu.get_live_params()
 	for spec in TV_SLIDER_SPECS:
@@ -184,6 +194,45 @@ func _build_tv_tab() -> void:
 	vbox.name = "Torque Vectoring"
 	vbox.add_theme_constant_override("separation", 6)
 	_tabs.add_child(vbox)
+
+	var map_row := HBoxContainer.new()
+	map_row.add_theme_constant_override("separation", 6)
+	vbox.add_child(map_row)
+
+	_map_dropdown = OptionButton.new()
+	_map_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_map_dropdown.focus_mode = Control.FOCUS_NONE
+	_map_dropdown.item_selected.connect(_on_map_selected)
+	map_row.add_child(_map_dropdown)
+
+	var btn_refresh := Button.new()
+	btn_refresh.text = "↻"
+	btn_refresh.tooltip_text = "Refrescar carpeta tv_maps/"
+	btn_refresh.focus_mode = Control.FOCUS_NONE
+	btn_refresh.pressed.connect(_refresh_tv_map_dropdown)
+	map_row.add_child(btn_refresh)
+
+	var save_row := HBoxContainer.new()
+	save_row.add_theme_constant_override("separation", 6)
+	vbox.add_child(save_row)
+
+	_map_name_edit = LineEdit.new()
+	_map_name_edit.placeholder_text = "Nombre del set-up..."
+	_map_name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_map_name_edit.text_submitted.connect(func(_t: String): _map_name_edit.release_focus())
+	save_row.add_child(_map_name_edit)
+
+	var btn_save_map := Button.new()
+	btn_save_map.text = "Save"
+	btn_save_map.focus_mode = Control.FOCUS_NONE
+	btn_save_map.pressed.connect(_on_save_overwrite_pressed)
+	save_row.add_child(btn_save_map)
+
+	var btn_save_as := Button.new()
+	btn_save_as.text = "Save As"
+	btn_save_as.focus_mode = Control.FOCUS_NONE
+	btn_save_as.pressed.connect(_on_save_as_pressed)
+	save_row.add_child(btn_save_as)
 
 	_telem_label = Label.new()
 	_telem_label.text = "wz_ref: 0.00 | wz: 0.00 | beta: 0.0 deg"
@@ -378,6 +427,57 @@ func _on_gp_slider_changed(val: float, key: String, fmt: String) -> void:
 		_car.set_live_gamepad_param(key, val)
 	elif _gamepad != null and _gamepad.has_method("set_live_gamepad_param"):
 		_gamepad.set_live_gamepad_param(key, val)
+
+
+func _refresh_tv_map_dropdown() -> void:
+	if _map_dropdown == null or _ecu == null or not _ecu.has_method("list_available_tv_maps"):
+		return
+	_tv_maps_cache = _ecu.list_available_tv_maps()
+	_map_dropdown.clear()
+	var sel_idx := 0
+	for i in range(_tv_maps_cache.size()):
+		var entry: Dictionary = _tv_maps_cache[i]
+		_map_dropdown.add_item("%s (%s)" % [String(entry["name"]), String(entry["filename"])], i)
+		if String(entry["path"]) == _ecu.active_map_path:
+			sel_idx = i
+	if not _tv_maps_cache.is_empty():
+		_map_dropdown.select(sel_idx)
+		if _map_name_edit != null and not _map_name_edit.has_focus():
+			_map_name_edit.text = String(_tv_maps_cache[sel_idx]["name"])
+
+
+func _on_map_selected(idx: int) -> void:
+	if idx < 0 or idx >= _tv_maps_cache.size() or _ecu == null:
+		return
+	var entry: Dictionary = _tv_maps_cache[idx]
+	if _ecu.load_tv_map_from_file(String(entry["path"])):
+		sync_from_ecu()
+		if _status_label != null:
+			_status_label.text = "Cargado: %s" % String(entry["filename"])
+
+
+func _on_save_overwrite_pressed() -> void:
+	if _ecu == null or not _ecu.has_method("save_current_tv_map_to_file"):
+		return
+	var map_name := _map_name_edit.text.strip_edges() if _map_name_edit != null else ""
+	if map_name == "":
+		map_name = _ecu.active_map_display_name if _ecu.active_map_display_name != "" else "custom_tv_map"
+	var saved: String = _ecu.save_current_tv_map_to_file(map_name, "", _ecu.active_map_path)
+	if saved != "":
+		_refresh_tv_map_dropdown()
+		_status_label.text = "Guardado: " + saved.get_file()
+
+
+func _on_save_as_pressed() -> void:
+	if _ecu == null or not _ecu.has_method("save_current_tv_map_to_file"):
+		return
+	var map_name := _map_name_edit.text.strip_edges() if _map_name_edit != null else ""
+	if map_name == "":
+		map_name = "custom_%d" % int(Time.get_unix_time_from_system())
+	var saved: String = _ecu.save_current_tv_map_to_file(map_name, "", "")
+	if saved != "":
+		_refresh_tv_map_dropdown()
+		_status_label.text = "Nuevo set-up: " + saved.get_file()
 
 
 func _on_reset_pressed() -> void:
