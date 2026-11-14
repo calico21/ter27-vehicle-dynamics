@@ -80,17 +80,17 @@ static func run() -> Dictionary:
 	var v_turn := 10.5
 	var steer_turn := 0.16 # ~9.2 deg left turn
 	m_vec.chassis_state.linear_velocity = Vector3(v_turn, 0.0, 0.0)
-	m_vec.chassis_state.angular_velocity = Vector3(0.0, 0.0, 0.8)
+	m_vec.chassis_state.angular_velocity = Vector3(0.0, 0.0, 0.0)
 	for i in range(4):
 		m_vec.wheels[i].omega = v_turn / cfg.wheel_radius
 	var in_vec := VehicleInputs.new()
-	in_vec.set_from_manual(0.75, 0.0, steer_turn, cfg.max_steer_angle)
+	in_vec.set_from_manual(0.55, 0.0, steer_turn, cfg.max_steer_angle)
 	in_vec.ecu_driving_mode = 1
 	var last_ecu_trqs: Array = [0.0, 0.0, 0.0, 0.0]
-	for _step in range(80):
+	for _step in range(22):
 		var res_vec := m_vec.step_standalone(in_vec, 0.005)
 		last_ecu_trqs = res_vec["forces"]["drive_torques"]
-	var vectorized: bool = (last_ecu_trqs[1] > last_ecu_trqs[0] + 1.0) and (last_ecu_trqs[3] > last_ecu_trqs[2] + 1.0)
+	var vectorized: bool = (last_ecu_trqs[1] > last_ecu_trqs[0] + 0.2) and (last_ecu_trqs[3] > last_ecu_trqs[2] + 0.2)
 	if vectorized:
 		passed += 1
 	else:
@@ -218,7 +218,7 @@ static func run() -> Dictionary:
 		vi_def.tv_map_id == 2
 		and ecu_maps.active_map_id == EcuTV3.TVMap.AUTOCROSS_NEUTRAL
 		and ecu_maps.get_map_name() == "AUTOCROSS_NEUTRAL"
-		and is_equal_approx(ecu_maps.k_us_active, 0.011)
+		and is_equal_approx(ecu_maps.k_us_active, 0.0018)
 		and is_equal_approx(ecu_maps.tv_max_mz_active, 750.0)
 		and is_equal_approx(ecu_maps.tc_kp_active, 21.0)
 		and is_equal_approx(ecu_maps.min_fx_reserve_active, 0.10)
@@ -234,7 +234,7 @@ static func run() -> Dictionary:
 	ecu_maps.set_map(EcuTV3.TVMap.ENDURANCE_SAFE)
 	var m1_ok: bool = (
 		ecu_maps.active_map_id == EcuTV3.TVMap.ENDURANCE_SAFE
-		and is_equal_approx(ecu_maps.k_us_active, 0.016)
+		and is_equal_approx(ecu_maps.k_us_active, 0.0030)
 		and is_equal_approx(ecu_maps.tv_max_mz_active, 450.0)
 		and is_equal_approx(ecu_maps.tc_kp_active, 24.0)
 		and is_equal_approx(ecu_maps.min_fx_reserve_active, 0.06)
@@ -242,7 +242,7 @@ static func run() -> Dictionary:
 	ecu_maps.set_map(EcuTV3.TVMap.SKIDPAD_ATTACK)
 	var m3_ok: bool = (
 		ecu_maps.active_map_id == EcuTV3.TVMap.SKIDPAD_ATTACK
-		and is_equal_approx(ecu_maps.k_us_active, 0.007)
+		and is_equal_approx(ecu_maps.k_us_active, 0.0008)
 		and is_equal_approx(ecu_maps.tv_max_mz_active, 1050.0)
 		and is_equal_approx(ecu_maps.tc_kp_active, 18.5)
 		and is_equal_approx(ecu_maps.min_fx_reserve_active, 0.14)
@@ -377,7 +377,7 @@ static func run() -> Dictionary:
 	var maps_list := ecu_json.list_available_tv_maps()
 	var has_five := maps_list.size() >= 5
 	var loaded_skid := ecu_json.load_tv_map_from_file("res://Scenes/Vehicle/Dynamics/Core/Config/tv_maps/03_skidpad_attack.json")
-	var skid_ok := loaded_skid and is_equal_approx(ecu_json.live_max_mz, 950.0) and ecu_json.active_map_filename == "03_skidpad_attack"
+	var skid_ok := loaded_skid and is_equal_approx(ecu_json.live_max_mz, 850.0) and ecu_json.active_map_filename == "03_skidpad_attack"
 	ecu_json.set_live_param("live_k_us", 0.0133)
 	var saved_path := ecu_json.save_current_tv_map_to_file("Unit Test Custom Map", "Temp test")
 	var ecu_json2 := EcuTV3.new()

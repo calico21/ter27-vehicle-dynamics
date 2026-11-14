@@ -24,7 +24,7 @@ const TV_MAP_PROFILES: Dictionary = {
 		"name": "OPEN_4WD",
 		"front_split": 0.35,
 		"rear_split": 0.65,
-		"k_us": 0.015,
+		"k_us": 0.0018,
 		"max_mz": 0.0,
 		"tc_kp": 23.113,
 		"min_fx_reserve": 0.08
@@ -33,7 +33,7 @@ const TV_MAP_PROFILES: Dictionary = {
 		"name": "ENDURANCE_SAFE",
 		"front_split": 0.35,
 		"rear_split": 0.65,
-		"k_us": 0.016,
+		"k_us": 0.0030,
 		"max_mz": 450.0,
 		"tc_kp": 24.0,
 		"min_fx_reserve": 0.06
@@ -42,7 +42,7 @@ const TV_MAP_PROFILES: Dictionary = {
 		"name": "AUTOCROSS_NEUTRAL",
 		"front_split": 0.35,
 		"rear_split": 0.65,
-		"k_us": 0.011,
+		"k_us": 0.0018,
 		"max_mz": 750.0,
 		"tc_kp": 21.0,
 		"min_fx_reserve": 0.10
@@ -51,7 +51,7 @@ const TV_MAP_PROFILES: Dictionary = {
 		"name": "SKIDPAD_ATTACK",
 		"front_split": 0.35,
 		"rear_split": 0.65,
-		"k_us": 0.007,
+		"k_us": 0.0008,
 		"max_mz": 1050.0,
 		"tc_kp": 18.5,
 		"min_fx_reserve": 0.14
@@ -742,8 +742,8 @@ func gp_ekf_update_kinematic_ss(ax_f: float, ay_f: float, wz_raw: float, vx: flo
 	var vy_ss: float = clampf((GP_LR * wz_corr) - ((GP_MASS * ay_f * GP_LF * vx_safe) / (GP_WB * GP_C_ALPHA_R)), -3.0, 3.0)
 
 	var a_total_g: float = sqrt(ax_f * ax_f + ay_f * ay_f) / GP_GRAVITY
-	var excess_g: float = clampf(a_total_g - 0.45, 0.0, 2.0)
-	var sat_penalty: float = 1.0 + 10.0 * (excess_g * excess_g)
+	var excess_g: float = clampf(a_total_g - 0.85, 0.0, 2.5)
+	var sat_penalty: float = 1.0 + 150.0 * (excess_g * excess_g)
 	var r_eff: float = ekf_r_pseudo_vy * sat_penalty
 
 	_ekf_scalar_update(0, vy_ss, r_eff)
@@ -861,24 +861,32 @@ static func gp_moment_arms() -> Array[float]:
 	return [-hw_f, hw_f, -hw_r, hw_r]
 
 # ── gp_solver (4WD) ──────────────────────────────────────────────────────────
-static func gp_nominal_allocation_4wd(fx_driver: float, mz_target: float, fz_est: Array[float]) -> Array[float]:
+static func gp_nominal_allocation_4wd(
+	fx_driver: float,
+	mz_target: float,
+	fz_est: Array[float],
+	front_split: float = -1.0
+) -> Array[float]:
 	var arms: Array[float] = gp_moment_arms()
 	var t_fx_total: float = fx_driver * GP_R_WHEEL
 
-	var fz_sum: float = 0.0
-	var denom: float = 0.0
+	var fz_f_sum: float = maxf(fz_est[GP_FL], 1.0) + maxf(fz_est[GP_FR], 1.0)
+	var fz_r_sum: float = maxf(fz_est[GP_RL], 1.0) + maxf(fz_est[GP_RR], 1.0)
+	var fz_sum: float = maxf(fz_f_sum + fz_r_sum, 1e-3)
+
+	var arm_sq_sum: float = 0.0
 	for i in range(4):
-		var fz_i: float = maxf(fz_est[i], 1.0)
-		fz_sum += fz_i
-		denom += arms[i] * arms[i] * fz_i
-	fz_sum = maxf(fz_sum, 1e-3)
-	denom = maxf(denom, 1e-3)
+		arm_sq_sum += arms[i] * arms[i]
+	arm_sq_sum = maxf(arm_sq_sum, 1e-3)
+
+	var use_axle_split: bool = front_split >= 0.0
+	var sf: float = clampf(front_split, 0.0, 1.0) if use_axle_split else (fz_f_sum / fz_sum)
+	var sr: float = 1.0 - sf
 
 	var t_nom: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	for i in range(4):
-		var fz_i: float = maxf(fz_est[i], 1.0)
-		var t_fx_i: float = t_fx_total * (fz_i / fz_sum)
-		var t_mz_i: float = (arms[i] * fz_i * mz_target) / denom
+		var t_fx_i: float = (0.5 * sf * t_fx_total) if i < 2 else (0.5 * sr * t_fx_total)
+		var t_mz_i: float = (arms[i] * mz_target) / arm_sq_sum
 		t_nom[i] = t_fx_i + t_mz_i
 	return t_nom
 
@@ -1368,17 +1376,33 @@ func _gp_tv_step(
 
 	var vy_std_clamped: float = clampf(ekf_vy_std, 0.0, 0.3)
 	var k_beta_dynamic: float = live_k_beta * (1.0 + 2.0 * vy_std_clamped)
-	var beta_term: float = clampf(-k_beta_dynamic * beta, -1200.0, 1200.0)
+	# ISO/ROS (+X fwd, +Y left): left oversteer => vy < 0 => beta < 0 => needs Mz < 0 (+k_beta * beta)
+	var beta_term: float = clampf(k_beta_dynamic * beta, -1200.0, 1200.0)
 
-	var raw_int: float = wz_int + wz_err * dt * mz_sat_ratio
-	wz_int = GP_TV_WZ_I_MAX * tanh(raw_int / GP_TV_WZ_I_MAX)
+	var is_oversteering: bool = absf(wz_corr) > absf(wz_ref) + 0.03 and (wz_corr * wz_ref) > 0.0
+	if is_oversteering:
+		wz_int *= 0.90
+	else:
+		var raw_int: float = wz_int + wz_err * dt * mz_sat_ratio
+		wz_int = GP_TV_WZ_I_MAX * tanh(raw_int / GP_TV_WZ_I_MAX)
 
 	var os_gate: float = 1.0 - gp_sigmoid((absf(wz_corr) - absf(wz_ref) - 0.04) * 15.0)
 	var counter_steer_factor: float = 1.0 - gp_sigmoid(-(delta_dz * wz_corr + 0.05) * 40.0)
 
-	var ff_mz: float = kd * delta_dot * (vx_safe / 10.0)
+	# Gate only pro-turn feedforward; keep stabilizing feedback active during oversteer/countersteer
+	var ff_mz: float = kd * delta_dot * (vx_safe / 10.0) * os_gate * counter_steer_factor
 	var fb_mz: float = kp * wz_err + ki * wz_int + beta_term
-	var mz_req: float = clampf((ff_mz + fb_mz) * os_gate * counter_steer_factor, -tv_max_mz_active, tv_max_mz_active)
+	var mz_raw: float = ff_mz + fb_mz
+
+	var spin_sign: float = 1.0 if wz_corr > 1e-4 else (-1.0 if wz_corr < -1e-4 else 0.0)
+	var stab_limit: float = maxf(tv_max_mz_active, 1000.0)
+	var mz_req: float = 0.0
+	if tv_max_mz_active <= 0.0:
+		mz_req = 0.0
+	elif mz_raw * spin_sign > 0.0:
+		mz_req = clampf(mz_raw, -tv_max_mz_active, tv_max_mz_active)
+	else:
+		mz_req = clampf(mz_raw, -stab_limit, stab_limit)
 	last_mz_req = mz_req
 
 	# Stage 6: 4WD Friction Ellipse + Power Bounds (filtered tau = 30 ms)
@@ -1391,6 +1415,7 @@ func _gp_tv_step(
 	var t_lb: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	var t_ub: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	var max_sum: float = 0.0
+	var allow_regen_tv: bool = vx > 2.0 and brake_norm < 0.05
 	for i in range(4):
 		var raw_ub_i: float = minf(t_ub_friction[i], t_ub_power[i])
 		if not _ub_filt_initialized:
@@ -1398,13 +1423,25 @@ func _gp_tv_step(
 		else:
 			t_ub_filt[i] += alpha_ub * (raw_ub_i - t_ub_filt[i])
 		t_ub[i] = t_ub_filt[i]
-		t_lb_filt[i] = 0.0
+		var lb_raw: float = -minf(80.0, 0.25 * t_ub[i]) if (allow_regen_tv and fx_driver <= 50.0) else 0.0
+		t_lb_filt[i] = lb_raw
+		t_lb[i] = lb_raw
 		max_sum += t_ub[i]
 	_ub_filt_initialized = true
 
 	var fx_clamped: float = fx_driver
 	var max_sum_power: float = GP_P_MAX_TOTAL_MECH / maxf(w_chassis, 1e-3)
 	var eff_max_sum: float = minf(max_sum, max_sum_power)
+	if delta_dz > 0.02 and mz_req < -25.0:
+		var t_in_cap_l: float = t_ub[GP_FL] + t_ub[GP_RL]
+		var max_sum_stab_l: float = maxf(2.0 * t_in_cap_l + (mz_req * GP_R_WHEEL) / (0.5 * GP_TRACK_F), 0.0)
+		var blend_l: float = clampf((absf(mz_req) - 25.0) / 100.0, 0.0, 1.0)
+		eff_max_sum = minf(eff_max_sum, lerpf(eff_max_sum, max_sum_stab_l, blend_l))
+	elif delta_dz < -0.02 and mz_req > 25.0:
+		var t_in_cap_r: float = t_ub[GP_FR] + t_ub[GP_RR]
+		var max_sum_stab_r: float = maxf(2.0 * t_in_cap_r - (mz_req * GP_R_WHEEL) / (0.5 * GP_TRACK_F), 0.0)
+		var blend_r: float = clampf((absf(mz_req) - 25.0) / 100.0, 0.0, 1.0)
+		eff_max_sum = minf(eff_max_sum, lerpf(eff_max_sum, max_sum_stab_r, blend_r))
 	var req_sum: float = fx_clamped * GP_R_WHEEL
 	if req_sum > eff_max_sum:
 		fx_clamped = eff_max_sum / GP_R_WHEEL
@@ -1417,7 +1454,7 @@ func _gp_tv_step(
 	last_mz_req = mz_req
 
 	# Stage 7: 4WD Nominal Allocation + Closed-Form KKT QP Solver + Rate Limiter
-	var t_nominal: Array[float] = gp_nominal_allocation_4wd(fx_clamped, mz_req, fz_est)
+	var t_nominal: Array[float] = gp_nominal_allocation_4wd(fx_clamped, mz_req, fz_est, front_split_active)
 	var qp_res: Dictionary = gp_qp_solve_4wd_closedform(t_nominal, t_qp_prev, fx_clamped, t_lb, t_ub)
 	var qp_result: Array[float] = qp_res["torques"]
 	qp_residual = float(qp_res["residual"])

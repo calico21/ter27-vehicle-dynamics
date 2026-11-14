@@ -3,12 +3,12 @@
 	"description": "Control conservador de deslizamiento para asfalto húmedo",
 	"author": "TeR27 Vehicle Dynamics",
 	"params": {
-		"k_us": 0.014,
+		"k_us": 0.0045,
 		"max_mz": 450.0,
 		"min_fx_reserve": 0.12,
 		"tc_kp": 35.0,
-		"k_beta": 6000.0,
-		"throttle_mz_cut": 0.60,
+		"k_beta": 6500.0,
+		"throttle_mz_cut": 0.55,
 		"front_drive_bias": 0.35,
 		"can_latency_ms": 12.0
 	}

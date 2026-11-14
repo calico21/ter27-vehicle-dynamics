@@ -3,7 +3,7 @@
 	"description": "4WD abierto sin vectorización de par (referencia base)",
 	"author": "TeR27 Vehicle Dynamics",
 	"params": {
-		"k_us": 0.011,
+		"k_us": 0.0018,
 		"max_mz": 0.0,
 		"min_fx_reserve": 0.0,
 		"tc_kp": 0.0,

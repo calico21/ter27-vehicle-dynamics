@@ -1,14 +1,14 @@
 {
 	"name": "Skidpad Attack",
-	"description": "Máxima rotación y respuesta de guiñada en curva estacionaria",
+	"description": "Máxima estabilidad, precisión de guiñada y facilidad en círculos de 9.125 m",
 	"author": "TeR27 Vehicle Dynamics",
 	"params": {
-		"k_us": 0.0085,
-		"max_mz": 950.0,
-		"min_fx_reserve": 0.04,
-		"tc_kp": 18.0,
-		"k_beta": 3800.0,
-		"throttle_mz_cut": 0.30,
+		"k_us": 0.0008,
+		"max_mz": 850.0,
+		"min_fx_reserve": 0.05,
+		"tc_kp": 20.0,
+		"k_beta": 5200.0,
+		"throttle_mz_cut": 0.25,
 		"front_drive_bias": 0.35,
 		"can_latency_ms": 12.0
 	}

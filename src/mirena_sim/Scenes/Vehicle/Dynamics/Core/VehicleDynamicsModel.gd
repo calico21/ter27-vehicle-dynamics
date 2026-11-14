@@ -139,7 +139,8 @@ func step_forces(
 	
 	# 1. Drivetrain, 200 Hz Torque Vectoring, HV Bus & Inverter Lag
 	if ecu_tv_v3 != null and in_inputs.tv_map_id != _last_input_tv_map_id:
-		ecu_tv_v3.set_map(in_inputs.tv_map_id)
+		if in_inputs.tv_map_id != ecu_tv_v3.active_map_id:
+			ecu_tv_v3.set_map(in_inputs.tv_map_id)
 		_last_input_tv_map_id = ecu_tv_v3.active_map_id
 
 	var w_omegas: Array[float] = [wheels[0].omega, wheels[1].omega, wheels[2].omega, wheels[3].omega]
@@ -162,7 +163,7 @@ func step_forces(
 			ecu_tv_v3.step(fx_driver, in_inputs.steer_angle, u, v, r, _prev_ay_ros, _prev_ax_ros, w_omegas, in_inputs.brake, dt, w_steers)
 			if advance_tv else ecu_tv_v3.last_t_cmd.duplicate()
 		)
-		if in_inputs.throttle > 0.0:
+		if in_inputs.throttle > 0.0 or in_inputs.brake < 0.05:
 			var eff: float = maxf(config.drivetrain_efficiency, 1e-3)
 			var v_nom: float = maxf(config.battery_nominal_voltage_v, 1.0)
 			var v_dc_cur: float = hv_state.v_dc if (hv_state != null and hv_state.v_dc > 0.0) else v_nom
