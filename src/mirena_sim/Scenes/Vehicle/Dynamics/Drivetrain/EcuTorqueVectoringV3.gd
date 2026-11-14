@@ -192,6 +192,14 @@ var rear_split_active: float = 0.65
 var open_4wd_tc_enabled: bool = false
 var _custom_params_active: bool = false
 
+# ── Live DiL Tuning Parameters (mutable without resetting EKF) ──────────────
+var live_k_us: float = 0.011
+var live_max_mz: float = 750.0
+var live_min_fx_reserve: float = 0.10
+var live_tc_kp: float = 21.0
+var live_k_beta: float = 4500.0
+var live_throttle_mz_cut: float = 0.40
+
 # ── Hardware Realism (CAN Latency & Encoder Quantization) ───────────────────
 var hardware_realism_enabled: bool = false:
 	set(value):
@@ -282,6 +290,12 @@ func set_map(map_id: int) -> void:
 	tv_max_mz_active = float(profile["max_mz"])
 	tc_kp_active = float(profile["tc_kp"])
 	min_fx_reserve_active = float(profile["min_fx_reserve"])
+	live_k_us = k_us_active
+	live_max_mz = tv_max_mz_active
+	live_tc_kp = tc_kp_active
+	live_min_fx_reserve = min_fx_reserve_active
+	live_k_beta = 4500.0
+	live_throttle_mz_cut = 0.40
 	_custom_params_active = false
 
 ## Cycles to the next live TV map (0 -> 1 -> 2 -> 3 -> 0) and returns the new active_map_id.
@@ -304,7 +318,55 @@ func set_custom_parameters(k_us: float, max_mz: float, tc_kp: float, min_fx_rese
 	tv_max_mz_active = maxf(max_mz, 0.0)
 	tc_kp_active = maxf(tc_kp, 0.0)
 	min_fx_reserve_active = clampf(min_fx_reserve, 0.0, 0.95)
+	live_k_us = k_us_active
+	live_max_mz = tv_max_mz_active
+	live_tc_kp = tc_kp_active
+	live_min_fx_reserve = min_fx_reserve_active
 	_custom_params_active = true
+
+## Returns a Dictionary snapshot of all live-tunable DiL TV parameters.
+func get_live_params() -> Dictionary:
+	return {
+		"live_k_us": live_k_us,
+		"live_max_mz": live_max_mz,
+		"live_min_fx_reserve": live_min_fx_reserve,
+		"live_tc_kp": live_tc_kp,
+		"live_k_beta": live_k_beta,
+		"live_throttle_mz_cut": live_throttle_mz_cut
+	}
+
+## Updates a single live TV parameter in-place without resetting EKF or thermal states.
+func set_live_param(key: String, val: float) -> void:
+	match key:
+		"live_k_us", "k_us":
+			live_k_us = clampf(val, 0.0, 0.05)
+			k_us_active = live_k_us
+		"live_max_mz", "max_mz":
+			live_max_mz = clampf(val, 0.0, 1500.0)
+			tv_max_mz_active = live_max_mz
+		"live_min_fx_reserve", "min_fx_reserve":
+			live_min_fx_reserve = clampf(val, 0.0, 0.95)
+			min_fx_reserve_active = live_min_fx_reserve
+		"live_tc_kp", "tc_kp":
+			live_tc_kp = clampf(val, 0.0, 60.0)
+			tc_kp_active = live_tc_kp
+		"live_k_beta", "k_beta":
+			live_k_beta = clampf(val, 0.0, 15000.0)
+		"live_throttle_mz_cut", "throttle_mz_cut":
+			live_throttle_mz_cut = clampf(val, 0.0, 1.0)
+	_custom_params_active = true
+
+## Exports the current live TV tuning parameters as a C/C++ #define header snippet for TeR_ECU.
+func export_c_header_snippet() -> String:
+	return (
+		"// TeR27 ECU Torque Vectoring Live Calibration (%s)\n" % get_map_name()
+		+ "#define GP_K_US              %.5ff\n" % live_k_us
+		+ "#define GP_TV_MAX_MZ         %.1ff\n" % live_max_mz
+		+ "#define GP_MIN_FX_RESERVE    %.4ff\n" % live_min_fx_reserve
+		+ "#define GP_TC_KP             %.3ff\n" % live_tc_kp
+		+ "#define GP_K_BETA            %.1ff\n" % live_k_beta
+		+ "#define GP_THROTTLE_MZ_CUT   %.3ff\n" % live_throttle_mz_cut
+	)
 
 ## Enables or disables CAN bus latency + 4096 PPR encoder quantization simulation.
 func set_hardware_realism(
@@ -1124,7 +1186,7 @@ func _gp_tv_step(
 	delta_prev = delta_dz
 
 	var vy_std_clamped: float = clampf(ekf_vy_std, 0.0, 0.3)
-	var k_beta_dynamic: float = 4000.0 * (1.0 + 2.0 * vy_std_clamped)
+	var k_beta_dynamic: float = live_k_beta * (1.0 + 2.0 * vy_std_clamped)
 	var beta_term: float = clampf(-k_beta_dynamic * beta, -1200.0, 1200.0)
 
 	var raw_int: float = wz_int + wz_err * dt * mz_sat_ratio
@@ -1167,6 +1229,11 @@ func _gp_tv_step(
 		fx_clamped = eff_max_sum / GP_R_WHEEL
 	if req_sum < 0.0:
 		fx_clamped = 0.0
+
+	# Corner-exit throttle Mz cut: attenuate pro-turn yaw moment under longitudinal acceleration
+	if mz_req * delta_dz > 0.0:
+		mz_req *= (1.0 - live_throttle_mz_cut * clampf(fx_clamped / 2500.0, 0.0, 1.0))
+	last_mz_req = mz_req
 
 	# Stage 7: 4WD Nominal Allocation + Closed-Form KKT QP Solver + Rate Limiter
 	var t_nominal: Array[float] = gp_nominal_allocation_4wd(fx_clamped, mz_req, fz_est)

@@ -23,6 +23,7 @@ const AeroModelScript = preload("../Aerodynamics/AeroModel.gd")
 const ChassisDynamicsScript = preload("../Chassis/ChassisDynamics.gd")
 const VehicleTelemetryScript = preload("../Telemetry/VehicleTelemetry.gd")
 const TelemetryRecorderScript = preload("../Telemetry/TelemetryRecorder.gd")
+const TvLiveTuningOverlayScript = preload("../../../UI/TvLiveTuningOverlay.gd")
 
 signal cone_hit(count: int)
 enum PilotMode { NO_PILOT, MANUAL, ROS, TRACK_RAIL }
@@ -128,6 +129,7 @@ var ffb_torque_nm: float = 0.0
 
 var _hud_layer: CanvasLayer = null
 var _hud_label: Label = null
+var _tv_overlay: TvLiveTuningOverlayScript = null
 
 var slam_cones: Array = []
 var hit_cones: Array = []
@@ -318,7 +320,12 @@ func _unhandled_input(event: InputEvent) -> void:
 				if inputs != null:
 					inputs.tv_map_id = tv_map_id
 				print("[TV Map]: %d (%s)" % [tv_map_id, tv_map_name])
+				if _tv_overlay != null:
+					_tv_overlay.sync_from_ecu()
 				_update_minimal_hud()
+		elif event.keycode == KEY_F8:
+			if _tv_overlay != null:
+				_tv_overlay.toggle_visibility()
 		elif event.keycode == KEY_F9:
 			if telemetry_recorder != null:
 				var rec_on: bool = telemetry_recorder.toggle_recording(_get_active_track_name(), tv_map_name)
@@ -824,9 +831,15 @@ func _setup_minimal_hud() -> void:
 	panel.add_child(_hud_label)
 	_hud_layer.add_child(panel)
 	add_child(_hud_layer)
+	_tv_overlay = TvLiveTuningOverlayScript.new()
+	if model != null and model.ecu_tv_v3 != null:
+		_tv_overlay.bind_ecu(model.ecu_tv_v3)
+	add_child(_tv_overlay)
 	_update_minimal_hud()
 
 func _update_minimal_hud() -> void:
+	if _tv_overlay != null and model != null:
+		_tv_overlay.update_telemetry(tv_wz_ref, model.angular_velocity_ros.z, tv_beta_est_deg, tv_mz_req, tv_tc_active)
 	if _hud_label == null:
 		return
 	var kmh: float = linear_velocity.length() * 3.6

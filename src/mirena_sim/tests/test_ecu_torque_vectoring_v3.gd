@@ -348,6 +348,36 @@ static func run() -> Dictionary:
 		failed += 1
 		errors.append("TvSilBridge fallback invalid: %s" % [sil_status])
 
+	# 13. Live DiL Tuning: set_live_param() preserves EKF state, changes torque output, and throttle_mz_cut attenuates corner-exit Mz
+	var ecu_live := EcuTV3.new()
+	ecu_live.set_map(EcuTV3.TVMap.AUTOCROSS_NEUTRAL)
+	var omega_live: Array[float] = [60.0, 60.0, 60.0, 60.0]
+	for _i in range(20):
+		ecu_live.step(2600.0, 0.14, 12.2, 0.4, 0.45, 7.0, 2.0, omega_live, 0.0, 0.005)
+	var ekf_vy_before: float = ecu_live.ekf_x[0]
+	ecu_live.set_live_param("live_throttle_mz_cut", 0.0)
+	ecu_live.set_live_param("live_max_mz", 1000.0)
+	var trq_no_cut: Array[float] = ecu_live.step(2600.0, 0.14, 12.2, 0.4, 0.45, 7.0, 2.0, omega_live, 0.0, 0.005)
+	var mz_no_cut: float = ecu_live.last_mz_req
+	var ekf_vy_after: float = ecu_live.ekf_x[0]
+	ecu_live.set_live_param("live_throttle_mz_cut", 0.80)
+	var trq_with_cut: Array[float] = ecu_live.step(2600.0, 0.14, 12.2, 0.4, 0.45, 7.0, 2.0, omega_live, 0.0, 0.005)
+	var mz_with_cut: float = ecu_live.last_mz_req
+	var c_hdr: String = ecu_live.export_c_header_snippet()
+	var live_ok: bool = (
+		absf(ekf_vy_before) > 1e-4
+		and absf(ekf_vy_after) > 1e-4
+		and mz_no_cut > 0.0
+		and mz_with_cut < mz_no_cut
+		and absf((trq_with_cut[3] - trq_with_cut[2]) - (trq_no_cut[3] - trq_no_cut[2])) > 0.1
+		and c_hdr.contains("#define GP_THROTTLE_MZ_CUT")
+	)
+	if live_ok:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("Live DiL tuning check failed: vy=[%.4f, %.4f] mz=[%.1f -> %.1f]" % [ekf_vy_before, ekf_vy_after, mz_no_cut, mz_with_cut])
+
 	return {
 		"name": "test_ecu_torque_vectoring_v3",
 		"passed": passed,
