@@ -1,14 +1,16 @@
 {
 	"name": "Wet Low Grip",
-	"description": "Control conservador de deslizamiento para asfalto húmedo",
+	"description": "Máxima seguridad y control conservador de deslizamiento en baja adherencia",
 	"author": "TeR27 Vehicle Dynamics",
+	"control_law": "v3",
 	"params": {
-		"k_us": 0.0045,
-		"max_mz": 450.0,
+		"grip_cap": 0.80,
+		"k_us": 0.0034,
+		"max_mz": 550.0,
 		"min_fx_reserve": 0.12,
-		"tc_kp": 35.0,
+		"tc_kp": 36.0,
 		"k_beta": 6500.0,
-		"throttle_mz_cut": 0.55,
+		"throttle_mz_cut": 0.50,
 		"front_drive_bias": 0.35,
 		"can_latency_ms": 12.0
 	}

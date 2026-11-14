@@ -355,7 +355,9 @@ static func run() -> Dictionary:
 	var mz_no_cut: float = ecu_live.last_mz_req
 	var ekf_vy_after: float = ecu_live.ekf_x[0]
 	ecu_live.set_live_param("live_throttle_mz_cut", 0.80)
-	var trq_with_cut: Array[float] = ecu_live.step(2600.0, 0.14, 12.2, 0.4, 0.45, 7.0, 2.0, omega_live, 0.0, 0.005)
+	var trq_with_cut: Array[float] = []
+	for _i in range(10):
+		trq_with_cut = ecu_live.step(2600.0, 0.14, 12.2, 0.4, 0.45, 7.0, 2.0, omega_live, 0.0, 0.005)
 	var mz_with_cut: float = ecu_live.last_mz_req
 	var c_hdr: String = ecu_live.export_c_header_snippet()
 	var live_ok: bool = (
@@ -377,7 +379,7 @@ static func run() -> Dictionary:
 	var maps_list := ecu_json.list_available_tv_maps()
 	var has_five := maps_list.size() >= 5
 	var loaded_skid := ecu_json.load_tv_map_from_file("res://Scenes/Vehicle/Dynamics/Core/Config/tv_maps/03_skidpad_attack.json")
-	var skid_ok := loaded_skid and is_equal_approx(ecu_json.live_max_mz, 850.0) and ecu_json.active_map_filename == "03_skidpad_attack"
+	var skid_ok := loaded_skid and is_equal_approx(ecu_json.live_max_mz, 1050.0) and ecu_json.active_map_filename == "03_skidpad_attack"
 	ecu_json.set_live_param("live_k_us", 0.0133)
 	var saved_path := ecu_json.save_current_tv_map_to_file("Unit Test Custom Map", "Temp test")
 	var ecu_json2 := EcuTV3.new()

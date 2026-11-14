@@ -218,13 +218,14 @@ var live_min_fx_reserve: float = 0.10
 var live_tc_kp: float = 21.0
 var live_k_beta: float = 4500.0
 var live_throttle_mz_cut: float = 0.40
+var live_grip_cap: float = 0.94
 
 # ── V4_SMC_HYBRID Parameters & Notch / SMC State ────────────────────────────
-var live_smc_k_gain: float = 820.0
-var live_smc_k_ffd: float = 55.0
-var live_smc_lambda_beta: float = 8.5
-var live_smc_phi: float = 0.14
-var live_smc_tc_kappa_base: float = 0.040
+var live_smc_k_gain: float = 920.0
+var live_smc_k_ffd: float = 95.0
+var live_smc_lambda_beta: float = 6.8
+var live_smc_phi: float = 0.13
+var live_smc_tc_kappa_base: float = 0.052
 
 var _notch_x1: float = 0.0
 var _notch_x2: float = 0.0
@@ -376,6 +377,7 @@ func set_map(map_id: int) -> void:
 	live_min_fx_reserve = min_fx_reserve_active
 	live_k_beta = 4500.0
 	live_throttle_mz_cut = 0.40
+	live_grip_cap = 0.87 if clamped_id == TVMap.ENDURANCE_SAFE else (0.97 if clamped_id == TVMap.SKIDPAD_ATTACK else 0.94)
 	_custom_params_active = false
 
 ## Cycles to the next live TV map across all JSON files in tv_maps/ and returns the new index.
@@ -428,6 +430,7 @@ func get_live_params() -> Dictionary:
 		"live_tc_kp": live_tc_kp,
 		"live_k_beta": live_k_beta,
 		"live_throttle_mz_cut": live_throttle_mz_cut,
+		"live_grip_cap": live_grip_cap,
 		"live_smc_k_gain": live_smc_k_gain,
 		"live_smc_k_ffd": live_smc_k_ffd,
 		"live_smc_lambda_beta": live_smc_lambda_beta,
@@ -458,6 +461,8 @@ func set_live_param(key: String, val: float) -> void:
 			live_k_beta = clampf(val, 0.0, 15000.0)
 		"live_throttle_mz_cut", "throttle_mz_cut":
 			live_throttle_mz_cut = clampf(val, 0.0, 1.0)
+		"live_grip_cap", "grip_cap":
+			live_grip_cap = clampf(val, 0.50, 1.15)
 		"live_smc_k_gain", "smc_k_gain":
 			live_smc_k_gain = clampf(val, 100.0, 2500.0)
 		"live_smc_k_ffd", "smc_k_ffd":
@@ -565,6 +570,12 @@ func load_tv_map_from_file(file_path: String) -> bool:
 		live_k_beta = clampf(float(params["k_beta"]), 0.0, 15000.0)
 	if params.has("throttle_mz_cut"):
 		live_throttle_mz_cut = clampf(float(params["throttle_mz_cut"]), 0.0, 1.0)
+	if params.has("grip_cap"):
+		live_grip_cap = clampf(float(params["grip_cap"]), 0.50, 1.15)
+	elif data.has("grip_cap"):
+		live_grip_cap = clampf(float(data["grip_cap"]), 0.50, 1.15)
+	else:
+		live_grip_cap = 0.94
 	if params.has("smc_k_gain"):
 		live_smc_k_gain = clampf(float(params["smc_k_gain"]), 100.0, 2500.0)
 	if params.has("smc_k_ffd"):
@@ -613,6 +624,7 @@ func save_current_tv_map_to_file(map_name: String, description: String = "", ove
 			"tc_kp": live_tc_kp,
 			"k_beta": live_k_beta,
 			"throttle_mz_cut": live_throttle_mz_cut,
+			"grip_cap": live_grip_cap,
 			"smc_k_gain": live_smc_k_gain,
 			"smc_k_ffd": live_smc_k_ffd,
 			"smc_lambda_beta": live_smc_lambda_beta,
@@ -1253,11 +1265,12 @@ func _gp_tc_step_4wd_smc(
 	wheel_steers: Array[float] = [0.0, 0.0, 0.0, 0.0],
 	brake_norm: float = 0.0
 ) -> void:
-	var ay_g: float = ay_mps2 / 9.81
-	var ay_factor: float = 1.0 / (1.0 + 0.55 * ay_g * ay_g)
+	var ay_g: float = ay_mps2 / GP_GRAVITY
+	var ay_factor: float = 1.0 / (1.0 + 0.45 * ay_g * ay_g)
 	var alpha_peak: float = deg_to_rad(8.0)
 	var speed_gate: float = gp_sigmoid((vx - GP_TC_V_MIN) * 3.0)
-	var ki_nm: float = 1400.0
+	var kp_nm: float = 900.0
+	var ki_nm: float = 1100.0
 
 	var dt_before: float = (t_req_out[1] - t_req_out[0]) + (t_req_out[3] - t_req_out[2])
 	var any_tc_cut: bool = false
@@ -1271,9 +1284,11 @@ func _gp_tc_step_4wd_smc(
 		var delta_i: float = wheel_steers[i] if (i < 2 and i < wheel_steers.size()) else 0.0
 		var alpha_i: float = atan2(vy_i, maxf(absf(vx_i), 1.0)) - delta_i
 		var alpha_ratio: float = alpha_i / alpha_peak
-		var alpha_factor: float = sqrt(maxf(0.08, 1.0 - alpha_ratio * alpha_ratio))
+		var alpha_factor: float = sqrt(maxf(0.10, 1.0 - alpha_ratio * alpha_ratio))
 
-		var kappa_lim_i: float = clampf(live_smc_tc_kappa_base * ay_factor * alpha_factor, 0.008, 0.12)
+		var kappa_ellipse: float = live_smc_tc_kappa_base * ay_factor * alpha_factor
+		var kappa_low_speed_floor: float = 0.65 / maxf(vx, 2.0)
+		var kappa_lim_i: float = maxf(kappa_ellipse, kappa_low_speed_floor)
 		last_tc_kappa_lim[i] = kappa_lim_i
 		tc_kappa_opt[i] = kappa_lim_i
 
@@ -1281,23 +1296,22 @@ func _gp_tc_step_4wd_smc(
 		if i < 2:
 			vx_wheel = vx * cos(delta_i) + (vy + wz * GP_LF) * sin(delta_i)
 		var kappa_raw: float = _tc_compute_kappa(omega[i], vx_wheel)
-		tc_kappa_filt[i] = 0.40 * tc_kappa_filt[i] + 0.60 * kappa_raw
+		tc_kappa_filt[i] = 0.45 * tc_kappa_filt[i] + 0.55 * kappa_raw
 		tc_omega_prev_ema[i] = omega[i]
 
 		var t_cmd_pos: float = maxf(t_req_out[i], 0.0)
 		var traction_demand: bool = t_cmd_pos > 5.0 and brake_norm < 0.05
-		var kappa_eff: float = maxf(absf(kappa_raw), absf(tc_kappa_filt[i]))
-		var excess: float = kappa_eff - kappa_lim_i
+		var excess: float = maxf(0.0, absf(tc_kappa_filt[i]) - kappa_lim_i)
 		if traction_demand and excess > 0.0:
-			var frac_cut: float = clampf(excess * 18.0, 0.0, 0.92)
-			tc_pi_integral[i] = clampf(tc_pi_integral[i] + ki_nm * excess * dt * speed_gate, 0.0, maxf(t_cmd_pos, 250.0))
-			var tc_cut: float = speed_gate * maxf(t_cmd_pos * frac_cut, tc_pi_integral[i])
-			tc_cut = clampf(tc_cut, 0.0, t_cmd_pos)
+			var max_cut: float = t_cmd_pos * 0.70
+			tc_pi_integral[i] = clampf(tc_pi_integral[i] + ki_nm * excess * dt * speed_gate, 0.0, max_cut)
+			var tc_cut: float = speed_gate * (kp_nm * excess + tc_pi_integral[i])
+			tc_cut = clampf(tc_cut, 0.0, max_cut)
 			if tc_cut > 1.0:
 				any_tc_cut = true
 			t_req_out[i] = maxf(0.0, t_cmd_pos - tc_cut)
 		else:
-			tc_pi_integral[i] *= 0.96
+			tc_pi_integral[i] *= 0.82
 			if absf(tc_pi_integral[i]) < 0.05:
 				tc_pi_integral[i] = 0.0
 
@@ -1579,12 +1593,15 @@ func _gp_tv_step(
 			last_t_cmd[i] = t_open[i]
 		return
 
-	# Stage 5: Yaw-Rate Reference & Moment Law (V3_PID_ALQP or V4_SMC_HYBRID)
+	# Stage 5: Physical Grip-Capped Yaw-Rate Reference & Moment Law (V3_PID_ALQP or V4_SMC_HYBRID)
+	var mu_avg: float = 0.25 * (tc_mu_surface[0] + tc_mu_surface[1] + tc_mu_surface[2] + tc_mu_surface[3])
 	var k_us: float = gp_adaptive_k_us_param(fz_est, k_us_active)
-	var wz_ref: float = (vx_safe * delta_dz) / (GP_WB + k_us * vx_safe * vx_safe)
+	var wz_kin: float = (vx_safe * delta_dz) / (GP_WB + k_us * vx_safe * vx_safe)
+	var ay_cap: float = live_grip_cap * mu_avg * GP_GRAVITY
+	var wz_max_grip: float = ay_cap / maxf(vx_safe, 2.5)
+	var wz_ref: float = wz_max_grip * tanh(wz_kin / maxf(wz_max_grip, 0.05))
 	last_wz_ref = wz_ref
 
-	var mu_avg: float = 0.25 * (tc_mu_surface[0] + tc_mu_surface[1] + tc_mu_surface[2] + tc_mu_surface[3])
 	var wz_err: float = wz_ref - wz_corr
 	var ff_mz: float = 0.0
 	var p_mz: float = 0.0
@@ -1602,10 +1619,14 @@ func _gp_tv_step(
 		_smc_wz_prev = wz_corr
 		_smc_wz_dot_filt += clampf(dt / (0.040 + dt), 0.0, 1.0) * (raw_wz_dot - _smc_wz_dot_filt)
 
+		# Instantaneous IMU sideslip rate & velocity-growing beta shield
+		var beta_dot_imu: float = (ay_filt / maxf(vx_safe, 3.0)) - wz_corr
+		var lambda_beta_eff: float = live_smc_lambda_beta * (1.0 + 0.032 * vx_safe)
+
 		# ISO/ROS (+Y left): left oversteer => vy < 0 => beta < 0 => needs Mz < 0, so +lambda_beta * beta brakes drift
 		var beta_excess: float = maxf(0.0, absf(beta) - 0.022)
 		var beta_emg: float = (1.0 if beta >= 0.0 else -1.0) * 1200.0 * beta_excess * beta_excess
-		var s_instant: float = wz_err + live_smc_lambda_beta * beta + beta_emg
+		var s_instant: float = wz_err + lambda_beta_eff * beta + 0.45 * beta_dot_imu + beta_emg
 		var lambda_int: float = 2.0
 		if mz_sat_ratio > 0.85:
 			smc_s_int = clampf(smc_s_int + s_instant * dt, -0.35, 0.35)
@@ -1615,20 +1636,21 @@ func _gp_tv_step(
 		last_smc_s = s_surface
 
 		var phi_eff: float = maxf(live_smc_phi, 0.02) * (1.0 + 0.03 * vx_safe)
-		var smc_mz: float = live_smc_k_gain * tanh(s_surface / phi_eff)
+		var hs_authority_scale: float = clampf(1.15 - 0.022 * vx_safe, 0.48, 1.0)
+		var smc_mz: float = live_smc_k_gain * hs_authority_scale * tanh(s_surface / phi_eff)
 
-		# Safety gate on turn-in feedforward: only active before 75% target yaw rate, zero if oversteering
-		var ff_allowed: bool = (absf(wz_corr) < 0.75 * absf(wz_ref)) and (absf(beta) <= 0.015) and (absf(wz_corr) <= absf(wz_ref))
+		# Pivot feedforward: only in slow/medium corners (< 75 km/h) before 80% target yaw rate, zero if drifting
+		var ff_allowed: bool = (vx_safe < 21.0) and (absf(wz_corr) < 0.80 * absf(wz_ref)) and (absf(beta) < 0.015)
 		ff_mz = (live_smc_k_ffd * delta_dot_notch) if ff_allowed else 0.0
 
-		var wz_damp_mz: float = -35.0 * _smc_wz_dot_filt
-		p_mz = live_smc_k_gain * tanh((wz_err + lambda_int * smc_s_int) / phi_eff) + wz_damp_mz
+		var wz_damp_mz: float = -35.0 * _smc_wz_dot_filt * hs_authority_scale
+		p_mz = live_smc_k_gain * hs_authority_scale * tanh((wz_err + lambda_int * smc_s_int) / phi_eff) + wz_damp_mz
 		beta_term = smc_mz - (p_mz - wz_damp_mz)
 		i_mz = 0.0
 		mz_raw = smc_mz + ff_mz + wz_damp_mz
-		last_kp = live_smc_k_gain / phi_eff
+		last_kp = (live_smc_k_gain * hs_authority_scale) / phi_eff
 		last_ki = lambda_int
-		last_kd = live_smc_k_ffd
+		last_kd = live_smc_k_ffd if vx_safe < 21.0 else 0.0
 	else:
 		last_smc_s = 0.0
 		var v_norm: float = clampf(vx_safe / 30.0, 0.0, 1.0)
