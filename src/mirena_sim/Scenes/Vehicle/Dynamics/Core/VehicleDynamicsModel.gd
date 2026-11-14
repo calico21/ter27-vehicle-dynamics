@@ -166,7 +166,8 @@ func step_forces(
 			ecu_tv_v3.step(fx_driver, in_inputs.steer_angle, u, v, r, _prev_ay_ros, _prev_ax_ros, w_omegas, in_inputs.brake, dt, w_steers)
 			if advance_tv else ecu_tv_v3.last_t_cmd.duplicate()
 		)
-		if in_inputs.throttle > 0.0 or in_inputs.brake < 0.05:
+		var lc_armed: bool = ecu_tv_v3.launch_state == EcuTorqueVectoringV3.LaunchState.LC_ARMED
+		if in_inputs.throttle > 0.0 or in_inputs.brake < 0.05 or lc_armed:
 			var eff: float = maxf(config.drivetrain_efficiency, 1e-3)
 			var v_nom: float = maxf(config.battery_nominal_voltage_v, 1.0)
 			var v_dc_cur: float = hv_state.v_dc if (hv_state != null and hv_state.v_dc > 0.0) else v_nom

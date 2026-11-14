@@ -212,6 +212,27 @@ var _custom_params_active: bool = false
 enum ControlLawMode { V3_PID_ALQP = 0, V4_SMC_HYBRID = 1 }
 var control_law_mode: int = ControlLawMode.V3_PID_ALQP
 
+enum LaunchState { LC_OFF = 0, LC_ARMED = 1, LC_ACTIVE = 2, LC_DONE = 3 }
+const FAST_CORNER_VX_MS: float = 16.67
+const LC_PRELOAD_TORQUE_NM: float = 8.0
+const LC_EXIT_VX_MS: float = 24.5
+const LC_TRANSITION_TIME_S: float = 0.15
+const LC_DV_OPT_MIN: float = 0.85
+const LC_KAPPA_OPT: float = 0.088
+const LC_FRONT_SPLIT: float = 0.32
+
+var active_event_mode: String = "autocross"
+var live_eco_power_cap_kw: float = 0.0
+var live_regen_boost: float = 1.0
+var _skidpad_yaw_integral: float = 0.0
+var _skidpad_lock_active: bool = false
+
+var launch_state: int = LaunchState.LC_OFF
+var _lc_arm_requested: bool = false
+var _lc_done_timer: float = 0.0
+var _lc_blend_alpha: float = 0.0
+var _lc_pi_integral: Array[float] = [0.0, 0.0, 0.0, 0.0]
+
 var live_k_us: float = 0.011
 var live_max_mz: float = 750.0
 var live_min_fx_reserve: float = 0.10
@@ -481,6 +502,63 @@ func set_live_param(key: String, val: float) -> void:
 			hardware_realism_enabled = can_latency_ms > 0.0
 	_custom_params_active = true
 
+## Arms Launch Control when stationary (vx < 0.5 m/s) with brake held (> 0.25).
+func request_launch_control_arm(vx: float = 0.0, brake_norm: float = 1.0) -> bool:
+	if absf(vx) < 0.5 and brake_norm > 0.25:
+		launch_state = LaunchState.LC_ARMED
+		_lc_arm_requested = false
+		_lc_done_timer = 0.0
+		_lc_blend_alpha = 1.0
+		_lc_pi_integral = [0.0, 0.0, 0.0, 0.0]
+		return true
+	_lc_arm_requested = false
+	return false
+
+## Cancels Launch Control and returns smoothly to normal TV control.
+func disarm_launch_control() -> void:
+	launch_state = LaunchState.LC_OFF
+	_lc_arm_requested = false
+	_lc_done_timer = 0.0
+	_lc_blend_alpha = 0.0
+	_lc_pi_integral = [0.0, 0.0, 0.0, 0.0]
+
+func get_launch_state_name() -> String:
+	match launch_state:
+		LaunchState.LC_ARMED:
+			return "LC_ARMED"
+		LaunchState.LC_ACTIVE:
+			return "LC_ACTIVE"
+		LaunchState.LC_DONE:
+			return "LC_DONE"
+		_:
+			return "LC_OFF"
+
+func get_event_mode_display() -> String:
+	match active_event_mode:
+		"endurance":
+			return "Endurance Eco"
+		"skidpad":
+			return "Skidpad Attack"
+		"wet":
+			return "Wet"
+		"acceleration":
+			return "Acceleration"
+		_:
+			return "Autocross Pivot"
+
+## Selects the first TV map matching the requested Formula Student event mode.
+func set_event_mode(mode_key: String) -> bool:
+	var target: String = mode_key.to_lower().strip_edges()
+	var maps: Array[Dictionary] = list_available_tv_maps()
+	for entry in maps:
+		var path: String = String(entry.get("path", ""))
+		var meta: Dictionary = _read_tv_map_metadata(path)
+		var ev: String = String(meta.get("event_mode", "")).to_lower().strip_edges()
+		if ev == target:
+			return load_tv_map_from_file(path)
+	active_event_mode = target
+	return false
+
 ## Exports the current live TV tuning parameters as a C/C++ #define header snippet for TeR_ECU.
 func export_c_header_snippet() -> String:
 	var dt := Time.get_datetime_string_from_system(false, true)
@@ -554,6 +632,25 @@ func load_tv_map_from_file(file_path: String) -> bool:
 	var params: Dictionary = data.get("params", {})
 	var law_str: String = String(data.get("control_law", params.get("control_law", "v3"))).to_lower().strip_edges()
 	control_law_mode = ControlLawMode.V4_SMC_HYBRID if (law_str == "smc" or law_str == "v4" or law_str == "v4_smc_hybrid") else ControlLawMode.V3_PID_ALQP
+	var ev_str: String = String(data.get("event_mode", params.get("event_mode", ""))).to_lower().strip_edges()
+	if ev_str != "":
+		active_event_mode = ev_str
+	else:
+		var fn_low: String = file_path.get_file().get_basename().to_lower()
+		if fn_low.contains("endurance"):
+			active_event_mode = "endurance"
+		elif fn_low.contains("skidpad"):
+			active_event_mode = "skidpad"
+		elif fn_low.contains("wet"):
+			active_event_mode = "wet"
+		elif fn_low.contains("accel") or fn_low.contains("launch"):
+			active_event_mode = "acceleration"
+		else:
+			active_event_mode = "autocross"
+	live_eco_power_cap_kw = clampf(float(params.get("eco_power_cap_kw", data.get("eco_power_cap_kw", 0.0))), 0.0, 120.0)
+	live_regen_boost = clampf(float(params.get("regen_boost", data.get("regen_boost", 1.0))), 0.5, 1.5)
+	_skidpad_yaw_integral = 0.0
+	_skidpad_lock_active = false
 	if params.has("k_us"):
 		live_k_us = clampf(float(params["k_us"]), 0.0, 0.05)
 		k_us_active = live_k_us
@@ -617,6 +714,7 @@ func save_current_tv_map_to_file(map_name: String, description: String = "", ove
 		"description": description,
 		"author": "TeR27 Vehicle Dynamics",
 		"control_law": "smc" if control_law_mode == ControlLawMode.V4_SMC_HYBRID else "v3",
+		"event_mode": active_event_mode,
 		"params": {
 			"k_us": live_k_us,
 			"max_mz": live_max_mz,
@@ -1018,15 +1116,19 @@ static func gp_qp_solve_4wd_closedform(
 	t_prev: Array[float],
 	fx_driver: float,
 	t_lb: Array[float],
-	t_ub: Array[float]
+	t_ub: Array[float],
+	w_reg_scale: float = 1.0,
+	w_smooth_scale: float = 1.0
 ) -> Dictionary:
-	var h: float = GP_W_REG + GP_W_SMOOTH
+	var w_reg: float = GP_W_REG * maxf(w_reg_scale, 0.1)
+	var w_smooth: float = GP_W_SMOOTH * maxf(w_smooth_scale, 0.1)
+	var h: float = w_reg + w_smooth
 	var a_eq: float = 1.0 / GP_R_WHEEL
 	var t_blend: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	var t_total_min: float = 0.0
 	var t_total_max: float = 0.0
 	for i in range(4):
-		t_blend[i] = (GP_W_REG * t_warmstart[i] + GP_W_SMOOTH * t_prev[i]) / h
+		t_blend[i] = (w_reg * t_warmstart[i] + w_smooth * t_prev[i]) / h
 		t_total_min += t_lb[i]
 		t_total_max += t_ub[i]
 
@@ -1482,6 +1584,127 @@ func _execute_tv_step(
 
 	_gp_tv_step(fx_driver, delta, vx, vy_in, wz, ay, ax, omega, brake_norm, dt, wheel_steers, vy_gps, gps_valid)
 
+func _update_launch_control_state(vx: float, fx_driver: float, brake_norm: float, dt: float) -> void:
+	var max_fx_est: float = (4.0 * GP_MAX_TRQ_ACT) / GP_R_WHEEL
+	var throttle_norm: float = clampf(fx_driver / maxf(max_fx_est, 1.0), 0.0, 1.0)
+	match launch_state:
+		LaunchState.LC_ARMED:
+			_lc_blend_alpha = 1.0
+			if absf(vx) > 2.0:
+				launch_state = LaunchState.LC_OFF
+				_lc_blend_alpha = 0.0
+			elif brake_norm < 0.08 and throttle_norm > 0.70:
+				launch_state = LaunchState.LC_ACTIVE
+				_lc_blend_alpha = 1.0
+				_lc_pi_integral = [0.0, 0.0, 0.0, 0.0]
+		LaunchState.LC_ACTIVE:
+			_lc_blend_alpha = 1.0
+			if vx > LC_EXIT_VX_MS or throttle_norm < 0.40 or brake_norm > 0.15:
+				launch_state = LaunchState.LC_DONE
+				_lc_done_timer = 0.0
+		LaunchState.LC_DONE:
+			_lc_done_timer += dt
+			_lc_blend_alpha = clampf(1.0 - (_lc_done_timer / LC_TRANSITION_TIME_S), 0.0, 1.0)
+			if _lc_done_timer >= LC_TRANSITION_TIME_S:
+				launch_state = LaunchState.LC_OFF
+				_lc_blend_alpha = 0.0
+		_:
+			_lc_blend_alpha = 0.0
+
+func _apply_launch_control_step(
+	delta_dz: float,
+	vx: float,
+	wz_corr: float,
+	ay_filt: float,
+	omega: Array[float],
+	t_ub: Array[float],
+	dt: float
+) -> Dictionary:
+	var blend: float = _lc_blend_alpha
+	var straight_lock: bool = absf(delta_dz) < 0.05
+	var mz_lc: float = (-950.0 * wz_corr - 320.0 * ay_filt) if straight_lock else 0.0
+	var lc_tc_active: bool = false
+	var vx_pos: float = maxf(vx, 0.0)
+	var dv_opt: float = maxf(LC_DV_OPT_MIN, LC_KAPPA_OPT * vx_pos)
+	var v_target: float = vx_pos + dv_opt
+	for i in range(4):
+		var v_wheel: float = omega[i] * GP_R_WHEEL
+		var dv_err: float = v_wheel - v_target
+		if dv_err > 0.0:
+			_lc_pi_integral[i] = clampf(_lc_pi_integral[i] + dv_err * dt, 0.0, 2.0)
+			var cut_nm: float = 180.0 * dv_err + 320.0 * _lc_pi_integral[i]
+			var t_cap: float = maxf(t_ub[i] - cut_nm * blend, 15.0)
+			if t_cap < t_ub[i] - 0.5:
+				lc_tc_active = true
+			t_ub[i] = minf(t_ub[i], t_cap)
+		else:
+			_lc_pi_integral[i] *= 0.85
+	return {
+		"front_split": lerpf(front_split_active, LC_FRONT_SPLIT, blend),
+		"straight_lock": straight_lock,
+		"mz_lc": mz_lc,
+		"blend": blend,
+		"tc_active": lc_tc_active
+	}
+
+func _apply_endurance_efficiency_policy(
+	fx_driver: float,
+	t_lb: Array[float],
+	omega: Array[float],
+	t_cmd: Array[float],
+	is_post_qp: bool
+) -> Dictionary:
+	if not is_post_qp:
+		if fx_driver > 0.0:
+			for i in range(4):
+				t_lb[i] = maxf(t_lb[i], 0.0)
+		return {"w_reg_scale": 2.2, "w_smooth_scale": 1.8}
+	if live_eco_power_cap_kw > 0.0:
+		var p_cap_w: float = live_eco_power_cap_kw * 1000.0
+		var p_elec: float = 0.0
+		for i in range(4):
+			p_elec += maxf(0.0, t_cmd[i] * absf(omega[i])) / 0.90
+		if p_elec > p_cap_w and p_elec > 1e-3:
+			var p_scale: float = p_cap_w / p_elec
+			for i in range(4):
+				if t_cmd[i] > 0.0:
+					t_cmd[i] *= p_scale
+	return {}
+
+func _apply_skidpad_radius_lock(
+	fz_est: Array[float],
+	delta_dot_est: float,
+	ay_filt: float,
+	wz_ref: float,
+	wz_corr: float,
+	fx_driver: float,
+	mz_req: float,
+	dt: float
+) -> Dictionary:
+	var steady_state: bool = absf(delta_dot_est) < 0.35 and absf(ay_filt) > 6.5
+	if not steady_state:
+		_skidpad_yaw_integral *= 0.90
+		_skidpad_lock_active = false
+		return {"active": false, "mz_req": mz_req}
+	_skidpad_lock_active = true
+	_skidpad_yaw_integral = clampf(_skidpad_yaw_integral + (wz_ref - wz_corr) * dt, -0.35, 0.35)
+	var mz_adj: float = mz_req + 180.0 * _skidpad_yaw_integral
+	var arms: Array[float] = gp_moment_arms()
+	var arm_sq_sum: float = 0.0
+	var fz_sum: float = 0.0
+	for i in range(4):
+		arm_sq_sum += arms[i] * arms[i]
+		fz_sum += maxf(fz_est[i], 1.0)
+	arm_sq_sum = maxf(arm_sq_sum, 1e-3)
+	fz_sum = maxf(fz_sum, 1.0)
+	var t_fx_total: float = fx_driver * GP_R_WHEEL
+	var t_nom_fz: Array[float] = [0.0, 0.0, 0.0, 0.0]
+	for i in range(4):
+		var t_fx_i: float = t_fx_total * (maxf(fz_est[i], 1.0) / fz_sum)
+		var t_mz_i: float = (arms[i] * mz_adj) / arm_sq_sum
+		t_nom_fz[i] = t_fx_i + t_mz_i
+	return {"active": true, "mz_req": mz_adj, "t_nominal": t_nom_fz}
+
 func _gp_tv_step(
 	fx_driver: float,
 	delta: float,
@@ -1497,8 +1720,22 @@ func _gp_tv_step(
 	vy_gps: float,
 	gps_valid: bool
 ) -> void:
-	# Stage 1: Standstill hold
-	if vx < 1.0 and brake_norm > 0.5 and fx_driver > 500.0:
+	_update_launch_control_state(vx, fx_driver, brake_norm, dt)
+	var lc_engaged: bool = launch_state == LaunchState.LC_ACTIVE or (launch_state == LaunchState.LC_DONE and _lc_blend_alpha > 0.0)
+
+	if launch_state == LaunchState.LC_ARMED:
+		for i in range(4):
+			last_t_cmd[i] = LC_PRELOAD_TORQUE_NM
+			t_out_prev[i] = LC_PRELOAD_TORQUE_NM
+			t_qp_prev[i] = LC_PRELOAD_TORQUE_NM
+			last_tc_cut_nm[i] = 0.0
+		tc_active = false
+		last_wz_ref = 0.0
+		last_mz_req = 0.0
+		return
+
+	# Stage 1: Standstill hold (bypassed when Launch Control is active)
+	if vx < 1.0 and brake_norm > 0.5 and fx_driver > 500.0 and not lc_engaged:
 		for i in range(4):
 			last_t_cmd[i] = 7.5
 			tc_pi_integral[i] = 0.0
@@ -1621,7 +1858,7 @@ func _gp_tv_step(
 
 		# Instantaneous IMU sideslip rate & velocity-growing beta shield
 		var beta_dot_imu: float = (ay_filt / maxf(vx_safe, 3.0)) - wz_corr
-		var lambda_beta_eff: float = live_smc_lambda_beta * (1.0 + 0.032 * vx_safe)
+		var lambda_beta_eff: float = live_smc_lambda_beta * (1.0 + 0.048 * vx_safe)
 
 		# ISO/ROS (+Y left): left oversteer => vy < 0 => beta < 0 => needs Mz < 0, so +lambda_beta * beta brakes drift
 		var beta_excess: float = maxf(0.0, absf(beta) - 0.022)
@@ -1636,11 +1873,11 @@ func _gp_tv_step(
 		last_smc_s = s_surface
 
 		var phi_eff: float = maxf(live_smc_phi, 0.02) * (1.0 + 0.03 * vx_safe)
-		var hs_authority_scale: float = clampf(1.15 - 0.022 * vx_safe, 0.48, 1.0)
+		var hs_authority_scale: float = clampf(1.32 - 0.026 * vx_safe, 0.48, 1.0)
 		var smc_mz: float = live_smc_k_gain * hs_authority_scale * tanh(s_surface / phi_eff)
 
-		# Pivot feedforward: only in slow/medium corners (< 75 km/h) before 80% target yaw rate, zero if drifting
-		var ff_allowed: bool = (vx_safe < 21.0) and (absf(wz_corr) < 0.80 * absf(wz_ref)) and (absf(beta) < 0.015)
+		# Pivot feedforward: only in slow/medium corners (< 60 km/h) before 80% target yaw rate, zero if drifting
+		var ff_allowed: bool = (vx_safe < FAST_CORNER_VX_MS) and (absf(wz_corr) < 0.80 * absf(wz_ref)) and (absf(beta) < 0.015)
 		ff_mz = (live_smc_k_ffd * delta_dot_notch) if ff_allowed else 0.0
 
 		var wz_damp_mz: float = -35.0 * _smc_wz_dot_filt * hs_authority_scale
@@ -1650,7 +1887,7 @@ func _gp_tv_step(
 		mz_raw = smc_mz + ff_mz + wz_damp_mz
 		last_kp = (live_smc_k_gain * hs_authority_scale) / phi_eff
 		last_ki = lambda_int
-		last_kd = live_smc_k_ffd if vx_safe < 21.0 else 0.0
+		last_kd = live_smc_k_ffd if vx_safe < FAST_CORNER_VX_MS else 0.0
 	else:
 		last_smc_s = 0.0
 		var v_norm: float = clampf(vx_safe / 30.0, 0.0, 1.0)
@@ -1756,11 +1993,33 @@ func _gp_tv_step(
 	# Corner-exit throttle Mz cut: attenuate pro-turn yaw moment under longitudinal acceleration
 	if mz_req * delta_dz > 0.0:
 		mz_req *= (1.0 - live_throttle_mz_cut * clampf(fx_clamped / 2500.0, 0.0, 1.0))
+
+	var eff_front_split: float = front_split_active
+	var w_reg_scale: float = 1.0
+	var w_smooth_scale: float = 1.0
+	var lc_res: Dictionary = {}
+	if lc_engaged:
+		lc_res = _apply_launch_control_step(delta_dz, vx, wz_corr, ay_filt, omega, t_ub, dt)
+		eff_front_split = float(lc_res.get("front_split", LC_FRONT_SPLIT))
+		if bool(lc_res.get("straight_lock", false)):
+			var blend_lc: float = float(lc_res.get("blend", 1.0))
+			mz_req = lerpf(mz_req, float(lc_res.get("mz_lc", 0.0)), blend_lc)
+			last_wz_ref = lerpf(last_wz_ref, 0.0, blend_lc)
+	elif active_event_mode == "endurance":
+		var end_pre: Dictionary = _apply_endurance_efficiency_policy(fx_driver, t_lb, omega, [], false)
+		w_reg_scale = float(end_pre.get("w_reg_scale", 1.0))
+		w_smooth_scale = float(end_pre.get("w_smooth_scale", 1.0))
 	last_mz_req = mz_req
 
 	# Stage 7: 4WD Nominal Allocation + Closed-Form KKT QP Solver + Rate Limiter
-	var t_nominal: Array[float] = gp_nominal_allocation_4wd(fx_clamped, mz_req, fz_est, front_split_active)
-	var qp_res: Dictionary = gp_qp_solve_4wd_closedform(t_nominal, t_qp_prev, fx_clamped, t_lb, t_ub)
+	var t_nominal: Array[float] = gp_nominal_allocation_4wd(fx_clamped, mz_req, fz_est, eff_front_split)
+	if not lc_engaged and active_event_mode == "skidpad":
+		var delta_dot_skid: float = (_notch_delta_prev - delta_prev) / maxf(dt, 1e-4)
+		var skid_res: Dictionary = _apply_skidpad_radius_lock(fz_est, delta_dot_skid, ay_filt, wz_ref, wz_corr, fx_clamped, mz_req, dt)
+		if bool(skid_res.get("active", false)):
+			t_nominal = skid_res["t_nominal"]
+			last_mz_req = float(skid_res.get("mz_req", mz_req))
+	var qp_res: Dictionary = gp_qp_solve_4wd_closedform(t_nominal, t_qp_prev, fx_clamped, t_lb, t_ub, w_reg_scale, w_smooth_scale)
 	var qp_result: Array[float] = qp_res["torques"]
 	qp_residual = float(qp_res["residual"])
 
@@ -1788,12 +2047,31 @@ func _gp_tv_step(
 	var t_pre_tc_2: float = t_cmd[2]
 	var t_pre_tc_3: float = t_cmd[3]
 
-	# Stage 8: 4WD Traction Control (V4 deterministic combined-ellipse or V3 RLS)
-	if control_law_mode == ControlLawMode.V4_SMC_HYBRID:
+	# Stage 8: 4WD Traction Control (Launch Control 0 km/h PI, V4 combined-ellipse, or V3 RLS)
+	if launch_state == LaunchState.LC_ACTIVE:
+		var lc_tc_on: bool = false
+		var vx_pos: float = maxf(vx, 0.0)
+		var dv_opt: float = maxf(LC_DV_OPT_MIN, LC_KAPPA_OPT * vx_pos)
+		var v_target: float = vx_pos + dv_opt
+		for i in range(4):
+			var v_wheel: float = omega[i] * GP_R_WHEEL
+			var dv_err: float = v_wheel - v_target
+			if dv_err > 0.0 and t_cmd[i] > 0.0:
+				_lc_pi_integral[i] = clampf(_lc_pi_integral[i] + dv_err * dt, 0.0, 2.0)
+				var cut_nm: float = 260.0 * dv_err + 480.0 * _lc_pi_integral[i]
+				t_cmd[i] = maxf(t_cmd[i] - cut_nm, 15.0)
+				lc_tc_on = true
+			else:
+				_lc_pi_integral[i] *= 0.82
+		tc_active = lc_tc_on
+	elif control_law_mode == ControlLawMode.V4_SMC_HYBRID:
 		_gp_tc_step_4wd_smc(t_cmd, omega, vx, vy_est, wz_corr, ay_filt, dt, wheel_steers, brake_norm)
 	else:
 		gp_tc_step_4wd(t_cmd, omega, vx, vy_est, wz_corr, fz_est, dt, wheel_steers, brake_norm, tc_kp_active)
 		gp_ekf_update_friction()
+
+	if active_event_mode == "endurance" and not lc_engaged:
+		_apply_endurance_efficiency_policy(fx_driver, t_lb, omega, t_cmd, true)
 
 	last_tc_cut_nm[0] = maxf(0.0, t_pre_tc_0 - t_cmd[0])
 	last_tc_cut_nm[1] = maxf(0.0, t_pre_tc_1 - t_cmd[1])

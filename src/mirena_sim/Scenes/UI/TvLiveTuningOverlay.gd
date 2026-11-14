@@ -61,8 +61,18 @@ var _gp_val_labels: Dictionary = {}
 var _telem_label: Label = null
 var _status_label: Label = null
 var _map_dropdown: OptionButton = null
+var _event_mode_dropdown: OptionButton = null
+var _btn_launch_arm: Button = null
 var _map_name_edit: LineEdit = null
 var _tv_maps_cache: Array[Dictionary] = []
+
+const EVENT_MODE_CHOICES: Array = [
+	["endurance", "Endurance Eco"],
+	["autocross", "Autocross Pivot"],
+	["skidpad", "Skidpad Attack"],
+	["wet", "Wet"],
+	["acceleration", "Acceleration"]
+]
 
 var _steer_raw_bar: ProgressBar = null
 var _steer_filt_bar: ProgressBar = null
@@ -183,6 +193,7 @@ func sync_from_setup() -> void:
 func update_telemetry(wz_ref: float, wz: float, beta_deg: float, mz_req: float, tc_active: bool) -> void:
 	if not visible or _telem_label == null:
 		return
+	_sync_launch_button_state()
 	var tc_txt := "ON" if tc_active else "off"
 	_telem_label.text = "wz_ref: %+5.2f | wz: %+5.2f rad/s | beta: %+4.1f deg\nmz_req: %+6.0f Nm | TC: %s" % [
 		wz_ref, wz, beta_deg, mz_req, tc_txt
@@ -295,6 +306,24 @@ func _build_tv_tab() -> void:
 	btn_refresh.focus_mode = Control.FOCUS_NONE
 	btn_refresh.pressed.connect(_refresh_tv_map_dropdown)
 	map_row.add_child(btn_refresh)
+
+	var mode_lc_row := HBoxContainer.new()
+	mode_lc_row.add_theme_constant_override("separation", 6)
+	vbox.add_child(mode_lc_row)
+
+	_event_mode_dropdown = OptionButton.new()
+	_event_mode_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_event_mode_dropdown.focus_mode = Control.FOCUS_NONE
+	for item in EVENT_MODE_CHOICES:
+		_event_mode_dropdown.add_item(String(item[1]))
+	_event_mode_dropdown.item_selected.connect(_on_event_mode_selected)
+	mode_lc_row.add_child(_event_mode_dropdown)
+
+	_btn_launch_arm = Button.new()
+	_btn_launch_arm.text = "Armar Launch Control [L]"
+	_btn_launch_arm.focus_mode = Control.FOCUS_NONE
+	_btn_launch_arm.pressed.connect(_on_launch_arm_pressed)
+	mode_lc_row.add_child(_btn_launch_arm)
 
 	var save_row := HBoxContainer.new()
 	save_row.add_theme_constant_override("separation", 6)
@@ -528,6 +557,45 @@ func _refresh_tv_map_dropdown() -> void:
 		_map_dropdown.select(sel_idx)
 		if _map_name_edit != null and not _map_name_edit.has_focus():
 			_map_name_edit.text = String(_tv_maps_cache[sel_idx]["name"])
+	if _event_mode_dropdown != null and _ecu != null:
+		var ev: String = String(_ecu.get("active_event_mode"))
+		for i in range(EVENT_MODE_CHOICES.size()):
+			if String(EVENT_MODE_CHOICES[i][0]) == ev:
+				_event_mode_dropdown.select(i)
+				break
+
+
+func _on_event_mode_selected(idx: int) -> void:
+	if idx < 0 or idx >= EVENT_MODE_CHOICES.size() or _ecu == null:
+		return
+	var mode_key: String = String(EVENT_MODE_CHOICES[idx][0])
+	if _ecu.has_method("set_event_mode"):
+		_ecu.set_event_mode(mode_key)
+	sync_from_ecu()
+	if _status_label != null:
+		_status_label.text = "Modo FS: %s" % String(EVENT_MODE_CHOICES[idx][1])
+
+
+func _on_launch_arm_pressed() -> void:
+	if _car != null and _car.has_method("launch_control_arm"):
+		var ok: bool = _car.launch_control_arm()
+		if _status_label != null:
+			_status_label.text = "LC ARMED (8 Nm)" if ok else "LC requiere vx < 0.5 y freno > 25%"
+	elif _ecu != null and _ecu.has_method("request_launch_control_arm"):
+		_ecu.request_launch_control_arm(0.0, 1.0)
+	_sync_launch_button_state()
+
+
+func _sync_launch_button_state() -> void:
+	if _btn_launch_arm == null or _ecu == null or not _ecu.has_method("get_launch_state_name"):
+		return
+	var st: String = _ecu.get_launch_state_name()
+	if st == "LC_ARMED":
+		_btn_launch_arm.text = "LC ARMED [L]"
+	elif st == "LC_ACTIVE":
+		_btn_launch_arm.text = "LC ACTIVE"
+	else:
+		_btn_launch_arm.text = "Armar Launch Control [L]"
 
 
 func _on_map_selected(idx: int) -> void:

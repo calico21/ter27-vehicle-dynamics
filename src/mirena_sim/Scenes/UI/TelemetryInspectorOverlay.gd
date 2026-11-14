@@ -1020,14 +1020,16 @@ func update_from_car(car: Node, dt: float) -> void:
 
 	if _yaw_label != null and ecu != null:
 		var law_tag: String = "V4_SMC" if int(ecu.control_law_mode) == 1 else "V3_PID"
+		var ev_tag: String = ecu.get_event_mode_display() if ecu.has_method("get_event_mode_display") else "Autocross"
+		var lc_tag: String = ecu.get_launch_state_name() if ecu.has_method("get_launch_state_name") else "LC_OFF"
 		_yaw_label.text = (
-			"[%s] S=%+5.3f rad/s | k_lim=%.3f\n"
+			"[%s | %s | %s] S=%+5.3f rad/s | k_lim=%.3f\n"
 			+ "wz ref/real/ekf: %+5.2f / %+5.2f / %+5.2f rad/s\n"
 			+ "beta real / ekf: %+5.2f / %+5.2f +-%.2f deg\n"
 			+ "vy_ekf / vy_ss : %+5.2f / %+5.2f m/s (std=%.3f)\n"
 			+ "Gains Kp/Ki/Kd : %.0f / %.0f / %.1f"
 		) % [
-			law_tag, float(ecu.last_smc_s), float(ecu.last_tc_kappa_lim[0]),
+			law_tag, ev_tag, lc_tag, float(ecu.last_smc_s), float(ecu.last_tc_kappa_lim[0]),
 			wz_ref, w_ros.z, wz_ekf,
 			beta_real, beta_ekf, beta_std_deg,
 			float(ecu.ekf_x[0]), float(ecu.last_vy_ss), vy_std,

@@ -346,6 +346,13 @@ func _unhandled_input(event: InputEvent) -> void:
 				_update_minimal_hud()
 		elif event.keycode == KEY_F8:
 			toggle_wheel_arrows()
+		elif event.keycode == KEY_L:
+			var overlay_typing := (
+				(_tv_overlay != null and _tv_overlay.has_method("is_text_input_focused") and _tv_overlay.is_text_input_focused())
+				or (_telemetry_inspector != null and _telemetry_inspector.has_method("is_text_input_focused") and _telemetry_inspector.is_text_input_focused())
+			)
+			if not overlay_typing:
+				launch_control_arm()
 		elif event.keycode == KEY_F10:
 			if _tv_overlay != null:
 				_tv_overlay.toggle_visibility()
@@ -1176,9 +1183,31 @@ func _update_minimal_hud() -> void:
 	if model != null and model.hv_state != null:
 		hv_str = "   |   %3.0f V (%.0f%% SoC)" % [model.hv_state.v_dc, model.hv_state.soc * 100.0]
 	var dev_str: String = "  |  WHEEL 1:1" if (wheel_ffb != null and wheel_ffb.active_device_mode == WheelFFBControllerScript.InputDeviceMode.WHEEL) else ""
-	_hud_label.text = "%5.1f km/h   |   %4.1f / 80.0 kW%s\n%s%s%s%s%s  |  [F10] Live Tuning  |  [F11] Telemetry X-Ray" % [
-		kmh, tv_elec_power_kw, hv_str, mode_str, map_str, tc_str, dev_str, rec_str
+	var lc_banner: String = ""
+	if model != null and model.ecu_tv_v3 != null:
+		if model.ecu_tv_v3.launch_state == EcuTorqueVectoringV3.LaunchState.LC_ARMED:
+			lc_banner = "[LAUNCH CONTROL ARMED] Mantén 100% Gas y Suelta Freno\n"
+			_hud_label.add_theme_color_override("font_color", Color(0.25, 0.95, 1.0))
+		elif model.ecu_tv_v3.launch_state == EcuTorqueVectoringV3.LaunchState.LC_ACTIVE:
+			lc_banner = "[LAUNCH CONTROL ACTIVE] 32/68 Split + Straight Lock\n"
+			_hud_label.add_theme_color_override("font_color", Color(1.0, 0.80, 0.20))
+		else:
+			_hud_label.add_theme_color_override("font_color", Color(0.95, 0.97, 1.0))
+	_hud_label.text = "%s%5.1f km/h   |   %4.1f / 80.0 kW%s\n%s%s%s%s%s  |  [F10] Live Tuning  |  [F11] Telemetry X-Ray" % [
+		lc_banner, kmh, tv_elec_power_kw, hv_str, mode_str, map_str, tc_str, dev_str, rec_str
 	]
+
+func launch_control_arm() -> bool:
+	if model == null or model.ecu_tv_v3 == null:
+		return false
+	var vx_cur: float = model.chassis_state.linear_velocity.x if model.chassis_state != null else 0.0
+	var armed: bool = model.ecu_tv_v3.request_launch_control_arm(vx_cur, brake)
+	if armed:
+		print("[Launch Control]: ARMED (preload 8 Nm) — Mantén 100% Gas y Suelta Freno")
+	else:
+		print("[Launch Control]: Requiere coche detenido (vx < 0.5 m/s) y freno pisado (> 25%)")
+	_update_minimal_hud()
+	return armed
 
 # --- Interface & Utility Methods ---
 func set_origin(target_transform: Transform3D, reset_vel: bool = false) -> void:

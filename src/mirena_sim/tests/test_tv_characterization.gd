@@ -322,6 +322,13 @@ static func run(verbose: bool = false) -> Dictionary:
 	else:
 		failed += 1
 
+	# J) Launch Control (0->75m), Fast Corner 65 km/h, Endurance Eco (>= 8% kWh/km reduction) & Skidpad Attack
+	var fs_ok: bool = _verify_fs_specialized_modes(cfg, tracks, verbose, errors)
+	if fs_ok:
+		passed += 1
+	else:
+		failed += 1
+
 	if verbose:
 		print("----------------------------------------------------------------------------------")
 		print("TV Characterization Summary: %d/%d assertions PASSED." % [passed, passed + failed])
@@ -1430,3 +1437,125 @@ static func _run_all_5_maps_4_maneuvers(
 	if verbose:
 		print("")
 	return ok
+
+static func _verify_fs_specialized_modes(cfg: VehicleConfigScript, tracks: Array[Dictionary], verbose: bool, errors: Array) -> bool:
+	var ok := true
+
+	# 1. Launch Control (0 -> 75 m) with 06_acceleration_launch.json
+	var m_lc := VehicleDynamicsModelScript.new(cfg)
+	var inp_lc := VehicleInputsScript.new()
+	_apply_tv_profile(m_lc, inp_lc, 2, {"map_file": "res://Scenes/Vehicle/Dynamics/Core/Config/tv_maps/06_acceleration_launch.json"})
+	inp_lc.brake = 0.8
+	inp_lc.throttle = 0.0
+	m_lc.step_standalone(inp_lc, SIM_DT, 0.0)
+	var armed_ok := m_lc.ecu_tv_v3.request_launch_control_arm(m_lc.chassis_state.linear_velocity.x, inp_lc.brake)
+	for _p in range(10):
+		m_lc.step_standalone(inp_lc, SIM_DT, 0.0)
+	inp_lc.brake = 0.0
+	inp_lc.throttle = 1.0
+	inp_lc.steer_angle = 0.0
+	var t_75 := 9.99
+	var max_lat_dev := 0.0
+	var max_kappa_lc := 0.0
+	for si in range(int(round(5.0 / SIM_DT))):
+		m_lc.step_standalone(inp_lc, SIM_DT, 0.0)
+		max_lat_dev = maxf(max_lat_dev, absf(m_lc.chassis_state.position.y))
+		if m_lc.chassis_state.linear_velocity.x >= 8.0:
+			for wi in range(4):
+				max_kappa_lc = maxf(max_kappa_lc, absf(m_lc.wheels[wi].kappa))
+		if m_lc.chassis_state.position.x >= 75.0:
+			t_75 = float(si + 1) * SIM_DT
+			break
+	var lc_ok := armed_ok and t_75 < 3.85 and max_lat_dev < 0.25 and max_kappa_lc < 0.14
+	if not lc_ok:
+		ok = false
+		errors.append("Launch Control 0->75m failed: armed=%s t75=%.3fs lat=%.3fm max_kappa=%.4f" % [
+			str(armed_ok), t_75, max_lat_dev, max_kappa_lc
+		])
+
+	# 2. Fast Corner 65 km/h (18.1 m/s, R ~ 23 m) with 05_smc_pivot_4wd.json
+	var m_fc65 := VehicleDynamicsModelScript.new(cfg)
+	var inp_fc65 := VehicleInputsScript.new()
+	_apply_tv_profile(m_fc65, inp_fc65, 2, {"map_file": "res://Scenes/Vehicle/Dynamics/Core/Config/tv_maps/05_smc_pivot_4wd.json"})
+	var v65 := 18.1
+	m_fc65.chassis_state.linear_velocity = Vector3(v65, 0.0, 0.0)
+	for wi in range(4):
+		m_fc65.wheels[wi].omega = v65 / cfg.wheel_radius
+	inp_fc65.throttle = 0.50
+	var peak_beta_65 := 0.0
+	for si in range(int(round(1.8 / SIM_DT))):
+		inp_fc65.steer_angle = 0.075 * clampf((float(si) * SIM_DT) / 0.25, 0.0, 1.0)
+		m_fc65.step_standalone(inp_fc65, SIM_DT, 0.0)
+		peak_beta_65 = maxf(peak_beta_65, absf(VehicleTelemetryScript.compute_beta_deg(
+			m_fc65.chassis_state.linear_velocity.x, m_fc65.chassis_state.linear_velocity.y
+		)))
+	var fc65_ok := peak_beta_65 < 1.8
+	if not fc65_ok:
+		ok = false
+		errors.append("Fast Corner 65 km/h failed: peak_beta=%.2f deg (need < 1.8)" % peak_beta_65)
+
+	# 3. Endurance Eco (01_endurance_safe) vs Autocross (02_autocross_neutral) kWh/km >= 8% reduction
+	var kwh_km_end := _measure_sprint_kwh_km(cfg, "res://Scenes/Vehicle/Dynamics/Core/Config/tv_maps/01_endurance_safe.json")
+	var kwh_km_auto := _measure_sprint_kwh_km(cfg, "res://Scenes/Vehicle/Dynamics/Core/Config/tv_maps/02_autocross_neutral.json")
+	var eco_reduction := (1.0 - kwh_km_end / maxf(kwh_km_auto, 1e-6)) * 100.0
+	var eco_ok := kwh_km_end <= 0.92 * kwh_km_auto
+	if not eco_ok:
+		ok = false
+		errors.append("Endurance Eco kWh/km reduction insufficient: %.2f%% (end=%.3f vs auto=%.3f)" % [
+			eco_reduction, kwh_km_end, kwh_km_auto
+		])
+
+	# 4. Skidpad Attack (03_skidpad_attack) vs Endurance Safe on FSG Skidpad
+	var skidpad_trk := {}
+	for tr in tracks:
+		if String(tr["id"]) == "skidpad":
+			skidpad_trk = tr
+			break
+	var sk_att := _run_track_benchmark(cfg, skidpad_trk, 2, {"map_file": "res://Scenes/Vehicle/Dynamics/Core/Config/tv_maps/03_skidpad_attack.json"})
+	var sk_end := _run_track_benchmark(cfg, skidpad_trk, 2, {"map_file": "res://Scenes/Vehicle/Dynamics/Core/Config/tv_maps/01_endurance_safe.json"})
+	var t_sk_att := float(sk_att.get("sector_time_s", 99.0))
+	var t_sk_end := float(sk_end.get("sector_time_s", 99.0))
+	var sk_att_ok := bool(sk_att.get("completed", false)) and t_sk_att <= t_sk_end
+	if not sk_att_ok:
+		ok = false
+		errors.append("Skidpad Attack did not beat/match Endurance: att=%.3fs vs end=%.3fs" % [t_sk_att, t_sk_end])
+
+	if verbose:
+		print("[FS SPECIALIZED MODES VERIFICATION]")
+		print("  Launch Control (0->75m, 06_accel) : t=%.3fs | lat_dev=%.3fm | max_k=%.4f | %s" % [
+			t_75, max_lat_dev, max_kappa_lc, "PASS" if lc_ok else "FAIL"
+		])
+		print("  Fast Corner 65 km/h (R=23m, V4)   : peak_beta=%.2f deg (< 1.8) | %s" % [
+			peak_beta_65, "PASS" if fc65_ok else "FAIL"
+		])
+		print("  Endurance Eco vs Autocross kWh/km : %.3f vs %.3f (-%.1f%%) | %s" % [
+			kwh_km_end, kwh_km_auto, eco_reduction, "PASS" if eco_ok else "FAIL"
+		])
+		print("  Skidpad Attack vs Endurance Safe  : %.3fs vs %.3fs | %s\n" % [
+			t_sk_att, t_sk_end, "PASS" if sk_att_ok else "FAIL"
+		])
+	return ok
+
+static func _measure_sprint_kwh_km(cfg: VehicleConfigScript, map_file: String) -> float:
+	var m := VehicleDynamicsModelScript.new(cfg)
+	var inp := VehicleInputsScript.new()
+	_apply_tv_profile(m, inp, 2, {"map_file": map_file})
+	var v0 := 8.0
+	m.chassis_state.linear_velocity = Vector3(v0, 0.0, 0.0)
+	for wi in range(4):
+		m.wheels[wi].omega = v0 / cfg.wheel_radius
+	var energy_j := 0.0
+	var dist_m := 0.0
+	for si in range(int(round(3.0 / SIM_DT))):
+		var t_s := float(si) * SIM_DT
+		inp.throttle = 1.0
+		inp.brake = 0.0
+		inp.steer_angle = 0.06 * sin(TAU * 0.5 * t_s)
+		m.step_standalone(inp, SIM_DT, 0.0)
+		var p_elec := 0.0
+		for wi in range(4):
+			p_elec += maxf(0.0, float(m.ecu_tv_v3.last_t_cmd[wi]) * absf(m.wheels[wi].omega)) / 0.90
+		energy_j += maxf(0.0, p_elec) * SIM_DT
+		dist_m += maxf(0.0, m.chassis_state.linear_velocity.x) * SIM_DT
+	var energy_kwh := energy_j / 3600000.0
+	return energy_kwh / maxf(dist_m / 1000.0, 1e-6)

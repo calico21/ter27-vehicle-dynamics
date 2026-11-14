@@ -1,8 +1,9 @@
 {
 	"name": "Skidpad Attack",
-	"description": "Máximo agarre lateral estacionario y precisión de guiñada en círculos de 9.125 m",
+	"description": "Reparto proporcional a Fz en radio constante R = 9.125 m con ajuste integral de guiñada",
 	"author": "TeR27 Vehicle Dynamics",
 	"control_law": "v3",
+	"event_mode": "skidpad",
 	"params": {
 		"grip_cap": 0.97,
 		"k_us": 0.0005,
