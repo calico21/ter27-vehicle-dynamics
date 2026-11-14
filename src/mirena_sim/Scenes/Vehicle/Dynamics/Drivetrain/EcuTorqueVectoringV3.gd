@@ -5,14 +5,62 @@ extends RefCounted
 ## Faithfully ports gp_math, gp_ekf, gp_vehicle_model, gp_solver, gp_traction_control,
 ## and gp_torque_vectoring, generalized to 4 independent in-hub motors [FL, FR, RL, RR] at 200 Hz.
 
+const TvSilBridgeScript = preload("res://addons/rclgd/tv_sil_bridge.gd")
+
 const GP_FL: int = 0
 const GP_FR: int = 1
 const GP_RL: int = 2
 const GP_RR: int = 3
 
+enum TVMap {
+	OPEN_4WD = 0,
+	ENDURANCE_SAFE = 1,
+	AUTOCROSS_NEUTRAL = 2,
+	SKIDPAD_ATTACK = 3
+}
+
+const TV_MAP_PROFILES: Dictionary = {
+	TVMap.OPEN_4WD: {
+		"name": "OPEN_4WD",
+		"front_split": 0.35,
+		"rear_split": 0.65,
+		"k_us": 0.015,
+		"max_mz": 0.0,
+		"tc_kp": 23.113,
+		"min_fx_reserve": 0.08
+	},
+	TVMap.ENDURANCE_SAFE: {
+		"name": "ENDURANCE_SAFE",
+		"front_split": 0.35,
+		"rear_split": 0.65,
+		"k_us": 0.016,
+		"max_mz": 450.0,
+		"tc_kp": 24.0,
+		"min_fx_reserve": 0.06
+	},
+	TVMap.AUTOCROSS_NEUTRAL: {
+		"name": "AUTOCROSS_NEUTRAL",
+		"front_split": 0.35,
+		"rear_split": 0.65,
+		"k_us": 0.011,
+		"max_mz": 750.0,
+		"tc_kp": 21.0,
+		"min_fx_reserve": 0.10
+	},
+	TVMap.SKIDPAD_ATTACK: {
+		"name": "SKIDPAD_ATTACK",
+		"front_split": 0.35,
+		"rear_split": 0.65,
+		"k_us": 0.007,
+		"max_mz": 1050.0,
+		"tc_kp": 18.5,
+		"min_fx_reserve": 0.14
+	}
+}
+
 # ── TeR27 Vehicle & Actuator Parameters ─────────────────────────────────────
 const GP_MASS: float = 290.0
-const GP_IZ: float = 125.0
+const GP_IZ: float = 137.2
 const GP_WB: float = 1.540
 const GP_LF: float = 0.847            # 0.55 * 1.540 (45% Front / 55% Rear static)
 const GP_LR: float = 0.693            # 0.45 * 1.540
@@ -30,7 +78,15 @@ const GP_AIR_DENSITY: float = 1.225
 const GP_MAX_TRQ_ACT: float = 312.5   # 25 Nm motor * 12.5 gear ratio [Nm at wheel]
 const GP_P_MAX_WHL: float = 32000.0   # Per-inverter hardware power cap [W mech per wheel]
 const GP_P_MAX_TOTAL_MECH: float = 72000.0 # 80 kW DC bus * 0.90 efficiency [W mech total]
+const GP_MOTOR_MAX_RPM: float = 22000.0
+const GP_MOTOR_TAPER_RATIO: float = 0.85
+const GP_GEAR_RATIO: float = 12.5
 const GP_I_WHEEL_EST: float = 0.5075  # [kg*m^2]
+
+# ── Hardware Realism (CAN Latency & Encoder Quantization) ───────────────────
+const DEFAULT_CAN_LATENCY_MS: float = 12.0
+const DEFAULT_ENCODER_PPR: int = 4096
+const RING_BUFFER_CAPACITY: int = 64
 
 # ── Tire & Understeer Reference ─────────────────────────────────────────────
 const GP_C_ALPHA_F: float = 35000.0
@@ -38,13 +94,13 @@ const GP_C_ALPHA_R: float = 32000.0
 const GP_MU_NOM: float = 1.90
 const GP_MU_SLIDE: float = 1.55
 const GP_MU_DEG_FZ: float = 0.00012
-const GP_K_US: float = 0.006
+const GP_K_US: float = 0.015
 const GP_K_US_FZ: float = 0.0015
 
 # ── Control, QP & Filtering Constants ───────────────────────────────────────
 const GP_W_SMOOTH: float = 5.999
 const GP_W_REG: float = 0.401
-const GP_TV_MAX_MZ: float = 1500.0
+const GP_TV_MAX_MZ: float = 500.0
 const GP_TV_WZ_I_MAX: float = 200.0
 const GP_TV_RATE_LIMIT: float = 3252.3
 const GP_STEER_DEADZONE_RAD: float = 0.0087
@@ -54,7 +110,7 @@ const GP_UB_LPF_TAU: float = 0.0300
 const FIXED_DT: float = 0.005         # 200 Hz ECU rate
 
 # ── Traction Control RLS Constants ──────────────────────────────────────────
-const GP_TC_KP: float = 12.0
+const GP_TC_KP: float = 23.113
 const GP_TC_KI: float = 12.0
 const GP_TC_B0: float = 14.0
 const GP_TC_B1: float = -0.0018
@@ -123,7 +179,46 @@ var tc_rls_theta: Array[float] = [30000.0, 30000.0, 30000.0, 30000.0]
 var tc_theta_prev: Array[float] = [30000.0, 30000.0, 30000.0, 30000.0]
 var tc_kappa_prev: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var tc_fx_prev: Array[float] = [0.0, 0.0, 0.0, 0.0]
-var tc_kappa_opt: Array[float] = [0.15, 0.15, 0.15, 0.15]
+var tc_kappa_opt: Array[float] = [0.11, 0.11, 0.11, 0.11]
+
+# ── Live Map Profile & Active Tunables ──────────────────────────────────────
+var active_map_id: int = TVMap.AUTOCROSS_NEUTRAL
+var k_us_active: float = 0.011
+var tv_max_mz_active: float = 750.0
+var tc_kp_active: float = 21.0
+var min_fx_reserve_active: float = 0.10
+var front_split_active: float = 0.35
+var rear_split_active: float = 0.65
+var open_4wd_tc_enabled: bool = false
+var _custom_params_active: bool = false
+
+# ── Hardware Realism (CAN Latency & Encoder Quantization) ───────────────────
+var hardware_realism_enabled: bool = false:
+	set(value):
+		hardware_realism_enabled = value
+		if value:
+			if can_latency_ms <= 0.0:
+				can_latency_ms = DEFAULT_CAN_LATENCY_MS
+			sensor_quantization_enabled = true
+		else:
+			can_latency_ms = 0.0
+			sensor_quantization_enabled = false
+var can_latency_ms: float = 0.0
+var cmd_latency_ms: float = 0.0
+var encoder_ppr: int = DEFAULT_ENCODER_PPR
+var sensor_quantization_enabled: bool = false
+
+var _sensor_ring_buffer: Array[Dictionary] = []
+var _sensor_rb_head: int = 0
+var _sensor_rb_count: int = 0
+var _cmd_ring_buffer: Array[Dictionary] = []
+var _cmd_rb_head: int = 0
+var _cmd_rb_count: int = 0
+var _sim_time_s: float = 0.0
+
+# ── C/C++ SIL Bridge ────────────────────────────────────────────────────────
+var sil_bridge: TvSilBridgeScript = null
+var use_native_sil: bool = false
 
 # ── Fixed-rate 200 Hz Accumulator & Telemetry ───────────────────────────────
 var _time_acc: float = 0.0
@@ -133,6 +228,8 @@ var last_mz_req: float = 0.0
 var tc_active: bool = false
 
 func _init() -> void:
+	sil_bridge = TvSilBridgeScript.new(false)
+	set_map(TVMap.AUTOCROSS_NEUTRAL)
 	reset()
 
 func reset() -> void:
@@ -163,13 +260,141 @@ func reset() -> void:
 	tc_theta_prev = [30000.0, 30000.0, 30000.0, 30000.0]
 	tc_kappa_prev = [0.0, 0.0, 0.0, 0.0]
 	tc_fx_prev = [0.0, 0.0, 0.0, 0.0]
-	tc_kappa_opt = [0.15, 0.15, 0.15, 0.15]
+	tc_kappa_opt = [0.11, 0.11, 0.11, 0.11]
 
 	_time_acc = 0.0
 	last_t_cmd = [0.0, 0.0, 0.0, 0.0]
 	last_wz_ref = 0.0
 	last_mz_req = 0.0
 	tc_active = false
+	_reset_ring_buffers()
+	if sil_bridge != null and sil_bridge.is_using_native_sil():
+		sil_bridge.gp_tv_init(null)
+
+## Selects one of the 4 live TV calibration maps (OPEN_4WD, ENDURANCE_SAFE, AUTOCROSS_NEUTRAL, SKIDPAD_ATTACK).
+func set_map(map_id: int) -> void:
+	var clamped_id: int = clampi(map_id, TVMap.OPEN_4WD, TVMap.SKIDPAD_ATTACK)
+	active_map_id = clamped_id
+	var profile: Dictionary = TV_MAP_PROFILES[clamped_id]
+	front_split_active = float(profile["front_split"])
+	rear_split_active = float(profile["rear_split"])
+	k_us_active = float(profile["k_us"])
+	tv_max_mz_active = float(profile["max_mz"])
+	tc_kp_active = float(profile["tc_kp"])
+	min_fx_reserve_active = float(profile["min_fx_reserve"])
+	_custom_params_active = false
+
+## Cycles to the next live TV map (0 -> 1 -> 2 -> 3 -> 0) and returns the new active_map_id.
+func cycle_map() -> int:
+	var next_id: int = (active_map_id + 1) % 4
+	set_map(next_id)
+	return active_map_id
+
+## Returns the human-readable name of the currently active TV map profile.
+func get_map_name() -> String:
+	if _custom_params_active:
+		return "CUSTOM"
+	if TV_MAP_PROFILES.has(active_map_id):
+		return String(TV_MAP_PROFILES[active_map_id]["name"])
+	return "UNKNOWN"
+
+## Applies custom live calibration parameters without altering the static reference constants.
+func set_custom_parameters(k_us: float, max_mz: float, tc_kp: float, min_fx_reserve: float) -> void:
+	k_us_active = k_us
+	tv_max_mz_active = maxf(max_mz, 0.0)
+	tc_kp_active = maxf(tc_kp, 0.0)
+	min_fx_reserve_active = clampf(min_fx_reserve, 0.0, 0.95)
+	_custom_params_active = true
+
+## Enables or disables CAN bus latency + 4096 PPR encoder quantization simulation.
+func set_hardware_realism(
+	enabled: bool,
+	latency_ms: float = DEFAULT_CAN_LATENCY_MS,
+	ppr: int = DEFAULT_ENCODER_PPR
+) -> void:
+	hardware_realism_enabled = enabled
+	if enabled:
+		can_latency_ms = maxf(latency_ms, 0.0)
+		encoder_ppr = maxi(ppr, 1)
+		sensor_quantization_enabled = true
+	else:
+		can_latency_ms = 0.0
+		encoder_ppr = maxi(ppr, 1)
+		sensor_quantization_enabled = false
+	_reset_ring_buffers()
+
+## Requests switching between GDScript and native C/C++ GDExtension SIL backend.
+## Falls back safely to GDScript when native `GpTorqueVectoringSIL` is not registered.
+func set_use_native_sil(enabled: bool) -> bool:
+	if sil_bridge == null:
+		sil_bridge = TvSilBridgeScript.new(false)
+	var target_mode: int = TvSilBridgeScript.IMPLEMENTATION_C_SIL if enabled else TvSilBridgeScript.IMPLEMENTATION_GDSCRIPT
+	sil_bridge.set_implementation(target_mode)
+	use_native_sil = sil_bridge.is_using_native_sil()
+	return use_native_sil
+
+func get_sil_status() -> Dictionary:
+	if sil_bridge == null:
+		sil_bridge = TvSilBridgeScript.new(false)
+	return sil_bridge.sil_backend_status()
+
+func _reset_ring_buffers() -> void:
+	_sensor_ring_buffer.clear()
+	_sensor_ring_buffer.resize(RING_BUFFER_CAPACITY)
+	for i in range(RING_BUFFER_CAPACITY):
+		_sensor_ring_buffer[i] = {}
+	_sensor_rb_head = 0
+	_sensor_rb_count = 0
+
+	_cmd_ring_buffer.clear()
+	_cmd_ring_buffer.resize(RING_BUFFER_CAPACITY)
+	for i in range(RING_BUFFER_CAPACITY):
+		_cmd_ring_buffer[i] = {}
+	_cmd_rb_head = 0
+	_cmd_rb_count = 0
+	_sim_time_s = 0.0
+
+func _push_sensor_sample(entry: Dictionary) -> void:
+	if _sensor_ring_buffer.size() != RING_BUFFER_CAPACITY:
+		_reset_ring_buffers()
+	_sensor_ring_buffer[_sensor_rb_head] = entry
+	_sensor_rb_head = (_sensor_rb_head + 1) % RING_BUFFER_CAPACITY
+	_sensor_rb_count = mini(_sensor_rb_count + 1, RING_BUFFER_CAPACITY)
+
+func _push_cmd_sample(t_s: float, cmd: Array[float]) -> void:
+	if _cmd_ring_buffer.size() != RING_BUFFER_CAPACITY:
+		_reset_ring_buffers()
+	_cmd_ring_buffer[_cmd_rb_head] = {"t": t_s, "cmd": cmd.duplicate()}
+	_cmd_rb_head = (_cmd_rb_head + 1) % RING_BUFFER_CAPACITY
+	_cmd_rb_count = mini(_cmd_rb_count + 1, RING_BUFFER_CAPACITY)
+
+static func _sample_ring_buffer(buf: Array[Dictionary], head: int, count: int, capacity: int, target_t: float) -> Dictionary:
+	if count <= 0:
+		return {}
+	var oldest_idx: int = (head - count + capacity) % capacity
+	for offset in range(count):
+		var idx: int = (head - 1 - offset + capacity) % capacity
+		var entry: Dictionary = buf[idx]
+		if not entry.is_empty() and float(entry["t"]) <= target_t + 1e-9:
+			return entry
+	return buf[oldest_idx]
+
+## Quantizes wheel angular speed using integer encoder quadrature counts over window `dt`.
+static func quantize_wheel_omega(omega_rad_s: float, dt: float, ppr: int = DEFAULT_ENCODER_PPR) -> float:
+	var window_dt: float = dt if dt > 1e-6 else FIXED_DT
+	var ticks_per_rev: float = float(maxi(ppr, 1)) * 4.0
+	var counts: float = roundf((omega_rad_s * window_dt) * (ticks_per_rev / TAU))
+	return (counts * TAU) / (ticks_per_rev * window_dt)
+
+static func _compute_motor_speed_scale(wheel_omega: float) -> float:
+	var omega_max_wheel: float = (GP_MOTOR_MAX_RPM * (TAU / 60.0)) / GP_GEAR_RATIO
+	var omega_taper_start: float = omega_max_wheel * GP_MOTOR_TAPER_RATIO
+	var w_abs: float = absf(wheel_omega)
+	if w_abs <= omega_taper_start:
+		return 1.0
+	if w_abs >= omega_max_wheel - 1e-6:
+		return 0.0
+	return clampf(1.0 - (w_abs - omega_taper_start) / maxf(omega_max_wheel - omega_taper_start, 1e-5), 0.0, 1.0)
 
 # ── gp_math ──────────────────────────────────────────────────────────────────
 static func gp_softplus(x: float) -> float:
@@ -342,24 +567,33 @@ static func gp_estimate_fy(vx: float, vy: float, wz: float, delta: float, fz: Ar
 			fy_out[idx] = fy_w
 	return fy_out
 
-static func gp_friction_ellipse_t_ub(fz: Array[float], fy_est: Array[float], mu_est: float) -> Array[float]:
+static func gp_friction_ellipse_t_ub_param(
+	fz: Array[float],
+	fy_est: Array[float],
+	mu_est: float,
+	min_fx_reserve_ratio: float = 0.08
+) -> Array[float]:
 	var mu_safe: float = clampf(mu_est, 1.35, 2.20)
+	var reserve_ratio: float = clampf(min_fx_reserve_ratio, 0.0, 0.95)
 	var t_ub: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	for i in range(4):
 		var max_cap: float = mu_safe * fz[i]
-		var min_fx_reserve_ratio: float = 0.35
-		var fx_reserve: float = min_fx_reserve_ratio * max_cap
+		var fx_reserve: float = reserve_ratio * max_cap
 		var fx_sq_max: float = maxf((max_cap * max_cap) - (fy_est[i] * fy_est[i]), fx_reserve * fx_reserve)
 		var fx_max: float = gp_softplus_sqrt(fx_sq_max * 4.0) * 0.5
 		t_ub[i] = fx_max * GP_R_WHEEL
 	return t_ub
+
+static func gp_friction_ellipse_t_ub(fz: Array[float], fy_est: Array[float], mu_est: float) -> Array[float]:
+	return gp_friction_ellipse_t_ub_param(fz, fy_est, mu_est, 0.08)
 
 static func gp_power_limited_t_ub(omega_wheel: Array[float]) -> Array[float]:
 	var t_ub: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	for i in range(4):
 		var omega_safe: float = gp_softplus(omega_wheel[i])
 		var t_power: float = GP_P_MAX_WHL / (omega_safe + 1e-3)
-		t_ub[i] = clampf(t_power, 0.0, GP_MAX_TRQ_ACT)
+		var speed_scale: float = _compute_motor_speed_scale(omega_wheel[i])
+		t_ub[i] = clampf(t_power, 0.0, GP_MAX_TRQ_ACT) * speed_scale
 	return t_ub
 
 static func gp_power_limited_t_lb(omega_wheel: Array[float], p_max_charge_w: float) -> Array[float]:
@@ -370,10 +604,13 @@ static func gp_power_limited_t_lb(omega_wheel: Array[float], p_max_charge_w: flo
 		t_lb[i] = clampf(t_power, 0.0, GP_MAX_TRQ_ACT)
 	return t_lb
 
-static func gp_adaptive_k_us(fz: Array[float]) -> float:
+static func gp_adaptive_k_us_param(fz: Array[float], k_us_base: float = GP_K_US) -> float:
 	var fz_f: float = 0.5 * (fz[GP_FL] + fz[GP_FR])
 	var fz_r: float = 0.5 * (fz[GP_RL] + fz[GP_RR])
-	return GP_K_US * (1.0 + GP_K_US_FZ * (fz_r - fz_f))
+	return k_us_base * (1.0 + GP_K_US_FZ * (fz_r - fz_f))
+
+static func gp_adaptive_k_us(fz: Array[float]) -> float:
+	return gp_adaptive_k_us_param(fz, GP_K_US)
 
 static func gp_moment_arms() -> Array[float]:
 	var hw_f: float = 0.5 * GP_TRACK_F / GP_R_WHEEL
@@ -498,7 +735,8 @@ func gp_tc_step_4wd(
 	fz: Array[float],
 	dt: float,
 	wheel_steers: Array[float] = [0.0, 0.0, 0.0, 0.0],
-	brake_norm: float = 0.0
+	brake_norm: float = 0.0,
+	tc_kp_override: float = -1.0
 ) -> void:
 	var t_mean_abs: float = 0.25 * (
 		absf(t_req_out[0]) + absf(t_req_out[1]) + absf(t_req_out[2]) + absf(t_req_out[3])
@@ -517,9 +755,10 @@ func gp_tc_step_4wd(
 
 	var gate_mu: float = gp_sigmoid(t_mean_abs - 20.0)
 	var alpha_gated: float = GP_TC_ALPHA_MU_EMA * gate_mu
-	var cs_factor: float = maxf(_tc_combined_slip_factor(vx, vy, wz), 0.72)
+	var cs_factor: float = _tc_combined_slip_factor(vx, vy, wz)
 	var speed_gate: float = gp_sigmoid((vx - GP_TC_V_MIN) * 3.0)
-	var kp_eff: float = (GP_TC_KP * 20.0) * (1.0 + GP_TC_V_KP_SCALE / (absf(vx) + 0.5))
+	var kp_gain: float = tc_kp_override if tc_kp_override >= 0.0 else tc_kp_active
+	var kp_eff: float = (kp_gain * 20.0) * (1.0 + GP_TC_V_KP_SCALE / (absf(vx) + 0.5))
 	var ki_eff: float = GP_TC_KI * 20.0
 
 	var any_tc_cut: bool = false
@@ -636,14 +875,136 @@ func step(
 	if dt <= 0.0:
 		return last_t_cmd.duplicate()
 
+	var use_realism: bool = (
+		hardware_realism_enabled
+		or can_latency_ms > 0.0
+		or cmd_latency_ms > 0.0
+		or sensor_quantization_enabled
+	)
+
+	if not use_realism:
+		_time_acc += dt
+		var steps_ideal: int = 0
+		while _time_acc >= FIXED_DT and steps_ideal < 8:
+			_time_acc -= FIXED_DT
+			steps_ideal += 1
+			_execute_tv_step(fx_driver, delta, vx, vy, wz, ay, ax, omega, brake_norm, FIXED_DT, wheel_steers, vy_gps, gps_valid)
+		return last_t_cmd.duplicate()
+
+	var omega_in: Array[float] = [0.0, 0.0, 0.0, 0.0]
+	for i in range(4):
+		var w_raw: float = omega[i] if i < omega.size() else 0.0
+		omega_in[i] = quantize_wheel_omega(w_raw, dt, encoder_ppr) if sensor_quantization_enabled else w_raw
+
+	if _sensor_rb_count == 0:
+		var prefill_sample: Dictionary = {
+			"t": 0.0,
+			"fx_driver": 0.0,
+			"delta": 0.0,
+			"vx": vx,
+			"vy": 0.0,
+			"wz": 0.0,
+			"ay": 0.0,
+			"ax": 0.0,
+			"omega": omega_in.duplicate(),
+			"brake_norm": 0.0,
+			"wheel_steers": [0.0, 0.0, 0.0, 0.0],
+			"vy_gps": 0.0,
+			"gps_valid": false
+		}
+		_push_sensor_sample(prefill_sample)
+		_push_cmd_sample(0.0, last_t_cmd)
+
+	_sim_time_s += dt
+	var current_sample: Dictionary = {
+		"t": _sim_time_s,
+		"fx_driver": fx_driver,
+		"delta": delta,
+		"vx": vx,
+		"vy": vy,
+		"wz": wz,
+		"ay": ay,
+		"ax": ax,
+		"omega": omega_in,
+		"brake_norm": brake_norm,
+		"wheel_steers": wheel_steers.duplicate(),
+		"vy_gps": vy_gps,
+		"gps_valid": gps_valid
+	}
+	_push_sensor_sample(current_sample)
+
+	var sensor_delay_s: float = maxf(can_latency_ms, 0.0) * 0.001
+	var target_sensor_t: float = _sim_time_s - sensor_delay_s
+	var delayed: Dictionary = _sample_ring_buffer(
+		_sensor_ring_buffer, _sensor_rb_head, _sensor_rb_count, RING_BUFFER_CAPACITY, target_sensor_t
+	)
+
+	var d_omega: Array[float] = [0.0, 0.0, 0.0, 0.0]
+	var raw_d_omega: Array = delayed.get("omega", omega_in)
+	for i in range(4):
+		d_omega[i] = float(raw_d_omega[i]) if i < raw_d_omega.size() else 0.0
+
+	var d_steers: Array[float] = [0.0, 0.0, 0.0, 0.0]
+	var raw_d_steers: Array = delayed.get("wheel_steers", wheel_steers)
+	for i in range(4):
+		d_steers[i] = float(raw_d_steers[i]) if i < raw_d_steers.size() else 0.0
+
 	_time_acc += dt
 	var steps: int = 0
 	while _time_acc >= FIXED_DT and steps < 8:
 		_time_acc -= FIXED_DT
 		steps += 1
-		_gp_tv_step(fx_driver, delta, vx, vy, wz, ay, ax, omega, brake_norm, FIXED_DT, wheel_steers, vy_gps, gps_valid)
+		_execute_tv_step(
+			float(delayed.get("fx_driver", 0.0)),
+			float(delayed.get("delta", 0.0)),
+			float(delayed.get("vx", vx)),
+			float(delayed.get("vy", 0.0)),
+			float(delayed.get("wz", 0.0)),
+			float(delayed.get("ay", 0.0)),
+			float(delayed.get("ax", 0.0)),
+			d_omega,
+			float(delayed.get("brake_norm", 0.0)),
+			FIXED_DT,
+			d_steers,
+			float(delayed.get("vy_gps", 0.0)),
+			bool(delayed.get("gps_valid", false))
+		)
 
+	_push_cmd_sample(_sim_time_s, last_t_cmd)
+	var cmd_delay_s: float = maxf(cmd_latency_ms, 0.0) * 0.001
+	var cmd_entry: Dictionary = _sample_ring_buffer(
+		_cmd_ring_buffer, _cmd_rb_head, _cmd_rb_count, RING_BUFFER_CAPACITY, _sim_time_s - cmd_delay_s
+	)
+	var raw_cmd: Array = cmd_entry.get("cmd", last_t_cmd)
+	if raw_cmd.size() >= 4:
+		return [float(raw_cmd[0]), float(raw_cmd[1]), float(raw_cmd[2]), float(raw_cmd[3])]
 	return last_t_cmd.duplicate()
+
+func _execute_tv_step(
+	fx_driver: float,
+	delta: float,
+	vx: float,
+	vy_in: float,
+	wz: float,
+	ay: float,
+	ax: float,
+	omega: Array[float],
+	brake_norm: float,
+	dt: float,
+	wheel_steers: Array[float],
+	vy_gps: float,
+	gps_valid: bool
+) -> void:
+	if use_native_sil and sil_bridge != null and sil_bridge.is_using_native_sil():
+		var sil_trqs: Array[float] = sil_bridge.gp_tv_step(
+			fx_driver, delta, vx, vy_in, wz, ay, ax, omega, brake_norm, dt, wheel_steers, vy_gps, gps_valid
+		)
+		for i in range(4):
+			t_out_prev[i] = sil_trqs[i]
+			last_t_cmd[i] = sil_trqs[i]
+		return
+
+	_gp_tv_step(fx_driver, delta, vx, vy_in, wz, ay, ax, omega, brake_norm, dt, wheel_steers, vy_gps, gps_valid)
 
 func _gp_tv_step(
 	fx_driver: float,
@@ -696,8 +1057,54 @@ func _gp_tv_step(
 	var fz_est: Array[float] = gp_estimate_fz(vx, ax_filt, ay_filt)
 	var fy_est: Array[float] = gp_estimate_fy(vx, vy_est, wz_corr, delta_dz, fz_est)
 
+	# Map 0 (OPEN_4WD): symmetric 35/65% axle split with Mz = 0, respecting power & max motor speed limits
+	if active_map_id == TVMap.OPEN_4WD and not _custom_params_active:
+		var k_us_open: float = gp_adaptive_k_us_param(fz_est, k_us_active)
+		last_wz_ref = (vx_safe * delta_dz) / (GP_WB + k_us_open * vx_safe * vx_safe)
+		last_mz_req = 0.0
+		mz_sat_ratio = 1.0
+		qp_residual = 0.0
+		delta_prev = delta_dz
+
+		var w_chassis_open: float = vx_safe / GP_R_WHEEL
+		var req_total_trq: float = maxf(fx_driver * GP_R_WHEEL, 0.0)
+		var sf: float = clampf(front_split_active, 0.0, 1.0)
+		var sr: float = 1.0 - sf
+		var t_open: Array[float] = [
+			0.5 * sf * req_total_trq,
+			0.5 * sf * req_total_trq,
+			0.5 * sr * req_total_trq,
+			0.5 * sr * req_total_trq
+		]
+
+		var p_total_mech: float = 0.0
+		for i in range(4):
+			var w_i: float = omega[i] if i < omega.size() else w_chassis_open
+			var w_eff: float = maxf(absf(w_i), w_chassis_open)
+			var t_pwr_i: float = GP_P_MAX_WHL / (w_eff + 1e-3)
+			var t_cap_i: float = minf(GP_MAX_TRQ_ACT, t_pwr_i) * _compute_motor_speed_scale(w_eff)
+			t_open[i] = clampf(t_open[i], 0.0, t_cap_i)
+			p_total_mech += maxf(0.0, t_open[i] * w_eff)
+
+		if p_total_mech > GP_P_MAX_TOTAL_MECH and p_total_mech > 1e-3:
+			var p_scale: float = GP_P_MAX_TOTAL_MECH / p_total_mech
+			for i in range(4):
+				t_open[i] *= p_scale
+
+		if open_4wd_tc_enabled:
+			gp_tc_step_4wd(t_open, omega, vx, vy_est, wz_corr, fz_est, dt, wheel_steers, brake_norm, tc_kp_active)
+		else:
+			tc_active = false
+		gp_ekf_update_friction()
+
+		for i in range(4):
+			t_qp_prev[i] = t_open[i]
+			t_out_prev[i] = t_open[i]
+			last_t_cmd[i] = t_open[i]
+		return
+
 	# Stage 5: Bilinear 4x4 Yaw-Rate Reference + Beta Damping + OS/Countersteer Gates
-	var k_us: float = gp_adaptive_k_us(fz_est)
+	var k_us: float = gp_adaptive_k_us_param(fz_est, k_us_active)
 	var wz_ref: float = (vx_safe * delta_dz) / (GP_WB + k_us * vx_safe * vx_safe)
 	last_wz_ref = wz_ref
 
@@ -718,23 +1125,23 @@ func _gp_tv_step(
 
 	var vy_std_clamped: float = clampf(ekf_vy_std, 0.0, 0.3)
 	var k_beta_dynamic: float = 4000.0 * (1.0 + 2.0 * vy_std_clamped)
-	var beta_term: float = clampf(-k_beta_dynamic * beta, -600.0, 600.0)
+	var beta_term: float = clampf(-k_beta_dynamic * beta, -1200.0, 1200.0)
 
 	var raw_int: float = wz_int + wz_err * dt * mz_sat_ratio
 	wz_int = GP_TV_WZ_I_MAX * tanh(raw_int / GP_TV_WZ_I_MAX)
 
-	var os_gate: float = 1.0 - gp_sigmoid((absf(wz_corr) - absf(wz_ref) - 0.2) * 10.0)
+	var os_gate: float = 1.0 - gp_sigmoid((absf(wz_corr) - absf(wz_ref) - 0.04) * 15.0)
 	var counter_steer_factor: float = 1.0 - gp_sigmoid(-(delta_dz * wz_corr + 0.05) * 40.0)
 
 	var ff_mz: float = kd * delta_dot * (vx_safe / 10.0)
 	var fb_mz: float = kp * wz_err + ki * wz_int + beta_term
-	var mz_req: float = clampf((ff_mz + fb_mz) * os_gate * counter_steer_factor, -GP_TV_MAX_MZ, GP_TV_MAX_MZ)
+	var mz_req: float = clampf((ff_mz + fb_mz) * os_gate * counter_steer_factor, -tv_max_mz_active, tv_max_mz_active)
 	last_mz_req = mz_req
 
 	# Stage 6: 4WD Friction Ellipse + Power Bounds (filtered tau = 30 ms)
 	var w_chassis: float = vx_safe / GP_R_WHEEL
 	var omega_power: Array[float] = [w_chassis, w_chassis, w_chassis, w_chassis]
-	var t_ub_friction: Array[float] = gp_friction_ellipse_t_ub(fz_est, fy_est, mu_avg)
+	var t_ub_friction: Array[float] = gp_friction_ellipse_t_ub_param(fz_est, fy_est, mu_avg, min_fx_reserve_active)
 	var t_ub_power: Array[float] = gp_power_limited_t_ub(omega_power)
 
 	var alpha_ub: float = clampf(dt / (GP_UB_LPF_TAU + dt), 0.0, 1.0)
@@ -783,7 +1190,7 @@ func _gp_tv_step(
 		t_cmd[i] = tv_final
 
 	# Stage 8: 4WD Adaptive RLS Traction Control
-	gp_tc_step_4wd(t_cmd, omega, vx, vy_est, wz_corr, fz_est, dt, wheel_steers, brake_norm)
+	gp_tc_step_4wd(t_cmd, omega, vx, vy_est, wz_corr, fz_est, dt, wheel_steers, brake_norm, tc_kp_active)
 	gp_ekf_update_friction()
 
 	for i in range(4):

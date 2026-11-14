@@ -29,6 +29,9 @@ var tv_mode: int = 0
 ## ECU Driving Mode (0: LINEAL_4WD, 1: ECU_TV_V3_4WD).
 var ecu_driving_mode: int = 0
 
+## ECU Torque Vectoring v3 live map profile (0: OPEN_4WD, 1: ENDURANCE_SAFE, 2: AUTOCROSS_NEUTRAL, 3: SKIDPAD_ATTACK).
+var tv_map_id: int = 2
+
 ## Requested yaw moment Delta_Mz (Nm, ISO 8855 +Z CCW left) for TorqueVectoring MODE_DYC.
 var tv_yaw_moment_req: float = 0.0
 
@@ -88,6 +91,7 @@ func reset() -> void:
 	ebs = 0.0
 	tv_mode = 0
 	ecu_driving_mode = 0
+	tv_map_id = 2
 	tv_yaw_moment_req = 0.0
 	override_wheel_torques = false
 	wheel_motor_torques = [0.0, 0.0, 0.0, 0.0]

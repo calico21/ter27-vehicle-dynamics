@@ -24,9 +24,11 @@ var wheels: Array[WheelDynamics] = []
 var suspension: SuspensionSystem
 var torque_vectoring: TorqueVectoring
 var ecu_tv_v3: EcuTorqueVectoringV3
+var hv_state: DrivetrainModel.HVPowertrainState
 var _prev_ax_ros: float = 0.0
 var chassis_state: ChassisDynamics.State6DOF
 var inputs: VehicleInputs
+var _last_input_tv_map_id: int = 2
 
 # --- Output Net Quantities (in ISO/ROS chassis frame around CoG) ---
 var net_force_chassis_ros: Vector3 = Vector3.ZERO
@@ -50,9 +52,11 @@ func _init(cfg: VehicleConfig = null) -> void:
 		config = VehicleConfig.new()
 	
 	inputs = VehicleInputs.new()
+	_last_input_tv_map_id = inputs.tv_map_id
 	suspension = SuspensionSystem.new()
 	torque_vectoring = TorqueVectoring.new()
 	ecu_tv_v3 = EcuTorqueVectoringV3.new()
+	hv_state = DrivetrainModel.HVPowertrainState.new(config)
 	chassis_state = ChassisDynamics.State6DOF.new(config.h_cog)
 	_init_wheels()
 
@@ -62,19 +66,20 @@ func _init_wheels() -> void:
 	wheels.append(WheelDynamics.new(VehicleConfig.WheelIndex.FR, "FR", true))
 	wheels.append(WheelDynamics.new(VehicleConfig.WheelIndex.RL, "RL", false))
 	wheels.append(WheelDynamics.new(VehicleConfig.WheelIndex.RR, "RR", true))
+	_sync_wheel_thermal_config()
+
+func _sync_wheel_thermal_config() -> void:
+	if config == null:
+		return
+	var init_t: float = config.tire_initial_temp_c
+	var track_t: float = config.track_temp_c
+	for w in wheels:
+		w.set_tire_temperature(init_t)
+		w.t_track_c = track_t
 
 ## Computes front wheel steer angle (ISO +Z CCW left) with configurable Ackermann geometry.
 static func compute_ackermann_steer(steer_angle: float, is_left: bool, config: VehicleConfig) -> float:
-	var abs_s: float = absf(steer_angle)
-	var ack: float = clampf(config.ackermann_factor, 0.0, 1.0)
-	if abs_s < 1e-6 or ack <= 0.0 or config.wheelbase <= 1e-3:
-		return steer_angle
-	var half_t: float = 0.5 * config.track_width_f
-	var r_turn: float = config.wheelbase / tan(abs_s)
-	var is_inner: bool = (steer_angle > 0.0 and is_left) or (steer_angle < 0.0 and not is_left)
-	var r_wheel: float = maxf(r_turn - half_t, 0.25 * config.wheelbase) if is_inner else (r_turn + half_t)
-	var ack_mag: float = atan2(config.wheelbase, r_wheel)
-	return signf(steer_angle) * lerpf(abs_s, ack_mag, ack)
+	return SuspensionSystem.compute_ackermann_steer(steer_angle, is_left, config)
 
 ## Returns wheel position relative to CoG in ISO/ROS frame:
 func get_wheel_pos_ros(index: int) -> Vector3:
@@ -93,11 +98,12 @@ func compute_drivetrain_torques(
 		wheels[2].omega,
 		wheels[3].omega
 	]
-	return DrivetrainModel.compute_torques(in_inputs, u_speed, config, wheel_omegas, torque_vectoring, dt, advance_tv)
+	var v_dc_eff: float = hv_state.v_dc if hv_state != null else -1.0
+	return DrivetrainModel.compute_torques(in_inputs, u_speed, config, wheel_omegas, torque_vectoring, dt, advance_tv, v_dc_eff)
 
 ## Computes aerodynamic drag and downforce forces in ISO/ROS frame.
-func compute_aerodynamics(v_ros: Vector3) -> Dictionary:
-	return AeroModel.compute_forces_ros(v_ros, config)
+func compute_aerodynamics(v_ros: Vector3, z_front: float = -1.0, z_rear: float = -1.0) -> Dictionary:
+	return AeroModel.compute_forces_ros(v_ros, config, z_front, z_rear)
 
 ## Analytic dynamic load transfer for unit testing and offline simulation:
 func compute_analytic_normal_forces(ax_ros: float, ay_ros: float, speed: float) -> Array[float]:
@@ -131,7 +137,12 @@ func step_forces(
 	var v = local_v_ros.y
 	var r = local_w_ros.z
 	
-	# 1. Drivetrain, 200 Hz Torque Vectoring & Brakes
+	# 1. Drivetrain, 200 Hz Torque Vectoring, HV Bus & Inverter Lag
+	if ecu_tv_v3 != null and in_inputs.tv_map_id != _last_input_tv_map_id:
+		ecu_tv_v3.set_map(in_inputs.tv_map_id)
+		_last_input_tv_map_id = ecu_tv_v3.active_map_id
+
+	var w_omegas: Array[float] = [wheels[0].omega, wheels[1].omega, wheels[2].omega, wheels[3].omega]
 	var drive_trqs: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	var brake_trqs: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	if in_inputs.ecu_driving_mode == 1 and in_inputs.drive_mode == VehicleConfig.DriveMode.FOUR_WD and not in_inputs.override_wheel_torques:
@@ -141,7 +152,6 @@ func step_forces(
 		var max_pwr_force: float = (config.power_limit_watts * config.drivetrain_efficiency) / spd_clamped
 		var max_fx_4wd: float = minf(4.0 * max_whl_trq / r_whl, max_pwr_force)
 		var fx_driver: float = in_inputs.throttle * max_fx_4wd
-		var w_omegas: Array[float] = [wheels[0].omega, wheels[1].omega, wheels[2].omega, wheels[3].omega]
 		var w_steers: Array[float] = [
 			compute_ackermann_steer(in_inputs.steer_angle, true, config),
 			compute_ackermann_steer(in_inputs.steer_angle, false, config),
@@ -154,9 +164,19 @@ func step_forces(
 		)
 		if in_inputs.throttle > 0.0:
 			var eff: float = maxf(config.drivetrain_efficiency, 1e-3)
+			var v_nom: float = maxf(config.battery_nominal_voltage_v, 1.0)
+			var v_dc_cur: float = hv_state.v_dc if (hv_state != null and hv_state.v_dc > 0.0) else v_nom
+			var v_scale: float = clampf(v_dc_cur / v_nom, 0.5, 1.25)
+			var omega_base_motor: float = maxf(config.base_speed_rpm, 0.0) * (TAU / 60.0) * v_scale
+			var p_motor_peak: float = config.motor_peak_torque * omega_base_motor
 			for i in range(4):
 				if tv_trqs[i] > 0.0:
-					tv_trqs[i] *= TorqueVectoring.compute_motor_speed_scale(w_omegas[i], true, config)
+					var omega_motor: float = absf(w_omegas[i]) * maxf(config.gear_ratio, 1e-3)
+					var t_motor_env: float = config.motor_peak_torque
+					if omega_base_motor > 0.0 and omega_motor > omega_base_motor:
+						t_motor_env = minf(config.motor_peak_torque, p_motor_peak / omega_motor)
+					var speed_scale: float = TorqueVectoring.compute_motor_speed_scale(w_omegas[i], true, config)
+					tv_trqs[i] = minf(tv_trqs[i] * speed_scale, t_motor_env * config.gear_ratio * speed_scale)
 			var p_dc_limit: float = maxf(config.max_dc_power_w, 0.0)
 			if p_dc_limit > 0.0:
 				var p_elec: float = 0.0
@@ -172,16 +192,31 @@ func step_forces(
 		var torques = compute_drivetrain_torques(in_inputs, u, dt, advance_tv)
 		drive_trqs = torques["drive"]
 		brake_trqs = torques["brake"]
+
+	if hv_state != null:
+		if dt > 0.0 and not advance_tv and not in_inputs.override_wheel_torques:
+			drive_trqs = hv_state.inverter_torques.duplicate()
+		else:
+			drive_trqs = DrivetrainModel.step_hv_and_inverters(
+				hv_state,
+				drive_trqs,
+				w_omegas,
+				dt,
+				config,
+				advance_tv,
+				in_inputs.override_wheel_torques
+			)
 	
 	# 2. Determine Normal Forces Fz and Suspension Alignment (zero load-transfer double counting)
 	var normal_forces: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	var toe_offsets: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	var corner_dz: Array[float] = [0.0, 0.0, 0.0, 0.0]
+	var has_corner_travel: bool = false
 	var chassis_roll_rad: float = chassis_state.roll
 	if ground_contacts.size() >= 4:
 		if ground_contacts[0] is Dictionary and ground_contacts[0].has("chassis_roll"):
 			chassis_roll_rad = float(ground_contacts[0].get("chassis_roll", chassis_roll_rad))
-		var has_corner_travel: bool = (ground_contacts[0] is Dictionary) and ground_contacts[0].has("delta_z")
+		has_corner_travel = (ground_contacts[0] is Dictionary) and ground_contacts[0].has("delta_z")
 		if has_corner_travel:
 			var dz_arr: Array[float] = [0.0, 0.0, 0.0, 0.0]
 			var dz_dot_arr: Array[float] = [0.0, 0.0, 0.0, 0.0]
@@ -245,6 +280,8 @@ func step_forces(
 		w.compute_slip(v_hub.x, v_hub.y, delta_w, config.slip_regularization_speed, w.effective_radius, dt)
 		w.compute_forces(normal_forces[i], config)
 		w.integrate_wheel_spin(drive_trqs[i], brake_trqs[i], dt, config)
+		if advance_tv and dt > 0.0:
+			w.step_thermal(dt, config)
 		
 		var cos_d = cos(delta_w)
 		var sin_d = sin(delta_w)
@@ -270,8 +307,13 @@ func step_forces(
 	var anti_pitch: Dictionary = SuspensionSystem.compute_anti_pitch_forces(fx_corners, config)
 	total_wheel_torque_ros.y += float(anti_pitch["pitch_torque_ros"])
 
-	# 4. Aerodynamics
-	var aero = compute_aerodynamics(local_v_ros)
+	# 4. Aerodynamics (ride-height sensitive ground effect & front-wing stall)
+	var z_front_dyn: float = -1.0
+	var z_rear_dyn: float = -1.0
+	if has_corner_travel:
+		z_front_dyn = maxf(0.0, config.static_ride_height_front - 0.5 * (corner_dz[0] + corner_dz[1]))
+		z_rear_dyn = maxf(0.0, config.static_ride_height_rear - 0.5 * (corner_dz[2] + corner_dz[3]))
+	var aero = compute_aerodynamics(local_v_ros, z_front_dyn, z_rear_dyn)
 	var f_aero_ros: Vector3 = aero["force"]
 	var tau_aero_ros: Vector3 = aero["torque"]
 	
@@ -286,6 +328,8 @@ func step_forces(
 	# Convert net quantities to Godot frame:
 	net_force_chassis_godot = VehicleConfig.ros_to_godot_vec(net_force_chassis_ros)
 	net_torque_chassis_godot = VehicleConfig.ros_to_godot_vec(net_torque_chassis_ros)
+
+	var tire_temps: Array[float] = [wheels[0].t_surf_c, wheels[1].t_surf_c, wheels[2].t_surf_c, wheels[3].t_surf_c]
 	
 	return {
 		"net_force_ros": net_force_chassis_ros,
@@ -299,7 +343,20 @@ func step_forces(
 		"drive_torques": drive_trqs,
 		"brake_torques": brake_trqs,
 		"normal_forces": normal_forces,
-		"wheel_steer_angles": wheel_steer_angles
+		"wheel_steer_angles": wheel_steer_angles,
+		"tire_temps": tire_temps,
+		"hv_state": hv_state,
+		"v_dc": hv_state.v_dc if hv_state != null else 588.0,
+		"i_dc": hv_state.i_dc if hv_state != null else 0.0,
+		"soc": hv_state.soc if hv_state != null else 0.95,
+		"power_kw": hv_state.power_kw if hv_state != null else 0.0,
+		"energy_kwh": hv_state.energy_kwh if hv_state != null else 0.0,
+		"map_id": ecu_tv_v3.active_map_id if ecu_tv_v3 != null else 0,
+		"mz_req": ecu_tv_v3.last_mz_req if (ecu_tv_v3 != null and in_inputs.ecu_driving_mode == 1) else 0.0,
+		"wz_ref": ecu_tv_v3.last_wz_ref if ecu_tv_v3 != null else 0.0,
+		"z_front": z_front_dyn,
+		"z_rear": z_rear_dyn,
+		"aero_front_stalled": bool(aero.get("front_stalled", false))
 	}
 
 ## Unified 14-DOF standalone step (6-DOF Rigid-Body Chassis via RK2 Heun + 4 Wheels + 4 Suspension Corners).
@@ -385,12 +442,16 @@ func step_standalone(in_inputs: VehicleInputs, dt: float, ground_height: float =
 func reset() -> void:
 	for w in wheels:
 		w.reset()
+	_sync_wheel_thermal_config()
 	suspension.reset()
 	torque_vectoring.reset()
 	if ecu_tv_v3 != null:
 		ecu_tv_v3.reset()
+	if hv_state != null:
+		hv_state.reset(config)
 	chassis_state.reset(config.h_cog)
 	inputs.reset()
+	_last_input_tv_map_id = inputs.tv_map_id
 	net_force_chassis_ros = Vector3.ZERO
 	net_torque_chassis_ros = Vector3.ZERO
 	net_force_chassis_godot = Vector3.ZERO

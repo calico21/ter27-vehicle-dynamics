@@ -4,6 +4,8 @@ const VehicleConfig = preload("res://Scenes/Vehicle/Dynamics/Core/VehicleConfig.
 const VehicleInputs = preload("res://Scenes/Vehicle/Dynamics/Core/VehicleInputs.gd")
 const VehicleDynamicsModel = preload("res://Scenes/Vehicle/Dynamics/Core/VehicleDynamicsModel.gd")
 const GamepadController = preload("res://Scenes/Vehicle/Dynamics/Core/GamepadController.gd")
+const WheelFFBController = preload("res://Scenes/Vehicle/Dynamics/Core/WheelFFBController.gd")
+const WheelDynamics = preload("res://Scenes/Vehicle/Dynamics/Tires/WheelDynamics.gd")
 
 static func run() -> Dictionary:
 	var passed = 0
@@ -128,6 +130,73 @@ static func run() -> Dictionary:
 	else:
 		failed += 1
 		errors.append("Pedal gamma shaping invalid: th=[%.3f, %.3f, %.3f] br=[%.3f, %.3f, %.3f]" % [th_0, th_half, th_1, br_0, br_half, br_1])
+
+	# 7. WheelFFBController auto-detection, linear +/-110 deg WHEEL mode & speed invariance
+	var ffb := WheelFFBController.new()
+	var mode_dd: int = ffb.detect_input_device_from_name("Fanatec Podium DD1")
+	var dd_linear_ok: bool = (
+		mode_dd == WheelFFBController.InputDeviceMode.WHEEL
+		and is_zero_approx(ffb.speed_sensitivity)
+		and is_equal_approx(ffb.steering_gamma, 1.0)
+		and is_zero_approx(ffb.steering_deadzone)
+		and is_zero_approx(ffb.steering_filter)
+		and is_equal_approx(WheelFFBController.WHEEL_MAX_DEG, 110.0)
+		and is_equal_approx(WheelFFBController.WHEEL_MAX_RAD, deg_to_rad(110.0))
+	)
+	var out_slow: float = ffb.step_steering(0.5, 5.0, 0.01)
+	var deg_half: float = ffb.wheel_angle_deg
+	var out_fast: float = ffb.step_steering(0.5, 35.0, 0.01)
+	var out_full_neg: float = ffb.step_steering(-1.0, 25.0, 0.01)
+	var deg_full_neg: float = ffb.wheel_angle_deg
+	var mode_gp: int = ffb.detect_input_device_from_name("Xbox 360 Controller")
+	ffb.input_device_override = WheelFFBController.InputDeviceMode.WHEEL
+	var mode_override: int = ffb.detect_input_device_from_name("Generic Controller")
+	if dd_linear_ok and is_equal_approx(out_slow, 0.5) and is_equal_approx(out_fast, 0.5) \
+	and is_equal_approx(deg_half, 55.0) and is_equal_approx(out_full_neg, -1.0) \
+	and is_equal_approx(deg_full_neg, -110.0) and mode_gp == WheelFFBController.InputDeviceMode.GAMEPAD \
+	and mode_override == WheelFFBController.InputDeviceMode.WHEEL:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("WheelFFBController WHEEL mode invalid: dd=%s slow=%.3f fast=%.3f deg=%.1f modes=%d/%d" % [dd_linear_ok, out_slow, out_fast, deg_half, mode_gp, mode_override])
+
+	# 8. WheelFFBController physical steering column FFB torque & signed normalized haptic output
+	var w_fl := WheelDynamics.new(true)
+	var w_fr := WheelDynamics.new(false)
+	w_fl.M_z = 12.0
+	w_fr.M_z = 8.0
+	w_fl.F_y = 900.0
+	w_fr.F_y = 700.0
+	w_fl.F_x = 600.0
+	w_fr.F_x = 200.0
+	# Expected: ((12 + 8) + (900 + 700)*0.013 + (600 - 200)*0.018) / 4.8 = (20 + 20.8 + 7.2) / 4.8 = 10.0 Nm
+	ffb.reset()
+	var tau_pos: float = ffb.compute_steering_torque_nm([w_fl, w_fr])
+	ffb.apply_haptic_feedback(0, [w_fl, w_fr], 15.0, 0.0)
+	var norm_pos: float = ffb.ffb_normalized
+	var pos_ok: bool = (
+		absf(tau_pos - 10.0) < 1e-4
+		and absf(ffb.ffb_torque_nm - 10.0) < 1e-4
+		and is_equal_approx(norm_pos, 10.0 / ffb.ffb_max_torque_nm)
+	)
+	w_fl.M_z = -12.0
+	w_fr.M_z = -8.0
+	w_fl.F_y = -900.0
+	w_fr.F_y = -700.0
+	w_fl.F_x = 200.0
+	w_fr.F_x = 600.0
+	var tau_neg: float = ffb.compute_steering_torque_nm([w_fl, w_fr])
+	ffb.apply_haptic_feedback(0, [w_fl, w_fr], 15.0, 0.0)
+	var neg_ok: bool = (
+		absf(tau_neg + 10.0) < 1e-4
+		and ffb.ffb_normalized < -0.5
+		and ffb.ffb_normalized >= -1.0
+	)
+	if pos_ok and neg_ok:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("WheelFFBController FFB torque failed: tau_pos=%.3f norm_pos=%.3f tau_neg=%.3f norm_neg=%.3f" % [tau_pos, norm_pos, tau_neg, ffb.ffb_normalized])
 
 	return {
 		"name": "test_gamepad_and_brakes",

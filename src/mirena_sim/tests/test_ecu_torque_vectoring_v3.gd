@@ -4,6 +4,7 @@ const VehicleConfig = preload("res://Scenes/Vehicle/Dynamics/Core/VehicleConfig.
 const VehicleInputs = preload("res://Scenes/Vehicle/Dynamics/Core/VehicleInputs.gd")
 const VehicleDynamicsModel = preload("res://Scenes/Vehicle/Dynamics/Core/VehicleDynamicsModel.gd")
 const EcuTV3 = preload("res://Scenes/Vehicle/Dynamics/Drivetrain/EcuTorqueVectoringV3.gd")
+const TvSilBridge = preload("res://addons/rclgd/tv_sil_bridge.gd")
 
 static func run() -> Dictionary:
 	var passed = 0
@@ -209,6 +210,143 @@ static func run() -> Dictionary:
 	else:
 		failed += 1
 		errors.append("Accel-brake-accel degradation: t1=%.3f s t2=%.3f s diff=%.2f%% min_mu=%.3f" % [launch_times[0], launch_times[1], rel_diff * 100.0, min_mu])
+
+	# 9. 4 live TV maps + VehicleInputs default tv_map_id + cycle_map() + custom params
+	var vi_def := VehicleInputs.new()
+	var ecu_maps := EcuTV3.new()
+	var default_ok: bool = (
+		vi_def.tv_map_id == 2
+		and ecu_maps.active_map_id == EcuTV3.TVMap.AUTOCROSS_NEUTRAL
+		and ecu_maps.get_map_name() == "AUTOCROSS_NEUTRAL"
+		and is_equal_approx(ecu_maps.k_us_active, 0.011)
+		and is_equal_approx(ecu_maps.tv_max_mz_active, 750.0)
+		and is_equal_approx(ecu_maps.tc_kp_active, 21.0)
+		and is_equal_approx(ecu_maps.min_fx_reserve_active, 0.10)
+	)
+	ecu_maps.set_map(EcuTV3.TVMap.OPEN_4WD)
+	var m0_ok: bool = (
+		ecu_maps.active_map_id == 0
+		and ecu_maps.get_map_name() == "OPEN_4WD"
+		and is_equal_approx(ecu_maps.front_split_active, 0.35)
+		and is_equal_approx(ecu_maps.rear_split_active, 0.65)
+		and is_equal_approx(ecu_maps.tv_max_mz_active, 0.0)
+	)
+	var c1: int = ecu_maps.cycle_map()
+	var m1_ok: bool = (
+		c1 == EcuTV3.TVMap.ENDURANCE_SAFE
+		and ecu_maps.get_map_name() == "ENDURANCE_SAFE"
+		and is_equal_approx(ecu_maps.k_us_active, 0.016)
+		and is_equal_approx(ecu_maps.tv_max_mz_active, 450.0)
+		and is_equal_approx(ecu_maps.tc_kp_active, 24.0)
+		and is_equal_approx(ecu_maps.min_fx_reserve_active, 0.06)
+	)
+	var c2: int = ecu_maps.cycle_map()
+	var c3: int = ecu_maps.cycle_map()
+	var m3_ok: bool = (
+		c2 == EcuTV3.TVMap.AUTOCROSS_NEUTRAL
+		and c3 == EcuTV3.TVMap.SKIDPAD_ATTACK
+		and ecu_maps.get_map_name() == "SKIDPAD_ATTACK"
+		and is_equal_approx(ecu_maps.k_us_active, 0.007)
+		and is_equal_approx(ecu_maps.tv_max_mz_active, 1050.0)
+		and is_equal_approx(ecu_maps.tc_kp_active, 18.5)
+		and is_equal_approx(ecu_maps.min_fx_reserve_active, 0.14)
+	)
+	var c_wrap: int = ecu_maps.cycle_map()
+	ecu_maps.set_custom_parameters(0.019, 600.0, 22.5, 0.08)
+	var custom_ok: bool = (
+		c_wrap == EcuTV3.TVMap.OPEN_4WD
+		and ecu_maps.get_map_name() == "CUSTOM"
+		and is_equal_approx(ecu_maps.k_us_active, 0.019)
+		and is_equal_approx(ecu_maps.tv_max_mz_active, 600.0)
+		and is_equal_approx(ecu_maps.tc_kp_active, 22.5)
+		and is_equal_approx(ecu_maps.min_fx_reserve_active, 0.08)
+	)
+	if default_ok and m0_ok and m1_ok and m3_ok and custom_ok:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("4-map TV profile check failed: def=%s m0=%s m1=%s m3=%s custom=%s" % [default_ok, m0_ok, m1_ok, m3_ok, custom_ok])
+
+	# 10. Map 0 (OPEN_4WD): 35/65 split, Mz == 0, 72 kW cap, 22000 RPM motor overspeed cutoff
+	var ecu_open := EcuTV3.new()
+	ecu_open.set_map(EcuTV3.TVMap.OPEN_4WD)
+	var omega_open: Array[float] = [50.0, 50.0, 50.0, 50.0]
+	var t_open: Array[float] = ecu_open.step(2000.0, 0.12, 10.0, 0.0, 0.25, 2.0, 1.0, omega_open, 0.0, 0.005)
+	var open_sum: float = t_open[0] + t_open[1] + t_open[2] + t_open[3]
+	var open_front_ratio: float = (t_open[0] + t_open[1]) / maxf(open_sum, 1e-6)
+	var split_ok: bool = (
+		is_zero_approx(ecu_open.last_mz_req)
+		and is_equal_approx(t_open[0], t_open[1])
+		and is_equal_approx(t_open[2], t_open[3])
+		and absf(open_front_ratio - 0.35) < 1e-4
+		and open_sum > 100.0
+	)
+	var ecu_pwr := EcuTV3.new()
+	ecu_pwr.set_map(EcuTV3.TVMap.OPEN_4WD)
+	var omega_pwr: Array[float] = [100.0, 100.0, 100.0, 100.0]
+	var t_pwr: Array[float] = ecu_pwr.step(12000.0, 0.0, 20.0, 0.0, 0.0, 0.0, 0.0, omega_pwr, 0.0, 0.005)
+	var p_total: float = (t_pwr[0] + t_pwr[1] + t_pwr[2] + t_pwr[3]) * 100.0
+	var ecu_rpm := EcuTV3.new()
+	ecu_rpm.set_map(EcuTV3.TVMap.OPEN_4WD)
+	var omega_overspeed: Array[float] = [200.0, 200.0, 200.0, 200.0] # 200 * 12.5 * 60 / (2*PI) = 23873 RPM > 22000
+	var t_overspeed: Array[float] = ecu_rpm.step(3000.0, 0.0, 40.64, 0.0, 0.0, 0.0, 0.0, omega_overspeed, 0.0, 0.005)
+	var overspeed_zero: bool = (
+		t_overspeed[0] <= 1e-4 and t_overspeed[1] <= 1e-4
+		and t_overspeed[2] <= 1e-4 and t_overspeed[3] <= 1e-4
+	)
+	if split_ok and p_total <= EcuTV3.GP_P_MAX_TOTAL_MECH + 1.0 and overspeed_zero:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("OPEN_4WD bounds failed: split_ok=%s ratio=%.3f p_total=%.1f overspeed=%s" % [split_ok, open_front_ratio, p_total, t_overspeed])
+
+	# 11. CAN latency ring buffer (12.0 ms) & 4096 PPR encoder quantization
+	var ecu_can := EcuTV3.new()
+	ecu_can.set_map(EcuTV3.TVMap.OPEN_4WD)
+	ecu_can.set_hardware_realism(true, 12.0, 4096)
+	var omega_can: Array[float] = [50.0, 50.0, 50.0, 50.0]
+	var cmd_5ms: Array[float] = ecu_can.step(1500.0, 0.0, 10.0, 0.0, 0.0, 0.0, 0.0, omega_can, 0.0, 0.005)
+	var cmd_10ms: Array[float] = ecu_can.step(1500.0, 0.0, 10.0, 0.0, 0.0, 0.0, 0.0, omega_can, 0.0, 0.005)
+	var cmd_15ms: Array[float] = ecu_can.step(1500.0, 0.0, 10.0, 0.0, 0.0, 0.0, 0.0, omega_can, 0.0, 0.005)
+	var cmd_20ms: Array[float] = ecu_can.step(1500.0, 0.0, 10.0, 0.0, 0.0, 0.0, 0.0, omega_can, 0.0, 0.005)
+	var delay_ok: bool = (
+		cmd_5ms[2] < 1e-4
+		and cmd_10ms[2] < 1e-4
+		and cmd_15ms[2] < 1e-4
+		and cmd_20ms[2] > 50.0
+	)
+	var quantum_rad_s: float = (2.0 * PI) / (4096.0 * 4.0 * 0.005)
+	var q_a: float = EcuTV3.quantize_wheel_omega(50.001, 0.005, 4096)
+	var q_b: float = EcuTV3.quantize_wheel_omega(50.002, 0.005, 4096)
+	var q_hi: float = EcuTV3.quantize_wheel_omega(50.10, 0.005, 4096)
+	var quant_ok: bool = (
+		is_equal_approx(q_a, q_b)
+		and q_hi > q_a
+		and absf(q_a - 50.001) <= 0.5 * quantum_rad_s + 1e-5
+	)
+	if delay_ok and quant_ok:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("Hardware realism CAN/Encoder check failed: cmds=[%.2f, %.2f, %.2f, %.2f] q=[%.4f, %.4f, %.4f]" % [cmd_5ms[2], cmd_10ms[2], cmd_15ms[2], cmd_20ms[2], q_a, q_b, q_hi])
+
+	# 12. TvSilBridge status & safe GDScript fallback when native GDExtension is absent
+	var ecu_sil := EcuTV3.new()
+	var class_present: bool = ClassDB.class_exists("GpTorqueVectoringSIL")
+	var switched_native: bool = ecu_sil.set_use_native_sil(true)
+	var sil_status: Dictionary = ecu_sil.get_sil_status()
+	var sil_ok: bool = (
+		sil_status.has("backend_name")
+		and sil_status.has("native_available")
+		and sil_status.has("message")
+		and not String(sil_status["message"]).is_empty()
+		and (class_present or (not switched_native and not ecu_sil.use_native_sil and sil_status["backend_name"] == "GDSCRIPT" and not TvSilBridge.is_native_sil_available()))
+	)
+	if sil_ok:
+		passed += 1
+	else:
+		failed += 1
+		errors.append("TvSilBridge fallback invalid: %s" % [sil_status])
 
 	return {
 		"name": "test_ecu_torque_vectoring_v3",

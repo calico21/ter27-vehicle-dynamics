@@ -14,6 +14,7 @@ const VehicleConfigScript = preload("VehicleConfig.gd")
 const VehicleInputsScript = preload("VehicleInputs.gd")
 const VehicleDynamicsModelScript = preload("VehicleDynamicsModel.gd")
 const GamepadControllerScript = preload("GamepadController.gd")
+const WheelFFBControllerScript = preload("WheelFFBController.gd")
 const TireModelScript = preload("../Tires/TireModel.gd")
 const DrivetrainModelScript = preload("../Drivetrain/DrivetrainModel.gd")
 const BrakeModelScript = preload("../Brakes/BrakeModel.gd")
@@ -21,6 +22,7 @@ const SuspensionModelScript = preload("../Suspension/SuspensionModel.gd")
 const AeroModelScript = preload("../Aerodynamics/AeroModel.gd")
 const ChassisDynamicsScript = preload("../Chassis/ChassisDynamics.gd")
 const VehicleTelemetryScript = preload("../Telemetry/VehicleTelemetry.gd")
+const TelemetryRecorderScript = preload("../Telemetry/TelemetryRecorder.gd")
 
 signal cone_hit(count: int)
 enum PilotMode { NO_PILOT, MANUAL, ROS, TRACK_RAIL }
@@ -50,6 +52,10 @@ var tv_yaw_moment_req: float = 0.0
 @export_range(0.0, 1.0, 0.05) var rumble_effects: float = 0.7
 
 var gamepad: GamepadControllerScript = GamepadControllerScript.new()
+var wheel_ffb: WheelFFBControllerScript = WheelFFBControllerScript.new()
+var telemetry_recorder: TelemetryRecorderScript = TelemetryRecorderScript.new()
+@export var input_device_mode: WheelFFBControllerScript.InputDeviceMode = WheelFFBControllerScript.InputDeviceMode.AUTO
+@export var tv_hardware_realism: bool = false
 @export var rail_speed: float = 10.0
 @export var rail_look_ahead: float = 3.0
 var _rail_progress: float = 0.0
@@ -116,6 +122,9 @@ var tv_kappa_opt: Array[float] = [0.12, 0.12, 0.12, 0.12]
 var tv_torque_4wd: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var tv_elec_power_kw: float = 0.0
 var tv_tc_active: bool = false
+var tv_map_id: int = 2
+var tv_map_name: String = "AUTOCROSS_NEUTRAL"
+var ffb_torque_nm: float = 0.0
 
 var _hud_layer: CanvasLayer = null
 var _hud_label: Label = null
@@ -150,6 +159,12 @@ func _ready() -> void:
 	model = VehicleDynamicsModelScript.new(config)
 	inputs = VehicleInputsScript.new()
 	telemetry = VehicleTelemetryScript.new()
+	if model.ecu_tv_v3 != null:
+		model.ecu_tv_v3.set_hardware_realism(tv_hardware_realism)
+		tv_map_id = model.ecu_tv_v3.active_map_id
+		tv_map_name = model.ecu_tv_v3.get_map_name()
+		inputs.tv_map_id = tv_map_id
+	wheel_ffb.input_device_override = input_device_mode
 	if gamepad.load_from_json():
 		steering_deadzone = gamepad.steering_deadzone
 		steering_gamma = gamepad.steering_gamma
@@ -162,7 +177,7 @@ func _ready() -> void:
 	
 	# Configure RigidBody3D properties from VehicleConfig
 	mass = config.mass
-	inertia = Vector3(config.iyy, config.izz, config.ixx)
+	inertia = Vector3(config.iyy, config.get_total_izz(), config.ixx)
 	center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
 	center_of_mass = Vector3(0.0, config.h_cog, -0.117)
 	
@@ -277,11 +292,44 @@ func _init_ros() -> void:
 	_as_status_sub = _node.call("create_subscription", "/as_status", "mirena_common/msg/AsInfo", _on_as_status)
 
 # --- Physics Process (Piloting & Telemetry) ---
+func _get_active_track_name() -> String:
+	var sim_node = get_node_or_null("/root/Sim")
+	if sim_node:
+		var trk = sim_node.get("track")
+		if trk != null:
+			var t_name = trk.get("track_name")
+			if t_name != null and String(t_name).strip_edges() != "":
+				return String(t_name)
+			if trk is Node:
+				return trk.name
+	return "manual"
+
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F7:
-		ecu_driving_mode = 1 - ecu_driving_mode
-		var mode_name: String = "ECU_TV_V3_4WD" if ecu_driving_mode == 1 else "LINEAL_4WD"
-		print("[ECU Mode]: %s" % mode_name)
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_F7:
+			ecu_driving_mode = 1 - ecu_driving_mode
+			var mode_name: String = "ECU_TV_V3_4WD" if ecu_driving_mode == 1 else "LINEAL_4WD"
+			print("[ECU Mode]: %s" % mode_name)
+			_update_minimal_hud()
+		elif event.keycode == KEY_F6:
+			if model != null and model.ecu_tv_v3 != null:
+				tv_map_id = model.ecu_tv_v3.cycle_map()
+				tv_map_name = model.ecu_tv_v3.get_map_name()
+				if inputs != null:
+					inputs.tv_map_id = tv_map_id
+				print("[TV Map]: %d (%s)" % [tv_map_id, tv_map_name])
+				_update_minimal_hud()
+		elif event.keycode == KEY_F9:
+			if telemetry_recorder != null:
+				var rec_on: bool = telemetry_recorder.toggle_recording(_get_active_track_name(), tv_map_name)
+				if rec_on:
+					print("[Telemetry REC ON]: %s" % telemetry_recorder.get_last_file_path())
+				else:
+					print("[Telemetry REC OFF]: %d samples saved -> %s" % [
+						telemetry_recorder.get_sample_count(),
+						telemetry_recorder.get_last_file_path()
+					])
+				_update_minimal_hud()
 
 func _physics_process(delta: float) -> void:
 	if pilot != PilotMode.MANUAL and _joy_vibrating:
@@ -315,6 +363,7 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	inputs.drive_mode = drive_mode
 	inputs.tv_mode = tv_mode
 	inputs.ecu_driving_mode = ecu_driving_mode
+	inputs.tv_map_id = tv_map_id
 	inputs.tv_yaw_moment_req = tv_yaw_moment_req
 	inputs.set_unified_control(self.gas, self.steering, self.brake, config.max_steer_angle)
 	
@@ -375,12 +424,32 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 		tv_kappa_opt = model.ecu_tv_v3.tc_kappa_opt.duplicate()
 		tv_torque_4wd = step_res["drive_torques"].duplicate()
 		tv_tc_active = model.ecu_tv_v3.tc_active and ecu_driving_mode == 1
-	var eff: float = maxf(config.drivetrain_efficiency, 1e-3)
-	var p_elec_w: float = 0.0
-	var d_trqs: Array = step_res["drive_torques"]
-	for i in range(4):
-		p_elec_w += maxf(0.0, float(d_trqs[i]) * absf(model.wheels[i].omega)) / eff
-	tv_elec_power_kw = p_elec_w * 0.001
+		tv_map_id = model.ecu_tv_v3.active_map_id
+		tv_map_name = model.ecu_tv_v3.get_map_name()
+	if model.hv_state != null:
+		tv_elec_power_kw = model.hv_state.power_kw
+	else:
+		var eff: float = maxf(config.drivetrain_efficiency, 1e-3)
+		var p_elec_w: float = 0.0
+		var d_trqs: Array = step_res["drive_torques"]
+		for i in range(4):
+			p_elec_w += maxf(0.0, float(d_trqs[i]) * absf(model.wheels[i].omega)) / eff
+		tv_elec_power_kw = p_elec_w * 0.001
+
+	if wheel_ffb != null:
+		ffb_torque_nm = wheel_ffb.compute_steering_torque_nm(
+			model.wheels, wheel_ffb.rack_ratio, wheel_ffb.mechanical_trail, wheel_ffb.scrub_radius
+		)
+	var inv_mass: float = 1.0 / maxf(config.mass, 1e-3)
+	var accel_ros: Vector3 = model.net_force_chassis_ros * inv_mass
+	if telemetry != null:
+		telemetry.update_from_model(model, accel_ros, inputs.steer_angle, {"dt": dt, "forces": step_res})
+	if telemetry_recorder != null and telemetry_recorder.is_recording:
+		telemetry_recorder.record_step(dt, model, inputs, step_res, {
+			"ax": accel_ros.x,
+			"ay": accel_ros.y,
+			"ffb_torque_nm": ffb_torque_nm
+		})
 	var normal_forces: Array = step_res["normal_forces"]
 	var wheel_forces_ros: Array = step_res["wheel_forces_ros"]
 	var wheel_moments_ros: Array = step_res["wheel_moments_ros"]
@@ -460,9 +529,13 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_PAUSED or what == NOTIFICATION_EXIT_TREE or what == NOTIFICATION_APPLICATION_FOCUS_OUT:
 		if _joy_vibrating:
 			_stop_all_joy_vibration()
+		if what == NOTIFICATION_EXIT_TREE and telemetry_recorder != null and telemetry_recorder.is_recording:
+			telemetry_recorder.stop_recording()
 
 func _process_manual_pilot(delta: float) -> void:
 	_sync_gamepad_settings()
+	if wheel_ffb != null:
+		wheel_ffb.input_device_override = input_device_mode
 	var joypads: Array[int] = Input.get_connected_joypads()
 	var has_joypad: bool = joypads.size() > 0
 	var kb_steer: float = Input.get_action_strength("manual_steer_l") - Input.get_action_strength("manual_steer_r")
@@ -472,9 +545,20 @@ func _process_manual_pilot(delta: float) -> void:
 
 	if has_joypad:
 		var joy_id: int = joypads[0]
+		var device_mode: int = WheelFFBControllerScript.InputDeviceMode.GAMEPAD
+		if wheel_ffb != null:
+			device_mode = wheel_ffb.detect_input_device(joy_id)
+			wheel_ffb.configure_gamepad_controller(gamepad)
+		var is_wheel: bool = (device_mode == WheelFFBControllerScript.InputDeviceMode.WHEEL)
 		var raw_x: float = -Input.get_joy_axis(joy_id, JOY_AXIS_LEFT_X)
 		var vx_mps: float = absf((global_transform.basis.inverse() * linear_velocity).z)
-		if absf(raw_x) > gamepad.steering_deadzone or is_zero_approx(kb_steer):
+		if is_wheel:
+			if absf(raw_x) > 0.002 or is_zero_approx(kb_steer):
+				_steer_smoothed = wheel_ffb.step_steering(raw_x, vx_mps, delta, gamepad)
+			else:
+				var steer_rate = manual_steer_return_rate if (absf(kb_steer) < absf(_steer_smoothed) or kb_steer * _steer_smoothed < 0.0) else manual_steer_rate
+				_steer_smoothed = _smooth_steer(_steer_smoothed, kb_steer, delta, steer_rate)
+		elif absf(raw_x) > gamepad.steering_deadzone or is_zero_approx(kb_steer):
 			_steer_smoothed = gamepad.step_steering(raw_x, vx_mps, delta)
 		else:
 			var steer_rate = manual_steer_return_rate if (absf(kb_steer) < absf(_steer_smoothed) or kb_steer * _steer_smoothed < 0.0) else manual_steer_rate
@@ -482,17 +566,28 @@ func _process_manual_pilot(delta: float) -> void:
 
 		var joy_throttle: float = gamepad.normalize_trigger(Input.get_joy_axis(joy_id, JOY_AXIS_TRIGGER_RIGHT), false)
 		var joy_brake: float = gamepad.normalize_trigger(Input.get_joy_axis(joy_id, JOY_AXIS_TRIGGER_LEFT), true)
-		self.gas = gamepad.shape_throttle(maxf(kb_throttle, joy_throttle))
-		self.brake = maxf(gamepad.shape_brake(maxf(kb_brake, joy_brake)), ebs_in)
+		if is_wheel:
+			self.gas = clampf(maxf(kb_throttle, joy_throttle), 0.0, 1.0)
+			self.brake = clampf(maxf(maxf(kb_brake, joy_brake), ebs_in), 0.0, 1.0)
+		else:
+			self.gas = gamepad.shape_throttle(maxf(kb_throttle, joy_throttle))
+			self.brake = maxf(gamepad.shape_brake(maxf(kb_brake, joy_brake)), ebs_in)
 
 		if model != null:
-			var rumble: Vector2 = gamepad.compute_rumble(model.wheels, model.suspension.corners, linear_velocity.length(), delta)
-			if rumble.x > 0.01 or rumble.y > 0.01:
-				Input.start_joy_vibration(joy_id, rumble.x, rumble.y, 0.05)
-				_joy_vibrating = true
-			elif _joy_vibrating:
-				_stop_all_joy_vibration()
+			if is_wheel and wheel_ffb != null:
+				wheel_ffb.apply_haptic_feedback(joy_id, model.wheels, linear_velocity.length(), delta)
+				ffb_torque_nm = wheel_ffb.ffb_torque_nm
+				_joy_vibrating = absf(wheel_ffb.ffb_normalized) > 0.01
+			else:
+				var rumble: Vector2 = gamepad.compute_rumble(model.wheels, model.suspension.corners, linear_velocity.length(), delta)
+				if rumble.x > 0.01 or rumble.y > 0.01:
+					Input.start_joy_vibration(joy_id, rumble.x, rumble.y, 0.05)
+					_joy_vibrating = true
+				elif _joy_vibrating:
+					_stop_all_joy_vibration()
 	else:
+		if wheel_ffb != null:
+			wheel_ffb.detect_input_device_from_name("")
 		var steer_rate = manual_steer_return_rate if (absf(kb_steer) < absf(_steer_smoothed) or kb_steer * _steer_smoothed < 0.0) else manual_steer_rate
 		_steer_smoothed = _smooth_steer(_steer_smoothed, kb_steer, delta, steer_rate)
 		self.gas = kb_throttle
@@ -736,8 +831,17 @@ func _update_minimal_hud() -> void:
 		return
 	var kmh: float = linear_velocity.length() * 3.6
 	var mode_str: String = "ECU TV v3 4WD [F7]" if ecu_driving_mode == 1 else "LINEAL 4WD [F7]"
+	var map_str: String = "  |  MAP %d: %s [F6]" % [tv_map_id, tv_map_name] if ecu_driving_mode == 1 else ""
 	var tc_str: String = "  |  TC ACTIVE" if tv_tc_active else ""
-	_hud_label.text = "%5.1f km/h   |   %4.1f / 80.0 kW\n%s%s" % [kmh, tv_elec_power_kw, mode_str, tc_str]
+	var rec_ind: String = telemetry_recorder.get_hud_indicator() if telemetry_recorder != null else ""
+	var rec_str: String = rec_ind if rec_ind != "" else "  |  [F9] REC"
+	var hv_str: String = ""
+	if model != null and model.hv_state != null:
+		hv_str = "   |   %3.0f V (%.0f%% SoC)" % [model.hv_state.v_dc, model.hv_state.soc * 100.0]
+	var dev_str: String = "  |  WHEEL 1:1" if (wheel_ffb != null and wheel_ffb.active_device_mode == WheelFFBControllerScript.InputDeviceMode.WHEEL) else ""
+	_hud_label.text = "%5.1f km/h   |   %4.1f / 80.0 kW%s\n%s%s%s%s%s" % [
+		kmh, tv_elec_power_kw, hv_str, mode_str, map_str, tc_str, dev_str, rec_str
+	]
 
 # --- Interface & Utility Methods ---
 func set_origin(target_transform: Transform3D, reset_vel: bool = false) -> void:
@@ -770,6 +874,11 @@ func reset_position() -> void:
 	cone_hit.emit(0)
 	
 	model.reset()
+	if wheel_ffb != null:
+		wheel_ffb.reset()
+	if telemetry_recorder != null and telemetry_recorder.is_recording:
+		telemetry_recorder.stop_recording()
+	ffb_torque_nm = 0.0
 	for i in range(4):
 		_wheel_rpm_acc[i] = 0.0
 		_wheel_rpm_lpf[i] = 0.0
