@@ -1,0 +1,21 @@
+{
+  "name": "default",
+  "vehicle_id": "ter27_4wd",
+  "description": "Set-up base TeR27 4WD equilibrio autocross / pista seca",
+  "spring_rate_front_n_m": 35000.0,
+  "spring_rate_rear_n_m": 48000.0,
+  "arb_front_nm_rad": 4500.0,
+  "arb_rear_nm_rad": 5500.0,
+  "camber_front_deg": -2.0,
+  "camber_rear_deg": -1.5,
+  "toe_front_deg": 0.0,
+  "toe_rear_deg": 0.0,
+  "ride_height_front_m": 0.035,
+  "ride_height_rear_m": 0.035,
+  "brake_bias": 0.58,
+  "tire_pressure_front_bar": 0.72,
+  "tire_pressure_rear_bar": 0.72,
+  "tv_map": "05_smc_pivot_4wd.json",
+  "power_limit_kw": 80.0,
+  "control_law_mode": "smc"
+}

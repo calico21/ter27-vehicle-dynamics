@@ -1,0 +1,23 @@
+{
+  "name": "TeR26 Race RWD",
+  "description": "Mapa RWD de competicion para TeR26: reparto Mz exclusivo en eje trasero (RL/RR) con TC protector de trasera",
+  "author": "TeR26 Vehicle Dynamics",
+  "control_law": "smc",
+  "event_mode": "autocross",
+  "params": {
+    "grip_cap": 0.94,
+    "k_us": 0.0014,
+    "max_mz": 680.0,
+    "min_fx_reserve": 0.06,
+    "tc_kp": 34.0,
+    "k_beta": 6000.0,
+    "throttle_mz_cut": 0.10,
+    "smc_k_gain": 620.0,
+    "smc_k_ffd": 65.0,
+    "smc_lambda_beta": 7.5,
+    "smc_phi": 0.14,
+    "smc_tc_kappa_base": 0.050,
+    "front_drive_bias": 0.0,
+    "can_latency_ms": 12.0
+  }
+}

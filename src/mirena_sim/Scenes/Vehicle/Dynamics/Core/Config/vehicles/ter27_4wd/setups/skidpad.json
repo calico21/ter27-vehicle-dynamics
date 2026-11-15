@@ -1,0 +1,21 @@
+{
+  "name": "skidpad",
+  "vehicle_id": "ter27_4wd",
+  "description": "Set-up agresivo para Skidpad 4WD con maxima rotacion y menor carga trasera de ARB",
+  "spring_rate_front_n_m": 37000.0,
+  "spring_rate_rear_n_m": 46000.0,
+  "arb_front_nm_rad": 4200.0,
+  "arb_rear_nm_rad": 6000.0,
+  "camber_front_deg": -2.4,
+  "camber_rear_deg": -1.8,
+  "toe_front_deg": -0.15,
+  "toe_rear_deg": 0.10,
+  "ride_height_front_m": 0.032,
+  "ride_height_rear_m": 0.034,
+  "brake_bias": 0.56,
+  "tire_pressure_front_bar": 0.70,
+  "tire_pressure_rear_bar": 0.70,
+  "tv_map": "03_skidpad_attack.json",
+  "power_limit_kw": 80.0,
+  "control_law_mode": "smc"
+}

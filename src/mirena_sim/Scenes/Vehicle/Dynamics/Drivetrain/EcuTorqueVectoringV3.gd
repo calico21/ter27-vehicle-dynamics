@@ -209,6 +209,26 @@ var open_4wd_tc_enabled: bool = false
 var _custom_params_active: bool = false
 
 # ── Live DiL Tuning Parameters (mutable without resetting EKF) ──────────────
+enum DriveLayout { AWD_4WD = 0, RWD_2WD = 1 }
+var drive_layout: int = DriveLayout.AWD_4WD
+var active_vehicle_id: String = "ter27_4wd"
+var active_tv_maps_dir: String = TV_MAPS_RES_DIR
+
+# Runtime vehicle/powertrain parameters synced from VehicleConfig
+var _cfg_mass: float = GP_MASS
+var _cfg_r_wheel: float = GP_R_WHEEL
+var _cfg_gear_ratio: float = GP_GEAR_RATIO
+var _cfg_motor_max_rpm: float = GP_MOTOR_MAX_RPM
+var _cfg_taper_ratio: float = GP_MOTOR_TAPER_RATIO
+var _cfg_max_trq_act: float = GP_MAX_TRQ_ACT
+var _cfg_p_max_total_mech: float = GP_P_MAX_TOTAL_MECH
+var _cfg_p_max_whl: float = GP_P_MAX_WHL
+var _cfg_wb: float = GP_WB
+var _cfg_lf: float = GP_LF
+var _cfg_lr: float = GP_LR
+var _cfg_track_f: float = GP_TRACK_F
+var _cfg_track_r: float = GP_TRACK_R
+
 enum ControlLawMode { V3_PID_ALQP = 0, V4_SMC_HYBRID = 1 }
 var control_law_mode: int = ControlLawMode.V3_PID_ALQP
 
@@ -575,11 +595,56 @@ func export_c_header_snippet() -> String:
 		+ "#define GP_CAN_LATENCY_MS    %.1ff\n" % can_latency_ms
 	)
 
-## Scans res://.../tv_maps/ and user://tv_maps/ for .json TV setups sorted alphabetically.
+## Configures vehicle geometry, powertrain limits, drive layout (4WD vs RWD), and active TV map directory.
+func configure_from_vehicle_config(cfg: VehicleConfig) -> void:
+	if cfg == null:
+		return
+	active_vehicle_id = cfg.vehicle_id
+	active_tv_maps_dir = cfg.get_active_tv_maps_dir()
+	drive_layout = DriveLayout.RWD_2WD if cfg.drive_mode == VehicleConfig.DriveMode.REAR_WD else DriveLayout.AWD_4WD
+	_cfg_mass = maxf(cfg.mass, 50.0)
+	_cfg_r_wheel = maxf(cfg.wheel_radius, 0.05)
+	_cfg_gear_ratio = maxf(cfg.gear_ratio, 0.1)
+	_cfg_motor_max_rpm = maxf(cfg.motor_max_rpm, 100.0)
+	_cfg_taper_ratio = clampf(cfg.motor_taper_ratio, 0.1, 0.99)
+	_cfg_max_trq_act = maxf(cfg.motor_peak_torque * _cfg_gear_ratio, 1.0)
+	_cfg_p_max_total_mech = maxf(cfg.power_limit_watts * cfg.drivetrain_efficiency, 1000.0)
+	_cfg_p_max_whl = maxf(_cfg_p_max_total_mech, GP_P_MAX_WHL) if drive_layout == DriveLayout.RWD_2WD else maxf(GP_P_MAX_WHL, 0.45 * _cfg_p_max_total_mech)
+	_cfg_wb = maxf(cfg.wheelbase, 0.5)
+	_cfg_lf = maxf(cfg.a_cog, 0.1)
+	_cfg_lr = maxf(cfg.b_cog, 0.1)
+	_cfg_track_f = maxf(cfg.track_width_f, 0.5)
+	_cfg_track_r = maxf(cfg.track_width_r, 0.5)
+	if drive_layout == DriveLayout.RWD_2WD:
+		front_split_active = 0.0
+		rear_split_active = 1.0
+	else:
+		front_split_active = clampf(cfg.front_drive_torque_ratio, 0.0, 1.0)
+		rear_split_active = 1.0 - front_split_active
+
+
+## Loads the first TV map matching a filename or display name inside the active vehicle's tv_maps/.
+func load_tv_map_by_filename(target: String) -> bool:
+	var key := target.strip_edges().to_lower()
+	if key == "":
+		return false
+	var stem := key.get_basename()
+	var maps := list_available_tv_maps()
+	for entry in maps:
+		var fn := String(entry.get("filename", "")).to_lower()
+		var nm := String(entry.get("name", "")).to_lower()
+		var p := String(entry.get("path", ""))
+		if fn == stem or p.get_file().to_lower() == key or nm == key:
+			return load_tv_map_from_file(p)
+	return false
+
+
+## Scans active vehicle tv_maps/ and user://tv_maps/ for .json TV setups sorted alphabetically.
 func list_available_tv_maps() -> Array[Dictionary]:
 	var entries: Array[Dictionary] = []
 	var seen_names: Dictionary = {}
-	for dir_path in [TV_MAPS_RES_DIR, TV_MAPS_USER_DIR]:
+	var dirs: Array[String] = [active_tv_maps_dir if active_tv_maps_dir != "" else TV_MAPS_RES_DIR, TV_MAPS_USER_DIR]
+	for dir_path in dirs:
 		var d := DirAccess.open(dir_path)
 		if d == null:
 			continue
@@ -684,8 +749,12 @@ func load_tv_map_from_file(file_path: String) -> bool:
 	if params.has("smc_tc_kappa_base"):
 		live_smc_tc_kappa_base = clampf(float(params["smc_tc_kappa_base"]), 0.01, 0.15)
 	if params.has("front_drive_bias"):
-		front_split_active = clampf(float(params["front_drive_bias"]), 0.0, 1.0)
-		rear_split_active = 1.0 - front_split_active
+		if drive_layout == DriveLayout.RWD_2WD:
+			front_split_active = 0.0
+			rear_split_active = 1.0
+		else:
+			front_split_active = clampf(float(params["front_drive_bias"]), 0.0, 1.0)
+			rear_split_active = 1.0 - front_split_active
 	if params.has("can_latency_ms"):
 		can_latency_ms = clampf(float(params["can_latency_ms"]), 0.0, 100.0)
 		hardware_realism_enabled = can_latency_ms > 0.0
@@ -707,8 +776,9 @@ func save_current_tv_map_to_file(map_name: String, description: String = "", ove
 		var sanitized := _sanitize_map_filename(map_name)
 		if sanitized == "":
 			sanitized = "custom_tv_map"
-		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(TV_MAPS_RES_DIR))
-		target_path = TV_MAPS_RES_DIR + sanitized + ".json"
+		var save_dir := active_tv_maps_dir if active_tv_maps_dir != "" else TV_MAPS_RES_DIR
+		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(save_dir))
+		target_path = save_dir.rstrip("/") + "/" + sanitized + ".json"
 	var payload := {
 		"name": map_name if map_name.strip_edges() != "" else target_path.get_file().get_basename(),
 		"description": description,
@@ -1109,6 +1179,39 @@ static func gp_nominal_allocation_4wd(
 		t_nom[i] = t_fx_i + t_mz_i
 	return t_nom
 
+func _compute_power_limited_t_ub_cfg(omega_wheel: Array[float]) -> Array[float]:
+	var t_ub: Array[float] = [0.0, 0.0, 0.0, 0.0]
+	var max_motor_rad_s: float = (_cfg_motor_max_rpm * TAU / 60.0) / maxf(_cfg_gear_ratio, 0.1)
+	var taper_start: float = max_motor_rad_s * _cfg_taper_ratio
+	var span: float = maxf(max_motor_rad_s - taper_start, 1e-3)
+	for i in range(4):
+		if drive_layout == DriveLayout.RWD_2WD and i < 2:
+			t_ub[i] = 0.0
+			continue
+		var w_abs: float = absf(omega_wheel[i])
+		var omega_safe: float = gp_softplus(omega_wheel[i])
+		var t_power: float = _cfg_p_max_whl / (omega_safe + 1e-3)
+		var speed_scale: float = 1.0
+		if w_abs >= max_motor_rad_s:
+			speed_scale = 0.0
+		elif w_abs > taper_start:
+			speed_scale = clampf(1.0 - (w_abs - taper_start) / span, 0.0, 1.0)
+		t_ub[i] = clampf(t_power, 0.0, _cfg_max_trq_act) * speed_scale
+	return t_ub
+
+
+func _gp_nominal_allocation_rwd(fx_driver: float, mz_target: float) -> Array[float]:
+	var t_fx_total: float = fx_driver * _cfg_r_wheel
+	var arm_r: float = maxf(0.5 * _cfg_track_r / _cfg_r_wheel, 1e-3)
+	var t_mz_half: float = mz_target / (2.0 * arm_r)
+	return [
+		0.0,
+		0.0,
+		0.5 * t_fx_total - t_mz_half,
+		0.5 * t_fx_total + t_mz_half,
+	]
+
+
 ## Exact closed-form KKT active-set water-filling solver for 4WD:
 ## min_{T} 0.5 * sum((T_i - T_blend_i)^2) s.t. sum(T_i) = T_target, T_lb_i <= T_i <= T_ub_i.
 static func gp_qp_solve_4wd_closedform(
@@ -1127,14 +1230,17 @@ static func gp_qp_solve_4wd_closedform(
 	var t_blend: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	var t_total_min: float = 0.0
 	var t_total_max: float = 0.0
+	var t_sol: Array[float] = [0.0, 0.0, 0.0, 0.0]
+	var active: Array[bool] = [true, true, true, true]
 	for i in range(4):
 		t_blend[i] = (w_reg * t_warmstart[i] + w_smooth * t_prev[i]) / h
 		t_total_min += t_lb[i]
 		t_total_max += t_ub[i]
+		if t_ub[i] - t_lb[i] <= 1e-6:
+			t_sol[i] = 0.5 * (t_lb[i] + t_ub[i])
+			active[i] = false
 
 	var t_target: float = clampf(fx_driver * GP_R_WHEEL, t_total_min, t_total_max)
-	var t_sol: Array[float] = [0.0, 0.0, 0.0, 0.0]
-	var active: Array[bool] = [true, true, true, true]
 
 	for _iter in range(4):
 		var rem_target: float = t_target
@@ -1237,6 +1343,10 @@ func gp_tc_step_4wd(
 
 	var any_tc_cut: bool = false
 	for i in range(4):
+		if drive_layout == DriveLayout.RWD_2WD and i < 2:
+			t_req_out[i] = 0.0
+			tc_pi_integral[i] = 0.0
+			continue
 		var sign_i: float = -1.0 if t_req_out[i] < 0.0 else 1.0
 		var mag_in: float = absf(t_req_out[i])
 
@@ -1378,6 +1488,12 @@ func _gp_tc_step_4wd_smc(
 	var any_tc_cut: bool = false
 
 	for i in range(4):
+		if drive_layout == DriveLayout.RWD_2WD and i < 2:
+			t_req_out[i] = 0.0
+			tc_pi_integral[i] = 0.0
+			last_tc_kappa_lim[i] = 0.0
+			tc_kappa_opt[i] = 0.0
+			continue
 		var half_track: float = 0.5 * (GP_TRACK_F if i < 2 else GP_TRACK_R)
 		var x_arm: float = GP_LF if i < 2 else -GP_LR
 		var y_arm: float = half_track if (i == 0 or i == 2) else -half_track
@@ -1585,7 +1701,8 @@ func _execute_tv_step(
 	_gp_tv_step(fx_driver, delta, vx, vy_in, wz, ay, ax, omega, brake_norm, dt, wheel_steers, vy_gps, gps_valid)
 
 func _update_launch_control_state(vx: float, fx_driver: float, brake_norm: float, dt: float) -> void:
-	var max_fx_est: float = (4.0 * GP_MAX_TRQ_ACT) / GP_R_WHEEL
+	var n_motors: float = 2.0 if drive_layout == DriveLayout.RWD_2WD else 4.0
+	var max_fx_est: float = (n_motors * _cfg_max_trq_act) / _cfg_r_wheel
 	var throttle_norm: float = clampf(fx_driver / maxf(max_fx_est, 1.0), 0.0, 1.0)
 	match launch_state:
 		LaunchState.LC_ARMED:
@@ -1628,6 +1745,10 @@ func _apply_launch_control_step(
 	var dv_opt: float = maxf(LC_DV_OPT_MIN, LC_KAPPA_OPT * vx_pos)
 	var v_target: float = vx_pos + dv_opt
 	for i in range(4):
+		if drive_layout == DriveLayout.RWD_2WD and i < 2:
+			t_ub[i] = 0.0
+			_lc_pi_integral[i] = 0.0
+			continue
 		var v_wheel: float = omega[i] * GP_R_WHEEL
 		var dv_err: float = v_wheel - v_target
 		if dv_err > 0.0:
@@ -1639,8 +1760,9 @@ func _apply_launch_control_step(
 			t_ub[i] = minf(t_ub[i], t_cap)
 		else:
 			_lc_pi_integral[i] *= 0.85
+	var lc_f_split: float = 0.0 if drive_layout == DriveLayout.RWD_2WD else lerpf(front_split_active, LC_FRONT_SPLIT, blend)
 	return {
-		"front_split": lerpf(front_split_active, LC_FRONT_SPLIT, blend),
+		"front_split": lc_f_split,
 		"straight_lock": straight_lock,
 		"mz_lc": mz_lc,
 		"blend": blend,
@@ -1697,12 +1819,15 @@ func _apply_skidpad_radius_lock(
 		fz_sum += maxf(fz_est[i], 1.0)
 	arm_sq_sum = maxf(arm_sq_sum, 1e-3)
 	fz_sum = maxf(fz_sum, 1.0)
-	var t_fx_total: float = fx_driver * GP_R_WHEEL
+	var t_fx_total: float = fx_driver * _cfg_r_wheel
 	var t_nom_fz: Array[float] = [0.0, 0.0, 0.0, 0.0]
-	for i in range(4):
-		var t_fx_i: float = t_fx_total * (maxf(fz_est[i], 1.0) / fz_sum)
-		var t_mz_i: float = (arms[i] * mz_adj) / arm_sq_sum
-		t_nom_fz[i] = t_fx_i + t_mz_i
+	if drive_layout == DriveLayout.RWD_2WD:
+		t_nom_fz = _gp_nominal_allocation_rwd(fx_driver, mz_adj)
+	else:
+		for i in range(4):
+			var t_fx_i: float = t_fx_total * (maxf(fz_est[i], 1.0) / fz_sum)
+			var t_mz_i: float = (arms[i] * mz_adj) / arm_sq_sum
+			t_nom_fz[i] = t_fx_i + t_mz_i
 	return {"active": true, "mz_req": mz_adj, "t_nominal": t_nom_fz}
 
 func _gp_tv_step(
@@ -1725,9 +1850,10 @@ func _gp_tv_step(
 
 	if launch_state == LaunchState.LC_ARMED:
 		for i in range(4):
-			last_t_cmd[i] = LC_PRELOAD_TORQUE_NM
-			t_out_prev[i] = LC_PRELOAD_TORQUE_NM
-			t_qp_prev[i] = LC_PRELOAD_TORQUE_NM
+			var preload_i: float = 0.0 if (drive_layout == DriveLayout.RWD_2WD and i < 2) else LC_PRELOAD_TORQUE_NM
+			last_t_cmd[i] = preload_i
+			t_out_prev[i] = preload_i
+			t_qp_prev[i] = preload_i
 			last_tc_cut_nm[i] = 0.0
 		tc_active = false
 		last_wz_ref = 0.0
@@ -1737,10 +1863,11 @@ func _gp_tv_step(
 	# Stage 1: Standstill hold (bypassed when Launch Control is active)
 	if vx < 1.0 and brake_norm > 0.5 and fx_driver > 500.0 and not lc_engaged:
 		for i in range(4):
-			last_t_cmd[i] = 7.5
+			var hold_i: float = 0.0 if (drive_layout == DriveLayout.RWD_2WD and i < 2) else 7.5
+			last_t_cmd[i] = hold_i
 			tc_pi_integral[i] = 0.0
-			t_out_prev[i] = 7.5
-			t_qp_prev[i] = 7.5
+			t_out_prev[i] = hold_i
+			t_qp_prev[i] = hold_i
 			t_lb_filt[i] = 0.0
 		wz_int = 0.0
 		last_wz_ref = 0.0
@@ -1770,8 +1897,9 @@ func _gp_tv_step(
 	var fz_est: Array[float] = gp_estimate_fz(vx, ax_filt, ay_filt)
 	var fy_est: Array[float] = gp_estimate_fy(vx, vy_est, wz_corr, delta_dz, fz_est)
 
-	# Map 0 (OPEN_4WD): symmetric 35/65% axle split with Mz = 0, respecting power & max motor speed limits
-	if active_map_id == TVMap.OPEN_4WD and not _custom_params_active:
+	# Map 0 (OPEN_4WD): symmetric axle split with Mz = 0, respecting power & max motor speed limits
+	var is_open_map: bool = (active_map_filename == "00_open_4wd") or (active_map_path == "" and active_map_id == TVMap.OPEN_4WD)
+	if is_open_map and not _custom_params_active:
 		var k_us_open: float = gp_adaptive_k_us_param(fz_est, k_us_active)
 		last_wz_ref = (vx_safe * delta_dz) / (GP_WB + k_us_open * vx_safe * vx_safe)
 		last_mz_req = 0.0
@@ -1779,9 +1907,9 @@ func _gp_tv_step(
 		qp_residual = 0.0
 		delta_prev = delta_dz
 
-		var w_chassis_open: float = vx_safe / GP_R_WHEEL
-		var req_total_trq: float = maxf(fx_driver * GP_R_WHEEL, 0.0)
-		var sf: float = clampf(front_split_active, 0.0, 1.0)
+		var w_chassis_open: float = vx_safe / _cfg_r_wheel
+		var req_total_trq: float = maxf(fx_driver * _cfg_r_wheel, 0.0)
+		var sf: float = 0.0 if drive_layout == DriveLayout.RWD_2WD else clampf(front_split_active, 0.0, 1.0)
 		var sr: float = 1.0 - sf
 		var t_open: Array[float] = [
 			0.5 * sf * req_total_trq,
@@ -1790,17 +1918,20 @@ func _gp_tv_step(
 			0.5 * sr * req_total_trq
 		]
 
+		var open_power_ub: Array[float] = _compute_power_limited_t_ub_cfg([w_chassis_open, w_chassis_open, w_chassis_open, w_chassis_open])
 		var p_total_mech: float = 0.0
 		for i in range(4):
+			if drive_layout == DriveLayout.RWD_2WD and i < 2:
+				t_open[i] = 0.0
+				continue
 			var w_i: float = omega[i] if i < omega.size() else w_chassis_open
 			var w_eff: float = maxf(absf(w_i), w_chassis_open)
-			var t_pwr_i: float = GP_P_MAX_WHL / (w_eff + 1e-3)
-			var t_cap_i: float = minf(GP_MAX_TRQ_ACT, t_pwr_i) * _compute_motor_speed_scale(w_eff)
+			var t_cap_i: float = open_power_ub[i]
 			t_open[i] = clampf(t_open[i], 0.0, t_cap_i)
 			p_total_mech += maxf(0.0, t_open[i] * w_eff)
 
-		if p_total_mech > GP_P_MAX_TOTAL_MECH and p_total_mech > 1e-3:
-			var p_scale: float = GP_P_MAX_TOTAL_MECH / p_total_mech
+		if p_total_mech > _cfg_p_max_total_mech and p_total_mech > 1e-3:
+			var p_scale: float = _cfg_p_max_total_mech / p_total_mech
 			for i in range(4):
 				t_open[i] *= p_scale
 
@@ -1945,11 +2076,11 @@ func _gp_tv_step(
 		mz_req = clampf(mz_raw, -stab_limit, stab_limit)
 	last_mz_req = mz_req
 
-	# Stage 6: 4WD Friction Ellipse + Power Bounds (filtered tau = 30 ms)
-	var w_chassis: float = vx_safe / GP_R_WHEEL
+	# Stage 6: Friction Ellipse + Power Bounds (filtered tau = 30 ms), respecting 4WD vs RWD layout
+	var w_chassis: float = vx_safe / _cfg_r_wheel
 	var omega_power: Array[float] = [w_chassis, w_chassis, w_chassis, w_chassis]
 	var t_ub_friction: Array[float] = gp_friction_ellipse_t_ub_param(fz_est, fy_est, mu_avg, min_fx_reserve_active)
-	var t_ub_power: Array[float] = gp_power_limited_t_ub(omega_power)
+	var t_ub_power: Array[float] = _compute_power_limited_t_ub_cfg(omega_power)
 
 	var alpha_ub: float = clampf(dt / (GP_UB_LPF_TAU + dt), 0.0, 1.0)
 	var t_lb: Array[float] = [0.0, 0.0, 0.0, 0.0]
@@ -1957,6 +2088,12 @@ func _gp_tv_step(
 	var max_sum: float = 0.0
 	var allow_regen_tv: bool = vx > 2.0 and brake_norm < 0.05
 	for i in range(4):
+		if drive_layout == DriveLayout.RWD_2WD and i < 2:
+			t_ub_filt[i] = 0.0
+			t_lb_filt[i] = 0.0
+			t_ub[i] = 0.0
+			t_lb[i] = 0.0
+			continue
 		var raw_ub_i: float = minf(t_ub_friction[i], t_ub_power[i])
 		if not _ub_filt_initialized:
 			t_ub_filt[i] = raw_ub_i
@@ -1972,7 +2109,7 @@ func _gp_tv_step(
 	_ub_filt_initialized = true
 
 	var fx_clamped: float = fx_driver
-	var max_sum_power: float = GP_P_MAX_TOTAL_MECH / maxf(w_chassis, 1e-3)
+	var max_sum_power: float = _cfg_p_max_total_mech / maxf(w_chassis, 1e-3)
 	var eff_max_sum: float = minf(max_sum, max_sum_power)
 	if delta_dz > 0.02 and mz_req < -25.0:
 		var t_in_cap_l: float = t_ub[GP_FL] + t_ub[GP_RL]
@@ -2011,8 +2148,12 @@ func _gp_tv_step(
 		w_smooth_scale = float(end_pre.get("w_smooth_scale", 1.0))
 	last_mz_req = mz_req
 
-	# Stage 7: 4WD Nominal Allocation + Closed-Form KKT QP Solver + Rate Limiter
-	var t_nominal: Array[float] = gp_nominal_allocation_4wd(fx_clamped, mz_req, fz_est, eff_front_split)
+	# Stage 7: Nominal Allocation (4WD or RWD) + Closed-Form KKT QP Solver + Rate Limiter
+	var t_nominal: Array[float] = (
+		_gp_nominal_allocation_rwd(fx_clamped, mz_req)
+		if drive_layout == DriveLayout.RWD_2WD
+		else gp_nominal_allocation_4wd(fx_clamped, mz_req, fz_est, eff_front_split)
+	)
 	if not lc_engaged and active_event_mode == "skidpad":
 		var delta_dot_skid: float = (_notch_delta_prev - delta_prev) / maxf(dt, 1e-4)
 		var skid_res: Dictionary = _apply_skidpad_radius_lock(fz_est, delta_dot_skid, ay_filt, wz_ref, wz_corr, fx_clamped, mz_req, dt)
@@ -2037,6 +2178,10 @@ func _gp_tv_step(
 		last_fy_est[i] = fy_est[i]
 		last_t_nominal[i] = t_nominal[i]
 		last_t_qp[i] = qp_result[i]
+		if drive_layout == DriveLayout.RWD_2WD and i < 2:
+			t_qp_prev[i] = 0.0
+			t_cmd[i] = 0.0
+			continue
 		var d_t: float = clampf(qp_result[i] - t_qp_prev[i], -max_delta_t, max_delta_t)
 		var tv_final: float = t_qp_prev[i] + d_t
 		t_qp_prev[i] = tv_final
@@ -2047,13 +2192,16 @@ func _gp_tv_step(
 	var t_pre_tc_2: float = t_cmd[2]
 	var t_pre_tc_3: float = t_cmd[3]
 
-	# Stage 8: 4WD Traction Control (Launch Control 0 km/h PI, V4 combined-ellipse, or V3 RLS)
+	# Stage 8: Traction Control (Launch Control 0 km/h PI, V4 combined-ellipse, or V3 RLS)
 	if launch_state == LaunchState.LC_ACTIVE:
 		var lc_tc_on: bool = false
 		var vx_pos: float = maxf(vx, 0.0)
 		var dv_opt: float = maxf(LC_DV_OPT_MIN, LC_KAPPA_OPT * vx_pos)
 		var v_target: float = vx_pos + dv_opt
 		for i in range(4):
+			if drive_layout == DriveLayout.RWD_2WD and i < 2:
+				t_cmd[i] = 0.0
+				continue
 			var v_wheel: float = omega[i] * GP_R_WHEEL
 			var dv_err: float = v_wheel - v_target
 			if dv_err > 0.0 and t_cmd[i] > 0.0:
@@ -2072,6 +2220,10 @@ func _gp_tv_step(
 
 	if active_event_mode == "endurance" and not lc_engaged:
 		_apply_endurance_efficiency_policy(fx_driver, t_lb, omega, t_cmd, true)
+
+	if drive_layout == DriveLayout.RWD_2WD:
+		t_cmd[0] = 0.0
+		t_cmd[1] = 0.0
 
 	last_tc_cut_nm[0] = maxf(0.0, t_pre_tc_0 - t_cmd[0])
 	last_tc_cut_nm[1] = maxf(0.0, t_pre_tc_1 - t_cmd[1])

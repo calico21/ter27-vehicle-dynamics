@@ -2,8 +2,8 @@ extends CanvasLayer
 class_name TvLiveTuningOverlay
 
 const VehicleConfigScript = preload("../Vehicle/Dynamics/Core/VehicleConfig.gd")
+const SetupProfileScript = preload("../Vehicle/Dynamics/Core/SetupProfile.gd")
 const TireModelScript = preload("../Vehicle/Dynamics/Tires/TireModel.gd")
-const SetupManagerScript = preload("../Vehicle/Dynamics/Core/SetupManager.gd")
 
 const TV_SLIDER_SPECS := [
 	{"key": "live_k_us", "label": "k_us (Understeer)", "min": 0.0, "max": 0.025, "step": 0.0005, "fmt": "%.4f"},
@@ -90,13 +90,17 @@ var _setup_dropdown: OptionButton = null
 var _setup_name_edit: LineEdit = null
 var _setup_presets_cache: Array[Dictionary] = []
 var _active_setup_path: String = ""
-var _setup_mgr := SetupManagerScript.new()
-var _chk_reset_on_apply: CheckBox = null
-var _setup_diff_label: Label = null
 var _pinn_tire_check: CheckBox = null
 var _regen_blend_check: CheckBox = null
 var _chassis_telem_label: Label = null
 var _setup_status_label: Label = null
+
+var _vehicle_dropdown: OptionButton = null
+var _vehicles_cache: Array[Dictionary] = []
+var _profile_setup_dropdown: OptionButton = null
+var _profile_setups_cache: Array[Dictionary] = []
+var _profile_name_edit: LineEdit = null
+var _vehicle_status_label: Label = null
 
 var _syncing: bool = false
 
@@ -137,7 +141,8 @@ func toggle_visibility() -> void:
 func is_text_input_focused() -> bool:
 	var tv_focused := _map_name_edit != null and _map_name_edit.has_focus()
 	var setup_focused := _setup_name_edit != null and _setup_name_edit.has_focus()
-	return tv_focused or setup_focused
+	var profile_focused := _profile_name_edit != null and _profile_name_edit.has_focus()
+	return tv_focused or setup_focused or profile_focused
 
 
 func sync_from_ecu() -> void:
@@ -174,6 +179,8 @@ func sync_from_gamepad() -> void:
 
 
 func sync_from_setup() -> void:
+	_refresh_vehicle_dropdown()
+	_refresh_vehicle_setup_dropdown()
 	_refresh_setup_dropdown()
 	var params: Dictionary = {}
 	if _car != null and _car.has_method("get_setup_params"):
@@ -277,6 +284,55 @@ func _build_ui() -> void:
 	title.add_theme_font_size_override("font_size", 14)
 	title.add_theme_color_override("font_color", Color(0.4, 0.88, 1.0))
 	main_vbox.add_child(title)
+
+	var veh_row := HBoxContainer.new()
+	veh_row.add_theme_constant_override("separation", 6)
+	main_vbox.add_child(veh_row)
+
+	var veh_lbl := Label.new()
+	veh_lbl.text = "Vehiculo:"
+	veh_lbl.custom_minimum_size = Vector2(68, 0)
+	veh_lbl.add_theme_font_size_override("font_size", 12)
+	veh_row.add_child(veh_lbl)
+
+	_vehicle_dropdown = OptionButton.new()
+	_vehicle_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_vehicle_dropdown.focus_mode = Control.FOCUS_NONE
+	_vehicle_dropdown.item_selected.connect(_on_vehicle_selected)
+	veh_row.add_child(_vehicle_dropdown)
+
+	var prof_row := HBoxContainer.new()
+	prof_row.add_theme_constant_override("separation", 6)
+	main_vbox.add_child(prof_row)
+
+	var prof_lbl := Label.new()
+	prof_lbl.text = "Set-up:"
+	prof_lbl.custom_minimum_size = Vector2(68, 0)
+	prof_lbl.add_theme_font_size_override("font_size", 12)
+	prof_row.add_child(prof_lbl)
+
+	_profile_setup_dropdown = OptionButton.new()
+	_profile_setup_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_profile_setup_dropdown.focus_mode = Control.FOCUS_NONE
+	_profile_setup_dropdown.item_selected.connect(_on_vehicle_setup_selected)
+	prof_row.add_child(_profile_setup_dropdown)
+
+	_profile_name_edit = LineEdit.new()
+	_profile_name_edit.placeholder_text = "nombre_setup"
+	_profile_name_edit.custom_minimum_size = Vector2(115, 0)
+	prof_row.add_child(_profile_name_edit)
+
+	var btn_save_prof := Button.new()
+	btn_save_prof.text = "Guardar Set-up Como..."
+	btn_save_prof.focus_mode = Control.FOCUS_NONE
+	btn_save_prof.pressed.connect(_on_save_vehicle_setup_as_pressed)
+	prof_row.add_child(btn_save_prof)
+
+	_vehicle_status_label = Label.new()
+	_vehicle_status_label.text = ""
+	_vehicle_status_label.add_theme_font_size_override("font_size", 11)
+	_vehicle_status_label.add_theme_color_override("font_color", Color(0.65, 0.95, 0.65))
+	main_vbox.add_child(_vehicle_status_label)
 
 	_tabs = TabContainer.new()
 	_tabs.focus_mode = Control.FOCUS_NONE
@@ -777,28 +833,6 @@ func _build_chassis_tab() -> void:
 	btn_reset_base.pressed.connect(_on_setup_reset_baseline_pressed)
 	save_row.add_child(btn_reset_base)
 
-	var apply_row := HBoxContainer.new()
-	apply_row.add_theme_constant_override("separation", 6)
-	vbox.add_child(apply_row)
-
-	var btn_apply := Button.new()
-	btn_apply.text = "Aplicar Set-up"
-	btn_apply.focus_mode = Control.FOCUS_NONE
-	btn_apply.pressed.connect(_on_apply_unified_setup_pressed)
-	apply_row.add_child(btn_apply)
-
-	_chk_reset_on_apply = CheckBox.new()
-	_chk_reset_on_apply.text = "Reset en Meta"
-	_chk_reset_on_apply.focus_mode = Control.FOCUS_NONE
-	apply_row.add_child(_chk_reset_on_apply)
-
-	_setup_diff_label = Label.new()
-	_setup_diff_label.add_theme_font_size_override("font_size", 11)
-	_setup_diff_label.add_theme_color_override("font_color", Color(0.96, 0.72, 0.25))
-	_setup_diff_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_setup_diff_label.text = "Diffs vs Base: sin cambios"
-	vbox.add_child(_setup_diff_label)
-
 	for spec in CHASSIS_SLIDER_SPECS:
 		var k: String = spec["key"]
 		var row := HBoxContainer.new()
@@ -862,16 +896,88 @@ func _get_car_config():
 	return null
 
 
+func _refresh_vehicle_dropdown() -> void:
+	if _vehicle_dropdown == null:
+		return
+	_vehicles_cache = VehicleConfigScript.list_available_vehicles()
+	_vehicle_dropdown.clear()
+	var cfg = _get_car_config()
+	var active_id: String = String(cfg.vehicle_id) if cfg != null else "ter27_4wd"
+	var sel_idx := 0
+	for i in range(_vehicles_cache.size()):
+		var entry: Dictionary = _vehicles_cache[i]
+		_vehicle_dropdown.add_item(String(entry["display_name"]), i)
+		if String(entry["vehicle_id"]) == active_id:
+			sel_idx = i
+	if not _vehicles_cache.is_empty():
+		_vehicle_dropdown.select(sel_idx)
+
+
+func _refresh_vehicle_setup_dropdown() -> void:
+	if _profile_setup_dropdown == null:
+		return
+	var cfg = _get_car_config()
+	var active_vid: String = String(cfg.vehicle_id) if cfg != null else "ter27_4wd"
+	var active_setup: String = String(cfg.active_setup_name).to_lower() if cfg != null else "default"
+	_profile_setups_cache = SetupProfileScript.list_setups_for_vehicle(active_vid)
+	_profile_setup_dropdown.clear()
+	var sel_idx := 0
+	for i in range(_profile_setups_cache.size()):
+		var entry: Dictionary = _profile_setups_cache[i]
+		_profile_setup_dropdown.add_item("%s (%s)" % [String(entry["name"]), String(entry["stem"])], i)
+		if String(entry["stem"]).to_lower() == active_setup or String(entry["name"]).to_lower() == active_setup:
+			sel_idx = i
+	if not _profile_setups_cache.is_empty():
+		_profile_setup_dropdown.select(sel_idx)
+		if _profile_name_edit != null and not _profile_name_edit.has_focus():
+			_profile_name_edit.text = String(_profile_setups_cache[sel_idx]["name"])
+
+
+func _on_vehicle_selected(idx: int) -> void:
+	if _syncing or idx < 0 or idx >= _vehicles_cache.size():
+		return
+	var entry: Dictionary = _vehicles_cache[idx]
+	var vid: String = String(entry["vehicle_id"])
+	if _car != null and _car.has_method("switch_vehicle"):
+		if _car.switch_vehicle(vid, "default"):
+			if _car.get("model") != null and _car.model.get("ecu_tv_v3") != null:
+				_ecu = _car.model.ecu_tv_v3
+			sync_from_ecu()
+			sync_from_setup()
+			if _vehicle_status_label != null:
+				_vehicle_status_label.text = "Vehiculo activo: %s" % String(entry["display_name"])
+
+
+func _on_vehicle_setup_selected(idx: int) -> void:
+	if _syncing or idx < 0 or idx >= _profile_setups_cache.size():
+		return
+	var entry: Dictionary = _profile_setups_cache[idx]
+	var stem: String = String(entry["stem"])
+	if _car != null and _car.has_method("apply_vehicle_setup"):
+		if _car.apply_vehicle_setup(stem):
+			sync_from_ecu()
+			sync_from_setup()
+			if _vehicle_status_label != null:
+				_vehicle_status_label.text = "Set-up aplicado: %s" % String(entry["name"])
+
+
+func _on_save_vehicle_setup_as_pressed() -> void:
+	if _car == null or not _car.has_method("save_vehicle_setup"):
+		return
+	var raw_name := _profile_name_edit.text.strip_edges() if _profile_name_edit != null else ""
+	if raw_name == "":
+		raw_name = "custom_%d" % int(Time.get_unix_time_from_system())
+	var saved_path: String = _car.save_vehicle_setup(raw_name)
+	if saved_path != "":
+		sync_from_setup()
+		if _vehicle_status_label != null:
+			_vehicle_status_label.text = "Set-up guardado: %s" % saved_path.get_file()
+
+
 func _refresh_setup_dropdown() -> void:
 	if _setup_dropdown == null:
 		return
-	var unified: Array[Dictionary] = _setup_mgr.list_presets()
-	var legacy: Array[Dictionary] = VehicleConfigScript.list_setup_presets()
-	_setup_presets_cache = []
-	for e in unified:
-		_setup_presets_cache.append(e)
-	for e in legacy:
-		_setup_presets_cache.append(e)
+	_setup_presets_cache = VehicleConfigScript.list_setup_presets()
 	_setup_dropdown.clear()
 	var sel_idx := 0
 	for i in range(_setup_presets_cache.size()):
@@ -885,42 +991,6 @@ func _refresh_setup_dropdown() -> void:
 			_active_setup_path = String(_setup_presets_cache[sel_idx]["path"])
 		if _setup_name_edit != null and not _setup_name_edit.has_focus():
 			_setup_name_edit.text = String(_setup_presets_cache[sel_idx]["name"])
-	if _setup_mgr.base_snapshot.is_empty():
-		_setup_mgr.set_base_from_car(_get_car_config(), _ecu, "Baseline")
-	_refresh_setup_diffs()
-
-func _on_apply_unified_setup_pressed() -> void:
-	if _setup_dropdown == null or _setup_presets_cache.is_empty():
-		return
-	var idx: int = _setup_dropdown.selected
-	if idx < 0 or idx >= _setup_presets_cache.size():
-		return
-	var path: String = String(_setup_presets_cache[idx]["path"])
-	var reset_cb := Callable()
-	if _chk_reset_on_apply != null and _chk_reset_on_apply.button_pressed and _car != null and _car.has_method("reset_to_start_line"):
-		reset_cb = Callable(_car, "reset_to_start_line")
-	var ok: bool = _setup_mgr.load_preset(path, _get_car_config(), _ecu, reset_cb)
-	if not ok and _car != null and _car.has_method("load_setup_preset"):
-		ok = _car.load_setup_preset(path)
-	sync_from_ecu()
-	_refresh_setup_diffs()
-	if _setup_status_label != null:
-		_setup_status_label.text = "Set-up aplicado: %s" % String(_setup_presets_cache[idx]["name"]) if ok else "Error aplicando set-up"
-
-func _refresh_setup_diffs() -> void:
-	if _setup_diff_label == null:
-		return
-	var cur_snap: Dictionary = SetupManagerScript.capture_from_car(_get_car_config(), _ecu)
-	var diffs: Array[Dictionary] = _setup_mgr.compute_diffs_vs_base(cur_snap)
-	if diffs.is_empty():
-		_setup_diff_label.text = "Diffs vs %s: sin cambios" % _setup_mgr.base_preset_name
-		_setup_diff_label.add_theme_color_override("font_color", Color(0.45, 0.90, 0.65))
-		return
-	var parts: Array[String] = []
-	for d in diffs:
-		parts.append("%s: %s -> %s %s" % [String(d["label"]), String(d["base"]), String(d["current"]), String(d["unit"])])
-	_setup_diff_label.text = "Diffs vs %s:\n  %s" % [_setup_mgr.base_preset_name, "\n  ".join(parts)]
-	_setup_diff_label.add_theme_color_override("font_color", Color(0.96, 0.72, 0.25))
 
 
 func _on_chassis_slider_changed(val: float, key: String, fmt: String) -> void:
@@ -934,7 +1004,6 @@ func _on_chassis_slider_changed(val: float, key: String, fmt: String) -> void:
 		var cfg = _get_car_config()
 		if cfg != null and cfg.has_method("apply_setup_params"):
 			cfg.apply_setup_params({key: val})
-	_refresh_setup_diffs()
 
 
 func _on_pinn_tire_toggled(toggled_on: bool) -> void:

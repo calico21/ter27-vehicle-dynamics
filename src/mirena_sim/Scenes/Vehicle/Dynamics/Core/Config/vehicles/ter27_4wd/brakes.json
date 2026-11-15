@@ -1,0 +1,12 @@
+{
+  "brake_mu": 1.30,
+  "brake_bias_front": 0.58,
+  "regen_blending_enabled": true,
+  "p_max_charge_w": 25000.0,
+  "regen_min_speed_mps": 1.5,
+  "disc_ambient_temp_c": 40.0,
+  "disc_max_temp_c": 650.0,
+  "disc_thermal_mass_j_k": 1350.0,
+  "disc_conv_base_w_k": 12.0,
+  "disc_conv_speed_coeff": 1.8
+}

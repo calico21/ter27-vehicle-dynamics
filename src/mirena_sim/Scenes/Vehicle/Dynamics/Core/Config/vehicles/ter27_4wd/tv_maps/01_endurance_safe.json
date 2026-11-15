@@ -1,0 +1,20 @@
+{
+	"name": "Endurance Safe",
+	"description": "Eficiencia energética (tope 56 kW, cero frenada parasitaria, regen x1.15) para 22 km",
+	"author": "TeR27 Vehicle Dynamics",
+	"control_law": "v3",
+	"event_mode": "endurance",
+	"params": {
+		"grip_cap": 0.87,
+		"k_us": 0.0022,
+		"max_mz": 750.0,
+		"min_fx_reserve": 0.08,
+		"tc_kp": 30.0,
+		"k_beta": 5500.0,
+		"throttle_mz_cut": 0.35,
+		"eco_power_cap_kw": 56.0,
+		"regen_boost": 1.15,
+		"front_drive_bias": 0.35,
+		"can_latency_ms": 12.0
+	}
+}

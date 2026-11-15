@@ -197,8 +197,8 @@ static func compute_drive_torques(
 		var speed_clamped = maxf(absf(speed), 1.0)
 		var max_power_force = (config.power_limit_watts * eff) / speed_clamped
 		var max_power_trq_total = max_power_force * r
-		
-		var total_max_trq = minf(4.0 * max_wheel_trq, max_power_trq_total)
+		var n_motors: float = 2.0 if (inputs.drive_mode == VehicleConfig.DriveMode.REAR_WD or inputs.drive_mode == VehicleConfig.DriveMode.FRONT_WD) else 4.0
+		var total_max_trq = minf(n_motors * max_wheel_trq, max_power_trq_total)
 		var requested_total_trq = throttle * total_max_trq
 		
 		var s_front = config.front_drive_torque_ratio

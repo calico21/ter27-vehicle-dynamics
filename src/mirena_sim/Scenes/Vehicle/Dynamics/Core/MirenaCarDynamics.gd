@@ -12,6 +12,7 @@ class_name MirenaCar
 
 const VehicleConfigScript = preload("VehicleConfig.gd")
 const VehicleInputsScript = preload("VehicleInputs.gd")
+const SetupProfileScript = preload("SetupProfile.gd")
 const VehicleDynamicsModelScript = preload("VehicleDynamicsModel.gd")
 const GamepadControllerScript = preload("GamepadController.gd")
 const WheelFFBControllerScript = preload("WheelFFBController.gd")
@@ -25,12 +26,6 @@ const VehicleTelemetryScript = preload("../Telemetry/VehicleTelemetry.gd")
 const TelemetryRecorderScript = preload("../Telemetry/TelemetryRecorder.gd")
 const TvLiveTuningOverlayScript = preload("../../../UI/TvLiveTuningOverlay.gd")
 const TelemetryInspectorOverlayScript = preload("../../../UI/TelemetryInspectorOverlay.gd")
-const DilSessionLoggerScript = preload("DilSessionLogger.gd")
-const SetupManagerScript = preload("SetupManager.gd")
-
-const HOOSIER_R20_MU_NOM: float = 1.86
-const HOOSIER_R20_RADIUS_M: float = 0.2032
-const HOOSIER_R20_WIDTH_M: float = 0.203
 
 signal cone_hit(count: int)
 enum PilotMode { NO_PILOT, MANUAL, ROS, TRACK_RAIL }
@@ -147,26 +142,9 @@ var ffb_torque_nm: float = 0.0
 
 var _hud_layer: CanvasLayer = null
 var _hud_label: Label = null
-var _hud_top_bar: PanelContainer = null
-var _hud_lap_lbl: Label = null
-var _hud_best_lbl: Label = null
-var _hud_delta_lbl: Label = null
-var _hud_mode_lbl: Label = null
-var _hud_lc_lbl: Label = null
-var _hud_bottom_panel: PanelContainer = null
-var _hud_speed_lbl: Label = null
-var _hud_power_lbl: Label = null
-var _hud_gas_bar: ProgressBar = null
-var _hud_brake_bar: ProgressBar = null
-var _hud_steer_bar: ProgressBar = null
-var _hud_badges_lbl: Label = null
-var _hud_corners_lbl: Label = null
 var _tv_overlay: TvLiveTuningOverlayScript = null
 var _telemetry_inspector: TelemetryInspectorOverlayScript = null
 var _last_step_res: Dictionary = {}
-var dil_logger: DilSessionLoggerScript = DilSessionLoggerScript.new()
-var _wheel_spin_nodes: Array[Node3D] = [null, null, null, null]
-var _last_dil_hud_state: Dictionary = {}
 
 var slam_cones: Array = []
 var hit_cones: Array = []
@@ -225,8 +203,6 @@ func _ready() -> void:
 	cone_collision_set(true)
 	_connect_to_initial_gate()
 	_init_ros()
-	if dil_logger != null:
-		dil_logger.configure_track(_infer_dil_track_mode(), global_transform.origin, -global_transform.basis.z)
 	_setup_minimal_hud()
 	
 	# Register Cameras
@@ -280,114 +256,12 @@ func _setup_raycasts_and_wheels() -> void:
 		var w_node: Node3D = null
 		if has_node(wheel_names[i]):
 			w_node = get_node(wheel_names[i]) as Node3D
-		else:
-			w_node = Node3D.new()
-			w_node.name = wheel_names[i]
-			add_child(w_node)
-		_wheel_base_yaws[i] = w_node.rotation.y
-		w_node.position.x = ray_mount_positions[i].x
-		w_node.position.z = ray_mount_positions[i].z
-		w_node.position.y = ray_mount_positions[i].y - ray_rest_lengths[i] + config.wheel_radius
-		_ensure_hoosier_r20_visual(w_node, i)
+			_wheel_base_yaws[i] = w_node.rotation.y
+			w_node.position.x = ray_mount_positions[i].x
+			w_node.position.z = ray_mount_positions[i].z
+			w_node.position.y = ray_mount_positions[i].y - ray_rest_lengths[i] + config.wheel_radius
 		wheel_mesh_nodes.append(w_node)
 	_setup_wheel_force_arrows()
-
-func _ensure_hoosier_r20_visual(w_node: Node3D, index: int) -> void:
-	if w_node == null:
-		return
-	var existing_spin := w_node.get_node_or_null("HoosierR20Spin") as Node3D
-	if existing_spin != null:
-		_wheel_spin_nodes[index] = existing_spin
-		return
-	# Hide plain placeholder cylinder meshes if present so the detailed Hoosier R20 assembly renders cleanly
-	if w_node is MeshInstance3D:
-		(w_node as MeshInstance3D).mesh = null
-	for child in w_node.get_children():
-		if child is MeshInstance3D:
-			child.visible = false
-	var is_right: bool = (index == 1 or index == 3)
-	var spin_root := build_hoosier_r20_wheel_mesh(is_right)
-	spin_root.name = "HoosierR20Spin"
-	w_node.add_child(spin_root)
-	_wheel_spin_nodes[index] = spin_root
-
-static func build_hoosier_r20_wheel_mesh(is_right_side: bool = false) -> Node3D:
-	var spin_root := Node3D.new()
-	var tire_mat := StandardMaterial3D.new()
-	tire_mat.albedo_color = Color(0.08, 0.085, 0.095)
-	tire_mat.roughness = 0.88
-	tire_mat.metallic = 0.04
-
-	var rim_mat := StandardMaterial3D.new()
-	rim_mat.albedo_color = Color(0.18, 0.20, 0.24)
-	rim_mat.roughness = 0.32
-	rim_mat.metallic = 0.82
-
-	var hub_mat := StandardMaterial3D.new()
-	hub_mat.albedo_color = Color(0.85, 0.18, 0.14)
-	hub_mat.roughness = 0.35
-	hub_mat.metallic = 0.65
-
-	# Hoosier R20 16.0x7.5-10 outer tread (R0 = 0.2032 m, 8" overall width = 0.203 m)
-	var tread := MeshInstance3D.new()
-	var tread_cyl := CylinderMesh.new()
-	tread_cyl.top_radius = HOOSIER_R20_RADIUS_M
-	tread_cyl.bottom_radius = HOOSIER_R20_RADIUS_M
-	tread_cyl.height = 0.188
-	tread_cyl.radial_segments = 28
-	tread.mesh = tread_cyl
-	tread.rotation.z = PI * 0.5
-	tread.material_override = tire_mat
-	spin_root.add_child(tread)
-
-	# Sidewall bulge (width 0.203 m = 8.0 in)
-	var sidewall := MeshInstance3D.new()
-	var sw_cyl := CylinderMesh.new()
-	sw_cyl.top_radius = HOOSIER_R20_RADIUS_M - 0.011
-	sw_cyl.bottom_radius = HOOSIER_R20_RADIUS_M - 0.011
-	sw_cyl.height = HOOSIER_R20_WIDTH_M
-	sw_cyl.radial_segments = 24
-	sidewall.mesh = sw_cyl
-	sidewall.rotation.z = PI * 0.5
-	sidewall.material_override = tire_mat
-	spin_root.add_child(sidewall)
-
-	# 10"x8" rim barrel (radius 0.127 m, width 0.205 m)
-	var rim := MeshInstance3D.new()
-	var rim_cyl := CylinderMesh.new()
-	rim_cyl.top_radius = 0.127
-	rim_cyl.bottom_radius = 0.127
-	rim_cyl.height = HOOSIER_R20_WIDTH_M + 0.002
-	rim_cyl.radial_segments = 24
-	rim.mesh = rim_cyl
-	rim.rotation.z = PI * 0.5
-	rim.material_override = rim_mat
-	spin_root.add_child(rim)
-
-	# 4-spoke star & centerlock nut on outboard face
-	var out_sign: float = 1.0 if is_right_side else -1.0
-	for k in range(2):
-		var spoke := MeshInstance3D.new()
-		var spoke_box := BoxMesh.new()
-		spoke_box.size = Vector3(0.014, 0.235, 0.024)
-		spoke.mesh = spoke_box
-		spoke.position = Vector3(out_sign * 0.072, 0.0, 0.0)
-		spoke.rotation.x = float(k) * (PI * 0.5)
-		spoke.material_override = rim_mat
-		spin_root.add_child(spoke)
-
-	var nut := MeshInstance3D.new()
-	var nut_cyl := CylinderMesh.new()
-	nut_cyl.top_radius = 0.026
-	nut_cyl.bottom_radius = 0.032
-	nut_cyl.height = 0.024
-	nut_cyl.radial_segments = 12
-	nut.mesh = nut_cyl
-	nut.position = Vector3(out_sign * 0.088, 0.0, 0.0)
-	nut.rotation.z = PI * 0.5
-	nut.material_override = hub_mat
-	spin_root.add_child(nut)
-	return spin_root
 
 static func _new_ros_msg(msg_name: String) -> Object:
 	var s = load("res://addons/rclgd/gen/%s.gd" % msg_name)
@@ -451,15 +325,9 @@ func _get_active_track_name() -> String:
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_F7:
-			if event.shift_pressed:
-				ecu_driving_mode = 1 - ecu_driving_mode
-				var mode_name: String = "ECU_TV_V3_4WD" if ecu_driving_mode == 1 else "LINEAL_4WD"
-				print("[ECU Mode]: %s" % mode_name)
-			else:
-				if dil_logger != null and dil_logger.set_baseline_lap():
-					print("[DiL] Baseline fijado en Vuelta %d (%.3fs)" % [int(dil_logger.baseline_lap.get("lap_index", 0)), float(dil_logger.baseline_lap.get("lap_time_s", 0.0))])
-				else:
-					print("[DiL] Completa al menos 1 vuelta antes de fijar Baseline [F7]")
+			ecu_driving_mode = 1 - ecu_driving_mode
+			var mode_name: String = "ECU_TV_V3_4WD" if ecu_driving_mode == 1 else "LINEAL_4WD"
+			print("[ECU Mode]: %s" % mode_name)
 			_update_minimal_hud()
 		elif event.keycode == KEY_F6:
 			var overlay_typing := (
@@ -642,53 +510,6 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 		})
 	var normal_forces: Array = step_res["normal_forces"]
 	var wheel_forces_ros: Array = step_res["wheel_forces_ros"]
-	if dil_logger != null:
-		var sat_sum: float = 0.0
-		var fz_arr: Array = []
-		var k_arr: Array = []
-		var a_arr: Array = []
-		var tt_arr: Array = []
-		var td_arr: Array = []
-		var dsc_arr: Array[float] = _collect_disc_temps()
-		for wi in range(4):
-			var w_i = model.wheels[wi]
-			var f_r: Vector3 = wheel_forces_ros[wi] if wi < wheel_forces_ros.size() else Vector3.ZERO
-			var fz_i: float = float(normal_forces[wi]) if wi < normal_forces.size() else 0.0
-			var mu_i: float = HOOSIER_R20_MU_NOM * float(w_i.surface_mu_scale)
-			sat_sum += compute_wheel_saturation(f_r.x, f_r.y, fz_i, mu_i) * 100.0
-			fz_arr.append(fz_i)
-			k_arr.append(w_i.kappa)
-			a_arr.append(rad_to_deg(w_i.alpha))
-			tt_arr.append(w_i.t_surf_c)
-			td_arr.append(dsc_arr[wi] if wi < dsc_arr.size() else 40.0)
-		var d_trqs_arr: Array = step_res.get("drive_torques", [0.0, 0.0, 0.0, 0.0])
-		var tc_cut_val: Array = model.ecu_tv_v3.last_tc_cut_nm.duplicate() if model.ecu_tv_v3 != null else [0.0, 0.0, 0.0, 0.0]
-		var wz_ref_val: float = model.ecu_tv_v3.last_wz_ref if model.ecu_tv_v3 != null else 0.0
-		var mz_req_val: float = model.ecu_tv_v3.last_mz_req if model.ecu_tv_v3 != null else 0.0
-		var beta_deg_val: float = rad_to_deg(atan2(local_v_ros.y, maxf(absf(local_v_ros.x), 0.5)))
-		var dil_sample := {
-			"vx": local_v_ros.x,
-			"ay": accel_ros.y,
-			"ax": accel_ros.x,
-			"wz_ref": wz_ref_val,
-			"wz_real": local_w_ros.z,
-			"beta_deg": beta_deg_val,
-			"delta_deg": rad_to_deg(inputs.steer_angle),
-			"throttle": inputs.throttle,
-			"brake": inputs.brake,
-			"mz_req": mz_req_val,
-			"t_cmd": d_trqs_arr,
-			"tc_cut": tc_cut_val,
-			"fz": fz_arr,
-			"kappa": k_arr,
-			"alpha": a_arr,
-			"t_tire": tt_arr,
-			"t_disc": td_arr,
-			"p_elec_kw": tv_elec_power_kw,
-			"avg_sat_pct": sat_sum * 0.25,
-		}
-		var snap := SetupManagerScript.capture_from_car(config, model.ecu_tv_v3)
-		_last_dil_hud_state = dil_logger.step_sample(dt, state.transform.origin, state.linear_velocity, dil_sample, snap)
 	var wheel_moments_ros: Array = step_res["wheel_moments_ros"]
 	var wheel_steer_angles: Array = step_res["wheel_steer_angles"]
 	
@@ -743,8 +564,6 @@ func _update_wheel_visual(index: int, ray: RayCast3D, delta_w: float, roll_angle
 	# Steering yaw rotation for front wheels (+delta_w = CCW / left turn)
 	if index == 0 or index == 1:
 		w_node.rotation.y = _wheel_base_yaws[index] + delta_w
-	if index < _wheel_spin_nodes.size() and _wheel_spin_nodes[index] != null:
-		_wheel_spin_nodes[index].rotation.x = -roll_angle
 
 func _setup_wheel_force_arrows() -> void:
 	for n in _wheel_arrow_roots:
@@ -870,7 +689,7 @@ func _update_wheel_force_arrows(wheel_forces_ros: Array, normal_forces: Array, g
 		_wheel_arrow_tips[i].position = Vector3(0.0, 0.0, -(shaft_len + 0.09))
 
 		var fz: float = float(normal_forces[i]) if i < normal_forces.size() else 0.0
-		var mu_eff: float = HOOSIER_R20_MU_NOM * (float(model.wheels[i].surface_mu_scale) if (model != null and i < model.wheels.size()) else 1.0)
+		var mu_eff: float = 1.5 * (float(model.wheels[i].surface_mu_scale) if (model != null and i < model.wheels.size()) else 1.0)
 		var eta := compute_wheel_saturation(f_ros.x, f_ros.y, fz, mu_eff)
 		var col := saturation_to_color(eta)
 		var mat := _wheel_arrow_mats[i]
@@ -947,8 +766,78 @@ func _sync_setup_to_model() -> void:
 		return
 	if model != null and model.suspension != null:
 		model.suspension.sync_from_config(config)
+	if model != null:
+		for i in range(mini(4, model.wheels.size())):
+			model.wheels[i].inflation_pressure_kpa = (config.tire_pressure_front_bar if i < 2 else config.tire_pressure_rear_bar) * 100.0
 	mass = config.mass
 	inertia = Vector3(config.iyy, config.get_total_izz(), config.ixx)
+
+
+## Hot-swaps the active vehicle profile (e.g. "ter26_rwd" vs "ter27_4wd") and optional set-up name.
+func switch_vehicle(vehicle_id: String, setup_name: String = "default") -> bool:
+	if model == null or not model.load_vehicle(vehicle_id, setup_name):
+		return false
+	config = model.config
+	drive_mode = config.drive_mode
+	if inputs != null:
+		inputs.drive_mode = config.drive_mode
+	mass = config.mass
+	inertia = Vector3(config.iyy, config.get_total_izz(), config.ixx)
+	center_of_mass = Vector3(0.0, config.h_cog, -0.117)
+	linear_velocity = Vector3.ZERO
+	angular_velocity = Vector3.ZERO
+	_sync_geometry_from_config()
+	var wheel_names := ["FL_WHEEL", "FR_WHEEL", "RL_WHEEL", "RR_WHEEL"]
+	for i in range(4):
+		if i < raycasts.size() and raycasts[i] != null:
+			raycasts[i].position = ray_mount_positions[i]
+			raycasts[i].target_position = Vector3(0.0, -ray_cast_length, 0.0)
+		if has_node(wheel_names[i]):
+			var wn := get_node(wheel_names[i]) as Node3D
+			wn.position.x = ray_mount_positions[i].x
+			wn.position.z = ray_mount_positions[i].z
+			wn.position.y = ray_mount_positions[i].y - ray_rest_lengths[i] + config.wheel_radius
+		_prev_compressions[i] = 0.0
+		_was_grounded[i] = false
+	if model.ecu_tv_v3 != null:
+		model.ecu_tv_v3.set_hardware_realism(tv_hardware_realism)
+		tv_map_id = model.ecu_tv_v3.active_map_id
+		tv_map_name = model.ecu_tv_v3.get_map_name()
+		if inputs != null:
+			inputs.tv_map_id = tv_map_id
+	_sync_setup_to_model()
+	return true
+
+
+## Applies a named SetupProfile JSON for the currently active vehicle.
+func apply_vehicle_setup(setup_name: String) -> bool:
+	if model == null or not model.apply_setup(setup_name):
+		return false
+	config = model.config
+	drive_mode = config.drive_mode
+	if inputs != null:
+		inputs.drive_mode = config.drive_mode
+	if model.ecu_tv_v3 != null:
+		tv_map_id = model.ecu_tv_v3.active_map_id
+		tv_map_name = model.ecu_tv_v3.get_map_name()
+	_sync_setup_to_model()
+	return true
+
+
+## Saves the active vehicle's parameters into a modular SetupProfile JSON.
+func save_vehicle_setup(setup_name: String) -> String:
+	if config == null:
+		return ""
+	var tv_file := ""
+	var law_mode := "smc"
+	if model != null and model.ecu_tv_v3 != null:
+		tv_file = model.ecu_tv_v3.active_map_path.get_file()
+		law_mode = "smc" if model.ecu_tv_v3.control_law_mode == model.ecu_tv_v3.ControlLawMode.V4_SMC_HYBRID else "v3"
+	var prof = SetupProfileScript.from_vehicle_config(config, setup_name, tv_file, law_mode)
+	var saved_path: String = str(prof.save_for_vehicle(config.vehicle_id, setup_name))
+	if saved_path != "":
+		config.active_setup_name = prof.name
+	return saved_path
 
 func _collect_imo_temps() -> Array:
 	var out: Array = []
@@ -1314,131 +1203,26 @@ func _publish_lap_status(cones_hit: int, lap_time: float) -> void:
 	lap_status_msg.lap_time = lap_time
 	_lap_status_pub.publish(lap_status_msg)
 
-static func _make_hud_panel_style(border_col: Color = Color(0.118, 0.161, 0.231, 0.95)) -> StyleBoxFlat:
-	var st := StyleBoxFlat.new()
-	st.bg_color = Color(0.043, 0.059, 0.090, 0.82)
-	st.border_color = border_col
-	st.set_border_width_all(1)
-	st.set_corner_radius_all(6)
-	st.content_margin_left = 12
-	st.content_margin_right = 12
-	st.content_margin_top = 8
-	st.content_margin_bottom = 8
-	return st
-
-static func _make_hud_bar(fill_col: Color, min_w: float = 110.0, max_v: float = 100.0) -> ProgressBar:
-	var bar := ProgressBar.new()
-	bar.custom_minimum_size = Vector2(min_w, 12)
-	bar.max_value = max_v
-	bar.show_percentage = false
-	var bg := StyleBoxFlat.new()
-	bg.bg_color = Color(0.08, 0.11, 0.16, 0.9)
-	bg.set_corner_radius_all(3)
-	var fg := StyleBoxFlat.new()
-	fg.bg_color = fill_col
-	fg.set_corner_radius_all(3)
-	bar.add_theme_stylebox_override("background", bg)
-	bar.add_theme_stylebox_override("fill", fg)
-	return bar
-
-static func _format_lap_time(t_s: float) -> String:
-	if t_s < 0.0 or not is_finite(t_s):
-		return "--:--.---"
-	var mins := int(t_s / 60.0)
-	var secs := t_s - float(mins) * 60.0
-	return "%02d:%06.3f" % [mins, secs]
-
 func _setup_minimal_hud() -> void:
 	if DisplayServer.get_name() == "headless" or OS.has_feature("headless"):
 		return
 	_hud_layer = CanvasLayer.new()
 	_hud_layer.layer = 10
-	var mono := SystemFont.new()
-	mono.font_names = PackedStringArray(["JetBrains Mono", "Consolas", "DejaVu Sans Mono", "monospace"])
-
-	# --- Top Motorsport Timing & Mode Bar ---
-	_hud_top_bar = PanelContainer.new()
-	_hud_top_bar.anchor_left = 0.02
-	_hud_top_bar.anchor_right = 0.98
-	_hud_top_bar.anchor_top = 0.015
-	_hud_top_bar.add_theme_stylebox_override("panel", _make_hud_panel_style())
-	var top_hbox := HBoxContainer.new()
-	top_hbox.add_theme_constant_override("separation", 20)
-	_hud_top_bar.add_child(top_hbox)
-
-	_hud_lap_lbl = Label.new()
-	_hud_best_lbl = Label.new()
-	_hud_delta_lbl = Label.new()
-	_hud_mode_lbl = Label.new()
-	_hud_lc_lbl = Label.new()
-	for lbl in [_hud_lap_lbl, _hud_best_lbl, _hud_delta_lbl, _hud_mode_lbl, _hud_lc_lbl]:
-		lbl.add_theme_font_override("font", mono)
-		lbl.add_theme_font_size_override("font_size", 14)
-		lbl.add_theme_color_override("font_color", Color(0.92, 0.96, 1.0))
-		top_hbox.add_child(lbl)
-	_hud_mode_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_hud_layer.add_child(_hud_top_bar)
-
-	# --- Bottom Motorsport Cluster ---
-	_hud_bottom_panel = PanelContainer.new()
-	_hud_bottom_panel.anchor_left = 0.02
-	_hud_bottom_panel.anchor_right = 0.98
-	_hud_bottom_panel.anchor_top = 0.80
-	_hud_bottom_panel.anchor_bottom = 0.985
-	_hud_bottom_panel.add_theme_stylebox_override("panel", _make_hud_panel_style())
-	var bot_hbox := HBoxContainer.new()
-	bot_hbox.add_theme_constant_override("separation", 22)
-	_hud_bottom_panel.add_child(bot_hbox)
-
-	# Left: Speed + HV Power
-	var spd_vbox := VBoxContainer.new()
-	_hud_speed_lbl = Label.new()
-	_hud_speed_lbl.add_theme_font_override("font", mono)
-	_hud_speed_lbl.add_theme_font_size_override("font_size", 28)
-	_hud_speed_lbl.add_theme_color_override("font_color", Color(0.0, 0.898, 1.0)) # #00E5FF
-	_hud_power_lbl = Label.new()
-	_hud_power_lbl.add_theme_font_override("font", mono)
-	_hud_power_lbl.add_theme_font_size_override("font_size", 13)
-	_hud_power_lbl.add_theme_color_override("font_color", Color(0.85, 0.92, 0.98))
-	spd_vbox.add_child(_hud_speed_lbl)
-	spd_vbox.add_child(_hud_power_lbl)
-	bot_hbox.add_child(spd_vbox)
-
-	# Center: Gas / Brake / Steer Bars + Badges
-	var ped_vbox := VBoxContainer.new()
-	ped_vbox.add_theme_constant_override("separation", 4)
-	var ped_grid := GridContainer.new()
-	ped_grid.columns = 2
-	ped_grid.add_theme_constant_override("h_separation", 8)
-	ped_grid.add_theme_constant_override("v_separation", 4)
-	_hud_gas_bar = _make_hud_bar(Color(0.063, 0.725, 0.506))
-	_hud_brake_bar = _make_hud_bar(Color(0.937, 0.267, 0.267))
-	_hud_steer_bar = _make_hud_bar(Color(0.0, 0.898, 1.0))
-	for pair in [["GAS", _hud_gas_bar], ["BRK", _hud_brake_bar], ["STR", _hud_steer_bar]]:
-		var tag := Label.new()
-		tag.text = pair[0]
-		tag.add_theme_font_override("font", mono)
-		tag.add_theme_font_size_override("font_size", 11)
-		tag.add_theme_color_override("font_color", Color(0.65, 0.74, 0.85))
-		ped_grid.add_child(tag)
-		ped_grid.add_child(pair[1])
-	ped_vbox.add_child(ped_grid)
-	_hud_badges_lbl = Label.new()
-	_hud_badges_lbl.add_theme_font_override("font", mono)
-	_hud_badges_lbl.add_theme_font_size_override("font_size", 12)
-	_hud_badges_lbl.add_theme_color_override("font_color", Color(0.85, 0.92, 0.98))
-	ped_vbox.add_child(_hud_badges_lbl)
-	bot_hbox.add_child(ped_vbox)
-
-	# Right: 4-Corner Diagram (Fz, T_tire I/M/O, T_disc)
-	_hud_corners_lbl = Label.new()
-	_hud_corners_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_hud_corners_lbl.add_theme_font_override("font", mono)
-	_hud_corners_lbl.add_theme_font_size_override("font_size", 12)
-	_hud_corners_lbl.add_theme_color_override("font_color", Color(0.88, 0.93, 0.99))
-	bot_hbox.add_child(_hud_corners_lbl)
-
-	_hud_layer.add_child(_hud_bottom_panel)
+	var panel := PanelContainer.new()
+	panel.position = Vector2(16, 16)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.05, 0.06, 0.08, 0.72)
+	style.set_corner_radius_all(6)
+	style.content_margin_left = 12
+	style.content_margin_right = 12
+	style.content_margin_top = 8
+	style.content_margin_bottom = 8
+	panel.add_theme_stylebox_override("panel", style)
+	_hud_label = Label.new()
+	_hud_label.add_theme_font_size_override("font_size", 15)
+	_hud_label.add_theme_color_override("font_color", Color(0.95, 0.97, 1.0))
+	panel.add_child(_hud_label)
+	_hud_layer.add_child(panel)
 	add_child(_hud_layer)
 	_tv_overlay = TvLiveTuningOverlayScript.new()
 	_tv_overlay.bind_car(model.ecu_tv_v3 if model != null else null, gamepad, self)
@@ -1457,62 +1241,32 @@ func _update_minimal_hud() -> void:
 		_tv_overlay.update_input_telemetry(_raw_steer_in, _steer_smoothed, _raw_throttle_in, self.gas, _raw_brake_in, self.brake)
 		if _tv_overlay.has_method("update_chassis_telemetry"):
 			_tv_overlay.update_chassis_telemetry(_collect_imo_temps(), _collect_disc_temps(), _get_active_surface_mu())
-	if _hud_top_bar == null:
+	if _hud_label == null:
 		return
-
-	var cur_lap_t: float = dil_logger.current_lap_time_s if dil_logger != null else 0.0
-	var best_lap_t: float = dil_logger.best_lap_time_s if (dil_logger != null and dil_logger.best_lap_time_s > 0.0) else -1.0
-	var has_base: bool = dil_logger != null and not dil_logger.baseline_lap.is_empty()
-	var delta_s: float = dil_logger.get_live_delta_s(dil_logger.current_lap_dist_m, cur_lap_t) if has_base else 0.0
-	var lap_num: int = dil_logger.current_lap_index if dil_logger != null else 1
-	_hud_lap_lbl.text = "LAP %d  %s" % [lap_num, _format_lap_time(cur_lap_t)]
-	_hud_best_lbl.text = "BEST  %s" % _format_lap_time(best_lap_t)
-	if has_base:
-		_hud_delta_lbl.text = "Δt %+.3fs [F7]" % delta_s
-		_hud_delta_lbl.add_theme_color_override("font_color", Color(0.063, 0.725, 0.506) if delta_s < 0.0 else Color(0.937, 0.267, 0.267))
-	else:
-		_hud_delta_lbl.text = "Δt --.--- [F7 Pin]"
-		_hud_delta_lbl.add_theme_color_override("font_color", Color(0.58, 0.65, 0.75))
-
-	var total_maps: int = model.ecu_tv_v3._available_tv_maps.size() if (model != null and model.ecu_tv_v3 != null and not model.ecu_tv_v3._available_tv_maps.is_empty()) else 4
-	_hud_mode_lbl.text = "TV [%d/%d]: %s [F6]" % [tv_map_id + 1, total_maps, tv_map_name] if ecu_driving_mode == 1 else "LINEAL 4WD [Shift+F7]"
-
-	if model != null and model.ecu_tv_v3 != null and model.ecu_tv_v3.launch_state == EcuTorqueVectoringV3.LaunchState.LC_ARMED:
-		_hud_lc_lbl.text = "LC: ARMED"
-		_hud_lc_lbl.add_theme_color_override("font_color", Color(0.0, 0.898, 1.0))
-	elif model != null and model.ecu_tv_v3 != null and model.ecu_tv_v3.launch_state == EcuTorqueVectoringV3.LaunchState.LC_ACTIVE:
-		_hud_lc_lbl.text = "LC: ACTIVE"
-		_hud_lc_lbl.add_theme_color_override("font_color", Color(0.961, 0.620, 0.043))
-	else:
-		_hud_lc_lbl.text = "LC: OFF [L]"
-		_hud_lc_lbl.add_theme_color_override("font_color", Color(0.58, 0.65, 0.75))
-
 	var kmh: float = linear_velocity.length() * 3.6
-	_hud_speed_lbl.text = "%5.1f km/h" % kmh
-	var hv_str: String = "%3.0fV %.0f%%" % [model.hv_state.v_dc, model.hv_state.soc * 100.0] if (model != null and model.hv_state != null) else ""
-	_hud_power_lbl.text = "%+5.1f / 80 kW  %s" % [tv_elec_power_kw, hv_str]
-
-	_hud_gas_bar.value = clampf(self.gas * 100.0, 0.0, 100.0)
-	_hud_brake_bar.value = clampf(self.brake * 100.0, 0.0, 100.0)
-	_hud_steer_bar.value = clampf((self.steering * 0.5 + 0.5) * 100.0, 0.0, 100.0)
-
-	var tv_badge: String = "TV:ON" if ecu_driving_mode == 1 else "TV:OFF"
-	var tc_badge: String = "TC:ACT" if tv_tc_active else "TC:RDY"
-	var rec_ind: String = telemetry_recorder.get_hud_indicator().strip_edges() if telemetry_recorder != null else ""
-	_hud_badges_lbl.text = "%s  %s  [F8]Arr  [F10]Setup  [F11]XRay  %s" % [tv_badge, tc_badge, rec_ind if rec_ind != "" else "[F9]REC"]
-
-	if model != null and model.wheels.size() >= 4:
-		var nfs: Array = _last_step_res.get("normal_forces", [0.0, 0.0, 0.0, 0.0])
-		var imo: Array = _collect_imo_temps()
-		var dsc: Array = _collect_disc_temps()
-		var names := ["FL", "FR", "RL", "RR"]
-		var lines: PackedStringArray = []
-		for i in range(4):
-			var t_arr: Array = imo[i] if (i < imo.size() and imo[i] is Array and imo[i].size() >= 3) else [50.0, 50.0, 50.0]
-			var fz_i: float = float(nfs[i]) if i < nfs.size() else 0.0
-			var td_i: float = float(dsc[i]) if i < dsc.size() else 40.0
-			lines.append("%s Fz:%4.0fN  Tire:%2.0f/%2.0f/%2.0f°C  Disc:%3.0f°C" % [names[i], fz_i, float(t_arr[0]), float(t_arr[1]), float(t_arr[2]), td_i])
-		_hud_corners_lbl.text = "%s   |   %s\n%s   |   %s" % [lines[0], lines[1], lines[2], lines[3]]
+	var mode_str: String = "ECU TV v3 4WD [F7]" if ecu_driving_mode == 1 else "LINEAL 4WD [F7]"
+	var total_maps: int = model.ecu_tv_v3._available_tv_maps.size() if (model != null and model.ecu_tv_v3 != null and not model.ecu_tv_v3._available_tv_maps.is_empty()) else 4
+	var map_str: String = "  |  TV Map [%d/%d]: %s [F6]" % [tv_map_id + 1, total_maps, tv_map_name] if ecu_driving_mode == 1 else ""
+	var tc_str: String = "  |  TC ACTIVE" if tv_tc_active else ""
+	var rec_ind: String = telemetry_recorder.get_hud_indicator() if telemetry_recorder != null else ""
+	var rec_str: String = rec_ind if rec_ind != "" else "  |  [F9] REC"
+	var hv_str: String = ""
+	if model != null and model.hv_state != null:
+		hv_str = "   |   %3.0f V (%.0f%% SoC)" % [model.hv_state.v_dc, model.hv_state.soc * 100.0]
+	var dev_str: String = "  |  WHEEL 1:1" if (wheel_ffb != null and wheel_ffb.active_device_mode == WheelFFBControllerScript.InputDeviceMode.WHEEL) else ""
+	var lc_banner: String = ""
+	if model != null and model.ecu_tv_v3 != null:
+		if model.ecu_tv_v3.launch_state == EcuTorqueVectoringV3.LaunchState.LC_ARMED:
+			lc_banner = "[LAUNCH CONTROL ARMED] Mantén 100% Gas y Suelta Freno\n"
+			_hud_label.add_theme_color_override("font_color", Color(0.25, 0.95, 1.0))
+		elif model.ecu_tv_v3.launch_state == EcuTorqueVectoringV3.LaunchState.LC_ACTIVE:
+			lc_banner = "[LAUNCH CONTROL ACTIVE] 32/68 Split + Straight Lock\n"
+			_hud_label.add_theme_color_override("font_color", Color(1.0, 0.80, 0.20))
+		else:
+			_hud_label.add_theme_color_override("font_color", Color(0.95, 0.97, 1.0))
+	_hud_label.text = "%s%5.1f km/h   |   %4.1f / 80.0 kW%s\n%s%s%s%s%s  |  [F10] Live Tuning  |  [F11] Telemetry X-Ray" % [
+		lc_banner, kmh, tv_elec_power_kw, hv_str, mode_str, map_str, tc_str, dev_str, rec_str
+	]
 
 func launch_control_arm() -> bool:
 	if model == null or model.ecu_tv_v3 == null:
@@ -1527,32 +1281,13 @@ func launch_control_arm() -> bool:
 	return armed
 
 # --- Interface & Utility Methods ---
-func _infer_dil_track_mode() -> String:
-	var sim_node = get_node_or_null("/root/Sim")
-	if sim_node != null and sim_node.get("track") != null:
-		var t_name: String = str(sim_node.track.name).to_lower()
-		if "accel" in t_name:
-			return "Acceleration"
-		if "skidpad" in t_name:
-			return "Skidpad"
-		if "endurance" in t_name:
-			return "Endurance"
-	return "Autocross"
-
 func set_origin(target_transform: Transform3D, reset_vel: bool = false) -> void:
 	origin = target_transform
-	if dil_logger != null:
-		dil_logger.configure_track(_infer_dil_track_mode(), origin.origin, -origin.basis.z)
 	if reset_vel:
 		linear_velocity = Vector3.ZERO
 		angular_velocity = Vector3.ZERO
 	await get_tree().process_frame
 	set_deferred("global_transform", origin)
-
-func reset_to_start_line() -> void:
-	reset_position()
-	if model != null and model.ecu_tv_v3 != null and model.ecu_tv_v3.has_method("reset"):
-		model.ecu_tv_v3.reset()
 
 func reset_position() -> void:
 	var sim_node = get_node_or_null("/root/Sim")

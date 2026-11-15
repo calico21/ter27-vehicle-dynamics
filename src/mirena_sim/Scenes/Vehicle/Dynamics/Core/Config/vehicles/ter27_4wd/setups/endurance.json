@@ -1,0 +1,21 @@
+{
+  "name": "endurance",
+  "vehicle_id": "ter27_4wd",
+  "description": "Set-up de eficiencia energetica y proteccion termica para 22 km de Endurance",
+  "spring_rate_front_n_m": 34000.0,
+  "spring_rate_rear_n_m": 47000.0,
+  "arb_front_nm_rad": 4800.0,
+  "arb_rear_nm_rad": 5200.0,
+  "camber_front_deg": -1.9,
+  "camber_rear_deg": -1.4,
+  "toe_front_deg": 0.0,
+  "toe_rear_deg": 0.15,
+  "ride_height_front_m": 0.036,
+  "ride_height_rear_m": 0.036,
+  "brake_bias": 0.59,
+  "tire_pressure_front_bar": 0.74,
+  "tire_pressure_rear_bar": 0.74,
+  "tv_map": "01_endurance_safe.json",
+  "power_limit_kw": 56.0,
+  "control_law_mode": "v3"
+}

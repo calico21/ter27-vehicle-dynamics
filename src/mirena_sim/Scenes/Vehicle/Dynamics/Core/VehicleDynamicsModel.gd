@@ -9,6 +9,7 @@ extends RefCounted
 
 const VehicleConfig = preload("VehicleConfig.gd")
 const VehicleInputs = preload("VehicleInputs.gd")
+const SetupProfileScript = preload("SetupProfile.gd")
 const WheelDynamics = preload("../Tires/WheelDynamics.gd")
 const DrivetrainModel = preload("../Drivetrain/DrivetrainModel.gd")
 const TorqueVectoring = preload("../Drivetrain/TorqueVectoring.gd")
@@ -56,10 +57,12 @@ func _init(cfg: VehicleConfig = null) -> void:
 		TireModel.set_compound(config.tire_compound)
 	
 	inputs = VehicleInputs.new()
+	inputs.drive_mode = config.drive_mode
 	_last_input_tv_map_id = inputs.tv_map_id
 	suspension = SuspensionSystem.new()
 	torque_vectoring = TorqueVectoring.new()
 	ecu_tv_v3 = EcuTorqueVectoringV3.new()
+	ecu_tv_v3.configure_from_vehicle_config(config)
 	hv_state = DrivetrainModel.HVPowertrainState.new(config)
 	brake_state = BrakeModel.BrakeState.new(config.disc_ambient_temp_c)
 	chassis_state = ChassisDynamics.State6DOF.new(config.h_cog)
@@ -78,9 +81,68 @@ func _sync_wheel_thermal_config() -> void:
 		return
 	var init_t: float = config.tire_initial_temp_c
 	var track_t: float = config.track_temp_c
-	for w in wheels:
+	var p_front_kpa: float = config.tire_pressure_front_bar * 100.0
+	var p_rear_kpa: float = config.tire_pressure_rear_bar * 100.0
+	for i in range(wheels.size()):
+		var w = wheels[i]
 		w.set_tire_temperature(init_t)
 		w.t_track_c = track_t
+		w.inflation_pressure_kpa = p_front_kpa if i < 2 else p_rear_kpa
+
+
+## Hot-reloads a complete vehicle configuration (e.g. "ter26_rwd", "ter27_4wd") and optional set-up profile.
+func load_vehicle(vehicle_id: String, setup_name: String = "default") -> bool:
+	var new_cfg := VehicleConfig.new()
+	if not new_cfg.load_vehicle_configs(vehicle_id):
+		return false
+	config = new_cfg
+	if config.tire_compound != "" and TireModel.get_compound() != config.tire_compound:
+		TireModel.set_compound(config.tire_compound)
+	if ecu_tv_v3 != null:
+		ecu_tv_v3.configure_from_vehicle_config(config)
+		var v_maps := ecu_tv_v3.list_available_tv_maps()
+		if not v_maps.is_empty():
+			ecu_tv_v3.load_tv_map_from_file(String(v_maps[0]["path"]))
+	reset()
+	if setup_name.strip_edges() != "":
+		apply_setup(setup_name)
+	return true
+
+
+## Loads and applies a named SetupProfile for the active vehicle.
+func apply_setup(setup_name: String) -> bool:
+	if config == null:
+		return false
+	var prof := SetupProfileScript.load_for_vehicle(config.vehicle_id, setup_name)
+	if prof == null:
+		return false
+	return apply_setup_profile(prof)
+
+
+## Applies a SetupProfile instance to config, suspension, tires, power limit, and ECU/TV.
+func apply_setup_profile(prof: SetupProfileScript) -> bool:
+	if prof == null or config == null:
+		return false
+	prof.apply_to_config(config)
+	if suspension != null:
+		suspension.sync_from_config(config)
+	for i in range(wheels.size()):
+		wheels[i].inflation_pressure_kpa = (config.tire_pressure_front_bar if i < 2 else config.tire_pressure_rear_bar) * 100.0
+	if ecu_tv_v3 != null:
+		ecu_tv_v3.configure_from_vehicle_config(config)
+		if prof.tv_map.strip_edges() != "":
+			ecu_tv_v3.load_tv_map_by_filename(prof.tv_map)
+		if prof.control_law_mode.strip_edges() != "":
+			var law := prof.control_law_mode.strip_edges().to_lower()
+			ecu_tv_v3.control_law_mode = (
+				EcuTorqueVectoringV3.ControlLawMode.V4_SMC_HYBRID
+				if (law == "smc" or law == "v4" or law == "v4_smc_hybrid")
+				else EcuTorqueVectoringV3.ControlLawMode.V3_PID_ALQP
+			)
+		if not prof.tv_overrides.is_empty() and ecu_tv_v3.has_method("set_live_params"):
+			ecu_tv_v3.set_live_params(prof.tv_overrides)
+	inputs.drive_mode = config.drive_mode
+	return true
 
 ## Computes front wheel steer angle (ISO +Z CCW left) with configurable Ackermann geometry.
 static func compute_ackermann_steer(steer_angle: float, is_left: bool, config: VehicleConfig) -> float:
@@ -151,12 +213,25 @@ func step_forces(
 	var w_omegas: Array[float] = [wheels[0].omega, wheels[1].omega, wheels[2].omega, wheels[3].omega]
 	var drive_trqs: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	var brake_trqs: Array[float] = [0.0, 0.0, 0.0, 0.0]
-	if in_inputs.ecu_driving_mode == 1 and in_inputs.drive_mode == VehicleConfig.DriveMode.FOUR_WD and not in_inputs.override_wheel_torques:
+	var ecu_supports_mode: bool = (in_inputs.drive_mode == VehicleConfig.DriveMode.FOUR_WD or in_inputs.drive_mode == VehicleConfig.DriveMode.REAR_WD)
+	if in_inputs.ecu_driving_mode == 1 and ecu_supports_mode and not in_inputs.override_wheel_torques:
+		if ecu_tv_v3 != null:
+			var expected_layout: int = (
+				EcuTorqueVectoringV3.DriveLayout.RWD_2WD
+				if in_inputs.drive_mode == VehicleConfig.DriveMode.REAR_WD
+				else EcuTorqueVectoringV3.DriveLayout.AWD_4WD
+			)
+			if ecu_tv_v3.drive_layout != expected_layout:
+				ecu_tv_v3.drive_layout = expected_layout
+				if expected_layout == EcuTorqueVectoringV3.DriveLayout.RWD_2WD:
+					ecu_tv_v3.front_split_active = 0.0
+					ecu_tv_v3.rear_split_active = 1.0
 		var r_whl: float = maxf(config.wheel_radius, 1e-4)
 		var max_whl_trq: float = config.motor_peak_torque * config.gear_ratio
 		var spd_clamped: float = maxf(absf(u), 1.0)
 		var max_pwr_force: float = (config.power_limit_watts * config.drivetrain_efficiency) / spd_clamped
-		var max_fx_4wd: float = minf(4.0 * max_whl_trq / r_whl, max_pwr_force)
+		var n_motors: float = 2.0 if in_inputs.drive_mode == VehicleConfig.DriveMode.REAR_WD else 4.0
+		var max_fx_4wd: float = minf(n_motors * max_whl_trq / r_whl, max_pwr_force)
 		var fx_driver: float = in_inputs.throttle * max_fx_4wd
 		var w_steers: Array[float] = [
 			compute_ackermann_steer(in_inputs.steer_angle, true, config),
@@ -475,13 +550,18 @@ func reset() -> void:
 		w.reset()
 	_sync_wheel_thermal_config()
 	suspension.reset()
+	suspension.sync_from_config(config)
 	torque_vectoring.reset()
 	if ecu_tv_v3 != null:
+		ecu_tv_v3.configure_from_vehicle_config(config)
 		ecu_tv_v3.reset()
 	if hv_state != null:
 		hv_state.reset(config)
+	if brake_state != null:
+		brake_state = BrakeModel.BrakeState.new(config.disc_ambient_temp_c)
 	chassis_state.reset(config.h_cog)
 	inputs.reset()
+	inputs.drive_mode = config.drive_mode
 	_last_input_tv_map_id = inputs.tv_map_id
 	net_force_chassis_ros = Vector3.ZERO
 	net_torque_chassis_ros = Vector3.ZERO

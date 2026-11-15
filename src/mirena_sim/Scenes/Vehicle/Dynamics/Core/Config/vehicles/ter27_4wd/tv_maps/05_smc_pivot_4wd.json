@@ -1,0 +1,23 @@
+{
+	"name": "SMC Pivot 4WD",
+	"description": "V4_SMC_HYBRID: pivote agresivo < 60 km/h + blindaje beta_dot >= 60 km/h + TC delta_v",
+	"author": "TeR27 Vehicle Dynamics",
+	"control_law": "smc",
+	"event_mode": "autocross",
+	"params": {
+		"grip_cap": 0.95,
+		"k_us": 0.0011,
+		"max_mz": 980.0,
+		"min_fx_reserve": 0.05,
+		"tc_kp": 32.0,
+		"k_beta": 5200.0,
+		"throttle_mz_cut": 0.0,
+		"smc_k_gain": 920.0,
+		"smc_k_ffd": 95.0,
+		"smc_lambda_beta": 6.8,
+		"smc_phi": 0.13,
+		"smc_tc_kappa_base": 0.052,
+		"front_drive_bias": 0.35,
+		"can_latency_ms": 12.0
+	}
+}

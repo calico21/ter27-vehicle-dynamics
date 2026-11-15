@@ -19,6 +19,12 @@ enum WheelIndex {
 	RR = 3
 }
 
+# --- Vehicle Identity & Set-up ---
+@export var vehicle_id: String = "ter27_4wd"
+@export var display_name: String = "TeR27 4WD"
+@export var active_setup_name: String = "default"
+var active_config_dir: String = ""
+
 # --- Chassis & Mass Geometry ---
 @export var mass: float = 290.0
 @export var sprung_mass: float = 236.0
@@ -156,6 +162,8 @@ var toe_table_rear: Array = []
 @export var track_temp_c: float = 28.0
 @export var tire_initial_temp_c: float = 55.0
 @export var tire_compound: String = "R20"
+@export var tire_pressure_front_bar: float = 0.72
+@export var tire_pressure_rear_bar: float = 0.72
 ## Canonical MF 6.2 friction scaling factors (Calspan TTC belt -> real asphalt track grip).
 @export var lambda_mux: float = 0.95
 @export var lambda_muy: float = 0.90
@@ -179,6 +187,80 @@ func _init() -> void:
 	load_configs()
 	update_derived_geometry()
 
+func _has_vehicle_files(dir_path: String) -> bool:
+	if dir_path == "":
+		return false
+	var d := dir_path.rstrip("/") + "/"
+	return FileAccess.file_exists(d + "vehicle.json") or FileAccess.file_exists(d + "chassis.json")
+
+
+static func _vehicles_root_candidates() -> Array[String]:
+	return [
+		"res://Scenes/Vehicle/Dynamics/Core/Config/vehicles/",
+		"src/mirena_sim/Scenes/Vehicle/Dynamics/Core/Config/vehicles/",
+		"Scenes/Vehicle/Dynamics/Core/Config/vehicles/",
+		"Core/Config/vehicles/",
+	]
+
+
+## Lists all available vehicle profiles under Core/Config/vehicles/<vehicle_id>/.
+static func list_available_vehicles() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var seen: Dictionary = {}
+	for root in _vehicles_root_candidates():
+		if not DirAccess.dir_exists_absolute(root):
+			continue
+		var d := DirAccess.open(root)
+		if d == null:
+			continue
+		d.list_dir_begin()
+		var sub := d.get_next()
+		while sub != "":
+			if d.current_is_dir() and not sub.begins_with(".") and not seen.has(sub):
+				var vdir := root + sub + "/"
+				var meta_path := vdir + "vehicle.json"
+				if not FileAccess.file_exists(meta_path):
+					meta_path = vdir + "chassis.json"
+				if FileAccess.file_exists(meta_path):
+					seen[sub] = true
+					var disp := sub
+					var desc := ""
+					var f := FileAccess.open(meta_path, FileAccess.READ)
+					if f != null:
+						var parsed = JSON.parse_string(f.get_as_text())
+						f.close()
+						if parsed is Dictionary:
+							disp = String(parsed.get("display_name", sub))
+							desc = String(parsed.get("description", ""))
+					out.append({
+						"vehicle_id": sub,
+						"display_name": disp,
+						"description": desc,
+						"dir": vdir,
+					})
+			sub = d.get_next()
+		d.list_dir_end()
+		if not out.is_empty():
+			break
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return String(a["vehicle_id"]) < String(b["vehicle_id"])
+	)
+	return out
+
+
+func load_vehicle_configs(target_vehicle_id: String) -> bool:
+	var clean_id := target_vehicle_id.strip_edges()
+	if clean_id == "":
+		return false
+	for root in _vehicles_root_candidates():
+		var vdir := root + clean_id + "/"
+		if _has_vehicle_files(vdir):
+			vehicle_id = clean_id
+			load_configs(vdir)
+			return true
+	return false
+
+
 ## Loads configuration values from modular JSON files.
 func load_configs(custom_config_dir: String = "") -> void:
 	var base_dirs = [
@@ -189,24 +271,51 @@ func load_configs(custom_config_dir: String = "") -> void:
 		"Core/Config/"
 	]
 	
-	var found_dir = ""
+	var found_dir: String = ""
 	for d in base_dirs:
-		if d != "" and (DirAccess.dir_exists_absolute(d) or FileAccess.file_exists(d + "chassis.json")):
-			found_dir = d.rstrip("/") + "/"
+		var ds: String = str(d)
+		if _has_vehicle_files(ds):
+			found_dir = ds.rstrip("/") + "/"
 			break
 	
 	if found_dir == "":
 		update_derived_geometry()
 		return
 	
-	_load_chassis_json(found_dir + "chassis.json")
+	active_config_dir = found_dir
+	var chassis_file: String = found_dir + "vehicle.json"
+	if not FileAccess.file_exists(chassis_file):
+		chassis_file = found_dir + "chassis.json"
+	var drivetrain_file: String = found_dir + "powertrain.json"
+	if not FileAccess.file_exists(drivetrain_file):
+		drivetrain_file = found_dir + "drivetrain.json"
+	_load_chassis_json(chassis_file)
 	_load_suspension_json(found_dir + "suspension.json")
 	_load_tires_json(found_dir + "tires.json")
-	_load_drivetrain_json(found_dir + "drivetrain.json")
+	_load_drivetrain_json(drivetrain_file)
 	_load_brakes_json(found_dir + "brakes.json")
 	_load_aero_json(found_dir + "aero.json")
 	
 	update_derived_geometry()
+
+
+## Returns the tv_maps directory for the active vehicle (falling back to shared Core/Config/tv_maps/).
+func get_active_tv_maps_dir() -> String:
+	if active_config_dir != "" and DirAccess.dir_exists_absolute(active_config_dir + "tv_maps"):
+		return active_config_dir + "tv_maps/"
+	if vehicle_id != "":
+		for root in _vehicles_root_candidates():
+			var p := root + vehicle_id + "/tv_maps/"
+			if DirAccess.dir_exists_absolute(p):
+				return p
+	for fallback in [
+		"res://Scenes/Vehicle/Dynamics/Core/Config/tv_maps/",
+		"src/mirena_sim/Scenes/Vehicle/Dynamics/Core/Config/tv_maps/",
+		"Scenes/Vehicle/Dynamics/Core/Config/tv_maps/",
+	]:
+		if DirAccess.dir_exists_absolute(fallback):
+			return fallback
+	return "res://Scenes/Vehicle/Dynamics/Core/Config/tv_maps/"
 
 func _read_json_file(file_path: String) -> Dictionary:
 	if not FileAccess.file_exists(file_path):
@@ -224,6 +333,10 @@ func _load_chassis_json(file_path: String) -> void:
 	var d = _read_json_file(file_path)
 	if d.is_empty():
 		return
+	if d.has("vehicle_id"):
+		vehicle_id = String(d.get("vehicle_id", vehicle_id))
+	if d.has("display_name"):
+		display_name = String(d.get("display_name", display_name))
 	mass = float(d.get("mass", mass))
 	sprung_mass = float(d.get("sprung_mass", sprung_mass))
 	if d.has("unsprung_mass"):
@@ -381,6 +494,8 @@ func _load_tires_json(file_path: String) -> void:
 	track_temp_c = float(d.get("track_temp_c", track_temp_c))
 	tire_initial_temp_c = float(d.get("tire_initial_temp_c", tire_initial_temp_c))
 	tire_compound = String(d.get("tire_compound", tire_compound))
+	tire_pressure_front_bar = clampf(float(d.get("tire_pressure_front_bar", tire_pressure_front_bar)), 0.3, 2.5)
+	tire_pressure_rear_bar = clampf(float(d.get("tire_pressure_rear_bar", tire_pressure_rear_bar)), 0.3, 2.5)
 	if d.has("surface_grip_scale"):
 		surface_grip_scale = clampf(float(d.get("surface_grip_scale", surface_grip_scale)), 0.1, 1.5)
 	lambda_mux = clampf(float(d.get("lambda_mux", surface_grip_scale)), 0.1, 1.5)
@@ -416,7 +531,17 @@ func _load_drivetrain_json(file_path: String) -> void:
 	battery_capacity_kwh = maxf(0.01, float(d.get("battery_capacity_kwh", battery_capacity_kwh)))
 	inverter_tau_s = maxf(0.0, float(d.get("inverter_tau_s", inverter_tau_s)))
 	
-	var dm_str = str(d.get("drive_mode", "FOUR_WD"))
+	var dm_str := ""
+	if d.has("drive_type"):
+		var dt := String(d.get("drive_type", "")).strip_edges().to_upper()
+		if dt == "RWD" or dt == "REAR_WD" or dt == "2WD":
+			dm_str = "REAR_WD"
+		elif dt == "FWD" or dt == "FRONT_WD":
+			dm_str = "FRONT_WD"
+		elif dt == "4WD" or dt == "AWD" or dt == "FOUR_WD":
+			dm_str = "FOUR_WD"
+	if dm_str == "":
+		dm_str = str(d.get("drive_mode", "FOUR_WD"))
 	match dm_str:
 		"REAR_WD": drive_mode = DriveMode.REAR_WD
 		"FRONT_WD": drive_mode = DriveMode.FRONT_WD

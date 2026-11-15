@@ -1,0 +1,29 @@
+{
+  "vehicle_id": "ter26_rwd",
+  "display_name": "TeR26 RWD",
+  "description": "Monoplaza TeR26 traccion trasera RWD con doble motor trasero independiente y TV trasera",
+  "mass": 248.0,
+  "sprung_mass": 198.0,
+  "unsprung_mass": 12.5,
+  "unsprung_mass_total": 50.0,
+  "gravity": 9.81,
+  "wheelbase": 1.550,
+  "track_front": 1.210,
+  "track_rear": 1.200,
+  "track_width_front": 1.210,
+  "track_width_rear": 1.200,
+  "cg_height": 0.285,
+  "sprung_cg_height": 0.304,
+  "roll_center_height_front": 0.022,
+  "roll_center_height_rear": 0.042,
+  "front_weight_distribution": 0.44,
+  "weight_distribution_rear": 0.56,
+  "max_steer_angle": 0.38,
+  "ackermann_factor": -0.10,
+  "inertia": {
+    "ixx": 13.8,
+    "iyy": 74.5,
+    "izz": 73.0,
+    "ixz": -5.5
+  }
+}

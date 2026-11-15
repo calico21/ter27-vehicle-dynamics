@@ -20,7 +20,7 @@ const TestBrakeBlendingAndGripMap = preload("test_brake_blending_and_grip_map.gd
 const TestTelemetryInspector = preload("test_telemetry_inspector.gd")
 const AcceptanceManeuversSuite = preload("acceptance_maneuvers_suite.gd")
 const TestTVCharacterization = preload("test_tv_characterization.gd")
-const TestDilSessionLogger = preload("test_dil_session_logger.gd")
+const TestMultiVehicleSetup = preload("test_multi_vehicle_setup.gd")
 
 func _init() -> void:
 	print("\n========================================================")
@@ -46,9 +46,9 @@ func _init() -> void:
 		TestEcuTorqueVectoringV3,
 		TestBrakeBlendingAndGripMap,
 		TestTelemetryInspector,
+		TestMultiVehicleSetup,
 		AcceptanceManeuversSuite,
-		TestTVCharacterization,
-		TestDilSessionLogger
+		TestTVCharacterization
 	]
 	
 	var total_passed = 0

@@ -1,0 +1,21 @@
+{
+  "name": "autocross_wet",
+  "vehicle_id": "ter26_rwd",
+  "description": "Set-up TeR26 RWD mojado: suspension blanda, camber conservador y TV suave",
+  "spring_rate_front_n_m": 28000.0,
+  "spring_rate_rear_n_m": 38000.0,
+  "arb_front_nm_rad": 3500.0,
+  "arb_rear_nm_rad": 3000.0,
+  "camber_front_deg": -1.6,
+  "camber_rear_deg": -1.1,
+  "toe_front_deg": 0.05,
+  "toe_rear_deg": 0.25,
+  "ride_height_front_m": 0.040,
+  "ride_height_rear_m": 0.040,
+  "brake_bias": 0.64,
+  "tire_pressure_front_bar": 0.85,
+  "tire_pressure_rear_bar": 0.85,
+  "tv_map": "02_ter26_endurance_rwd.json",
+  "power_limit_kw": 65.0,
+  "control_law_mode": "v3"
+}

@@ -197,10 +197,16 @@ static func compute_blended_braking(
 	var p_charge_limit: float = p_max_charge_w * soc_scale
 	var allow_regen: bool = regen_enabled and absf(v_x) >= regen_min_speed and p_charge_limit > 0.0 and not override_trq
 
+	var dm: int = int(config.get("drive_mode", VehicleConfig.DriveMode.FOUR_WD)) if (config is Dictionary) else int(config.drive_mode)
 	for i in range(4):
 		var w_i: float = absf(float(wheel_omegas[i])) if i < wheel_omegas.size() else (absf(v_x) / wheel_radius)
 		omegas_abs[i] = w_i
-		if allow_regen and total_req[i] > 0.0 and w_i > 1e-4:
+		var axle_has_motor: bool = true
+		if dm == VehicleConfig.DriveMode.REAR_WD and i < 2:
+			axle_has_motor = false
+		elif dm == VehicleConfig.DriveMode.FRONT_WD and i >= 2:
+			axle_has_motor = false
+		if allow_regen and axle_has_motor and total_req[i] > 0.0 and w_i > 1e-4:
 			var speed_scale: float = _compute_motor_taper_scale(w_i, config)
 			var trq_motor_cap: float = motor_peak_trq * gear_ratio * speed_scale * soc_scale
 			var fz_i: float = maxf(float(wheel_fz[i]), 0.0) if i < wheel_fz.size() else (mass * gravity * 0.25)

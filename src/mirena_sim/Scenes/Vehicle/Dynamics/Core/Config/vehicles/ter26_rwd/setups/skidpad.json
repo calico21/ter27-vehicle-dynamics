@@ -1,0 +1,21 @@
+{
+  "name": "skidpad",
+  "vehicle_id": "ter26_rwd",
+  "description": "Set-up TeR26 RWD para Skidpad (mayor mordiente delantero, ARB trasera mas firme)",
+  "spring_rate_front_n_m": 34000.0,
+  "spring_rate_rear_n_m": 43000.0,
+  "arb_front_nm_rad": 4400.0,
+  "arb_rear_nm_rad": 4800.0,
+  "camber_front_deg": -2.4,
+  "camber_rear_deg": -1.6,
+  "toe_front_deg": -0.10,
+  "toe_rear_deg": 0.15,
+  "ride_height_front_m": 0.033,
+  "ride_height_rear_m": 0.035,
+  "brake_bias": 0.60,
+  "tire_pressure_front_bar": 0.70,
+  "tire_pressure_rear_bar": 0.70,
+  "tv_map": "01_ter26_race_rwd.json",
+  "power_limit_kw": 80.0,
+  "control_law_mode": "smc"
+}

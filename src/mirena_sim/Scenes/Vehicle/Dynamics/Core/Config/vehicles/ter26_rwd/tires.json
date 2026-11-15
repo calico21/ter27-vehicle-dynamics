@@ -1,0 +1,16 @@
+{
+  "wheel_radius": 0.2032,
+  "wheel_inertia": 0.35,
+  "tyre_mu_x": 1.6,
+  "tyre_mu_y": 1.5,
+  "slip_stiffness": 80000.0,
+  "cornering_stiffness": 45000.0,
+  "rolling_resistance_coeff": 0.015,
+  "slip_regularization_speed": 0.5,
+  "tire_vertical_stiffness": 115000.0,
+  "tire_compound": "R20",
+  "lambda_mux": 0.86,
+  "lambda_muy": 0.76,
+  "track_temp_c": 28.0,
+  "tire_initial_temp_c": 55.0
+}

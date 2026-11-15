@@ -1,0 +1,22 @@
+{
+  "_parameter_provenance": {
+    "estimated_configurable_placeholders": [
+      "air_density",
+      "cd_a",
+      "cl_a",
+      "aero_balance_front",
+      "static_ride_height_front",
+      "static_ride_height_rear",
+      "stall_ride_height_front"
+    ],
+    "notes": "Downforce splits across front and rear axles via aero_balance_front (or optional explicit cl_a_front / cl_a_rear): cl_a_front = cl_a * aero_balance_front, cl_a_rear = cl_a * (1 - aero_balance_front), producing real aerodynamic pitching moment around CoG, modulated by front/rear ground ride height."
+  },
+  "air_density": 1.225,
+  "cd_a": 1.5,
+  "cl_a": 6.0,
+  "aero_balance_front": 0.48,
+  "cp_height": 0.144,
+  "static_ride_height_front": 0.035,
+  "static_ride_height_rear": 0.035,
+  "stall_ride_height_front": 0.018
+}
