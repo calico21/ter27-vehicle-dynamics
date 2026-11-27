@@ -109,3 +109,11 @@ _archive_legacy/
 outputs/casadi_cache/*
 !outputs/casadi_cache/.gitkeep
 !outputs/casadi_cache/README.md
+
+# Large telemetry datasets and raw bags (>50 MB)
+data/telemetry_ter26/processed/ter26_clean_ground_truth.csv
+data/telemetry_ter26/processed/ter26_clean_ground_truth.parquet
+data/telemetry_ter26/raw_bags/*.log
+data/ttc_tire/Hoosier_18x6.0-10/Processed/R20_18x6_drive_brake_all.csv
+*.mcap
+*.bag
