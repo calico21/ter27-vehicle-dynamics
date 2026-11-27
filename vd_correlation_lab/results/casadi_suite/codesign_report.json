@@ -1,0 +1,357 @@
+{
+  "track": "fsg_2023",
+  "grip_profile": "FSG_REAL_TRACK",
+  "ocp_mode": "human_achievable",
+  "human_achievable_limits": {
+    "cone_margin_m": 0.22,
+    "max_steer_rate_deg_s": 32.0,
+    "max_beta_deg": 4.2,
+    "hv_bounds_kw": [
+      -25.0,
+      80.0
+    ],
+    "bspd_enforced": true,
+    "n_intervals": 260
+  },
+  "setup_bounds": {
+    "brake_bias_front": [
+      0.5,
+      0.72
+    ],
+    "gear_ratio": [
+      11.3988,
+      14.5392
+    ],
+    "v_max_kmh_equiv": [
+      98.0,
+      125.0
+    ],
+    "cop_front_frac": [
+      0.38,
+      0.56
+    ]
+  },
+  "nominal_ocp": {
+    "label": "nominal_setup",
+    "status": "Solve_Succeeded",
+    "iterations": 291,
+    "solve_time_s": 117.35,
+    "setup": {
+      "brake_bias_front": 0.58,
+      "gear_ratio": 12.5,
+      "v_max_gear_kmh": 113.99,
+      "cop_front_frac": 0.48,
+      "mass_kg": 290.0
+    },
+    "metrics": {
+      "ocp_lap_time_s": 66.4132,
+      "v_max_kmh": 109.79,
+      "ay_max_g": 1.516,
+      "ax_min_g": -2.067,
+      "ax_max_g": 1.251,
+      "beta_max_deg": 4.2,
+      "P_dc_min_kw": -24.394,
+      "P_dc_max_kw": 79.95,
+      "hv_violations": 0,
+      "bspd_violations": 9,
+      "min_cone_clearance_m": 0.22,
+      "cones_hit": 0,
+      "e_22km_kwh": 8.048
+    }
+  },
+  "codesign_optimal_ocp": {
+    "label": "codesign_optimal",
+    "status": "Solve_Succeeded",
+    "iterations": 242,
+    "solve_time_s": 90.45,
+    "setup": {
+      "brake_bias_front": 0.72,
+      "gear_ratio": 11.3988,
+      "v_max_gear_kmh": 125.0,
+      "cop_front_frac": 0.40701,
+      "mass_kg": 290.0
+    },
+    "metrics": {
+      "ocp_lap_time_s": 66.2342,
+      "v_max_kmh": 119.26,
+      "ay_max_g": 1.6,
+      "ax_min_g": -2.131,
+      "ax_max_g": 1.239,
+      "beta_max_deg": 4.2,
+      "P_dc_min_kw": -24.395,
+      "P_dc_max_kw": 79.95,
+      "hv_violations": 0,
+      "bspd_violations": 11,
+      "min_cone_clearance_m": 0.22,
+      "cones_hit": 0,
+      "e_22km_kwh": 8.825
+    }
+  },
+  "ocp_setup_gain": {
+    "delta_lap_time_s": -0.179,
+    "delta_pct": -0.27,
+    "optimal_vs_nominal": {
+      "brake_bias_front": {
+        "nominal": 0.58,
+        "optimal": 0.72,
+        "delta": 0.14
+      },
+      "gear_ratio": {
+        "nominal": 12.5,
+        "optimal": 11.3988,
+        "delta": -1.1012,
+        "v_max_gear_nom_kmh": 113.99,
+        "v_max_gear_opt_kmh": 125.0
+      },
+      "cop_front_frac": {
+        "nominal": 0.48,
+        "optimal": 0.40701,
+        "delta": -0.07299
+      }
+    }
+  },
+  "mass_sensitivity_sweep": {
+    "minus_15kg": {
+      "label": "mass_minus_15kg",
+      "status": "Solve_Succeeded",
+      "iterations": 176,
+      "solve_time_s": 67.17,
+      "setup": {
+        "brake_bias_front": 0.72,
+        "gear_ratio": 11.3988,
+        "v_max_gear_kmh": 125.0,
+        "cop_front_frac": 0.40701,
+        "mass_kg": 275.0
+      },
+      "metrics": {
+        "ocp_lap_time_s": 65.6981,
+        "v_max_kmh": 119.41,
+        "ay_max_g": 1.613,
+        "ax_min_g": -2.208,
+        "ax_max_g": 1.271,
+        "beta_max_deg": 4.2,
+        "P_dc_min_kw": -24.395,
+        "P_dc_max_kw": 79.95,
+        "hv_violations": 0,
+        "bspd_violations": 11,
+        "min_cone_clearance_m": 0.22,
+        "cones_hit": 0,
+        "e_22km_kwh": 8.55
+      }
+    },
+    "nominal_mass": {
+      "label": "codesign_optimal",
+      "status": "Solve_Succeeded",
+      "iterations": 242,
+      "solve_time_s": 90.45,
+      "setup": {
+        "brake_bias_front": 0.72,
+        "gear_ratio": 11.3988,
+        "v_max_gear_kmh": 125.0,
+        "cop_front_frac": 0.40701,
+        "mass_kg": 290.0
+      },
+      "metrics": {
+        "ocp_lap_time_s": 66.2342,
+        "v_max_kmh": 119.26,
+        "ay_max_g": 1.6,
+        "ax_min_g": -2.131,
+        "ax_max_g": 1.239,
+        "beta_max_deg": 4.2,
+        "P_dc_min_kw": -24.395,
+        "P_dc_max_kw": 79.95,
+        "hv_violations": 0,
+        "bspd_violations": 11,
+        "min_cone_clearance_m": 0.22,
+        "cones_hit": 0,
+        "e_22km_kwh": 8.825
+      }
+    },
+    "plus_15kg": {
+      "label": "mass_plus_15kg",
+      "status": "Solve_Succeeded",
+      "iterations": 46,
+      "solve_time_s": 18.24,
+      "setup": {
+        "brake_bias_front": 0.72,
+        "gear_ratio": 11.3988,
+        "v_max_gear_kmh": 125.0,
+        "cop_front_frac": 0.40701,
+        "mass_kg": 305.0
+      },
+      "metrics": {
+        "ocp_lap_time_s": 66.7406,
+        "v_max_kmh": 119.05,
+        "ay_max_g": 1.539,
+        "ax_min_g": -2.107,
+        "ax_max_g": 1.216,
+        "beta_max_deg": 4.2,
+        "P_dc_min_kw": -24.394,
+        "P_dc_max_kw": 79.95,
+        "hv_violations": 0,
+        "bspd_violations": 10,
+        "min_cone_clearance_m": 0.22,
+        "cones_hit": 0,
+        "e_22km_kwh": 9.086
+      }
+    },
+    "dt_dm_central_s_per_10kg": 0.3475,
+    "dt_dm_minus15_to_nom_s_per_10kg": 0.3574,
+    "dt_dm_nom_to_plus15_s_per_10kg": 0.3376
+  },
+  "marginal_sensitivity_table": [
+    {
+      "parameter": "mass_kg",
+      "perturbation": "+10.0 kg (central diff +/-15 kg)",
+      "delta_lap_time_s": 0.3475,
+      "units": "s / 10 kg"
+    },
+    {
+      "parameter": "brake_bias_front",
+      "perturbation": "+0.05 (0.58 -> 0.63)",
+      "delta_lap_time_s": -0.0315,
+      "units": "s / +0.05 bias"
+    },
+    {
+      "parameter": "gear_ratio",
+      "perturbation": "+1.0 (12.5 -> 13.5)",
+      "delta_lap_time_s": 0.1513,
+      "units": "s / +1.0 ratio"
+    },
+    {
+      "parameter": "cop_front_frac",
+      "perturbation": "+0.05 (0.48 -> 0.53)",
+      "delta_lap_time_s": 0.0551,
+      "units": "s / +0.05 CoP"
+    }
+  ],
+  "validation_14dof": {
+    "nominal_setup": {
+      "label": "nominal_setup",
+      "alpha_drv": 0.72,
+      "sim14dof_lap_time_s": 93.4431,
+      "valid": true,
+      "cones_hit": 0,
+      "corners_cones_hit": 0,
+      "off_track_ticks": 0,
+      "max_beta_deg": 8.6,
+      "p_dc_max_kw": 40.2,
+      "p_chg_min_kw": -24.42,
+      "hv_violations": 0,
+      "e_22km_kwh": 0.0,
+      "alpha_search_history": [
+        {
+          "alpha_drv": 0.85,
+          "strict_valid": false,
+          "lap_time_s": 999.0,
+          "cones_hit": 4,
+          "corners_cones_hit": 7,
+          "p_dc_max_kw": 78.26,
+          "p_chg_min_kw": -24.44
+        },
+        {
+          "alpha_drv": 0.795,
+          "strict_valid": false,
+          "lap_time_s": 84.6669,
+          "cones_hit": 2,
+          "corners_cones_hit": 8,
+          "p_dc_max_kw": 68.8,
+          "p_chg_min_kw": -24.44
+        },
+        {
+          "alpha_drv": 0.7675,
+          "strict_valid": false,
+          "lap_time_s": 86.7946,
+          "cones_hit": 0,
+          "corners_cones_hit": 10,
+          "p_dc_max_kw": 75.13,
+          "p_chg_min_kw": -24.44
+        },
+        {
+          "alpha_drv": 0.7537,
+          "strict_valid": false,
+          "lap_time_s": 87.9019,
+          "cones_hit": 0,
+          "corners_cones_hit": 3,
+          "p_dc_max_kw": 62.25,
+          "p_chg_min_kw": -24.44
+        },
+        {
+          "alpha_drv": 0.7469,
+          "strict_valid": false,
+          "lap_time_s": 90.1586,
+          "cones_hit": 0,
+          "corners_cones_hit": 1,
+          "p_dc_max_kw": 44.73,
+          "p_chg_min_kw": -24.44
+        }
+      ]
+    },
+    "codesign_optimal_setup": {
+      "label": "codesign_optimal",
+      "alpha_drv": 0.72,
+      "sim14dof_lap_time_s": 93.3671,
+      "valid": true,
+      "cones_hit": 0,
+      "corners_cones_hit": 0,
+      "off_track_ticks": 0,
+      "max_beta_deg": 8.8,
+      "p_dc_max_kw": 38.77,
+      "p_chg_min_kw": -24.44,
+      "hv_violations": 0,
+      "e_22km_kwh": 0.0,
+      "alpha_search_history": [
+        {
+          "alpha_drv": 0.85,
+          "strict_valid": false,
+          "lap_time_s": 999.0,
+          "cones_hit": 1,
+          "corners_cones_hit": 4,
+          "p_dc_max_kw": 79.06,
+          "p_chg_min_kw": -24.25
+        },
+        {
+          "alpha_drv": 0.795,
+          "strict_valid": false,
+          "lap_time_s": 999.0,
+          "cones_hit": 16,
+          "corners_cones_hit": 21,
+          "p_dc_max_kw": 60.33,
+          "p_chg_min_kw": -24.42
+        },
+        {
+          "alpha_drv": 0.7675,
+          "strict_valid": false,
+          "lap_time_s": 86.5677,
+          "cones_hit": 5,
+          "corners_cones_hit": 10,
+          "p_dc_max_kw": 74.46,
+          "p_chg_min_kw": -24.45
+        },
+        {
+          "alpha_drv": 0.7537,
+          "strict_valid": false,
+          "lap_time_s": 88.294,
+          "cones_hit": 0,
+          "corners_cones_hit": 4,
+          "p_dc_max_kw": 57.38,
+          "p_chg_min_kw": -24.45
+        },
+        {
+          "alpha_drv": 0.7469,
+          "strict_valid": false,
+          "lap_time_s": 89.0667,
+          "cones_hit": 0,
+          "corners_cones_hit": 1,
+          "p_dc_max_kw": 44.87,
+          "p_chg_min_kw": -24.45
+        }
+      ]
+    },
+    "delta_lap_time_s": -0.076,
+    "delta_pct": -0.081,
+    "zero_cones_hit": true,
+    "zero_hv_violations": true
+  },
+  "total_runtime_s": 840.91
+}

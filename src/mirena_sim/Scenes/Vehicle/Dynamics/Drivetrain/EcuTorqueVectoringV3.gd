@@ -1,9 +1,9 @@
 class_name EcuTorqueVectoringV3
 extends RefCounted
 
-## 4WD (TeR27) port of the ECU Torque Vectoring v3 + Adaptive RLS Traction Control pipeline.
-## Faithfully ports gp_math, gp_ekf, gp_vehicle_model, gp_solver, gp_traction_control,
-## and gp_torque_vectoring, generalized to 4 independent in-hub motors [FL, FR, RL, RR] at 200 Hz.
+## 4wd (ter27) port of the ecu torque vectoring v3 + adaptive rls traction control pipeline
+## faithfully ports gp_math, gp_ekf, gp_vehicle_model, gp_solver, gp_traction_control,
+## and gp_torque_vectoring, generalized to 4 independent in-hub motors [fl, fr, rl, rr] at 200 hz
 
 const TvSilBridgeScript = preload("res://addons/rclgd/tv_sil_bridge.gd")
 
@@ -58,11 +58,11 @@ const TV_MAP_PROFILES: Dictionary = {
 	}
 }
 
-# ── TeR27 Vehicle & Actuator Parameters ─────────────────────────────────────
+# ter27 vehicle & actuator parameters
 const GP_MASS: float = 290.0
 const GP_IZ: float = 137.2
 const GP_WB: float = 1.540
-const GP_LF: float = 0.847            # 0.55 * 1.540 (45% Front / 55% Rear static)
+const GP_LF: float = 0.847            # 0.55 * 1.540 (45% front / 55% rear static)
 const GP_LR: float = 0.693            # 0.45 * 1.540
 const GP_TRACK_F: float = 1.230
 const GP_TRACK_R: float = 1.230
@@ -75,20 +75,20 @@ const GP_AERO_CL_REAR: float = 3.30
 const GP_AERO_AREA: float = 1.0
 const GP_AIR_DENSITY: float = 1.225
 
-const GP_MAX_TRQ_ACT: float = 312.5   # 25 Nm motor * 12.5 gear ratio [Nm at wheel]
-const GP_P_MAX_WHL: float = 32000.0   # Per-inverter hardware power cap [W mech per wheel]
-const GP_P_MAX_TOTAL_MECH: float = 72000.0 # 80 kW DC bus * 0.90 efficiency [W mech total]
+const GP_MAX_TRQ_ACT: float = 312.5   # 25 nm motor * 12.5 gear ratio [nm at wheel]
+const GP_P_MAX_WHL: float = 32000.0   # per-inverter hardware power cap [w mech per wheel]
+const GP_P_MAX_TOTAL_MECH: float = 72000.0 # 80 kw dc bus * 0.90 efficiency [w mech total]
 const GP_MOTOR_MAX_RPM: float = 22000.0
 const GP_MOTOR_TAPER_RATIO: float = 0.85
 const GP_GEAR_RATIO: float = 12.5
 const GP_I_WHEEL_EST: float = 0.5075  # [kg*m^2]
 
-# ── Hardware Realism (CAN Latency & Encoder Quantization) ───────────────────
+# hardware realism (can latency & encoder quantization)
 const DEFAULT_CAN_LATENCY_MS: float = 12.0
 const DEFAULT_ENCODER_PPR: int = 4096
 const RING_BUFFER_CAPACITY: int = 64
 
-# ── Tire & Understeer Reference ─────────────────────────────────────────────
+# tire & understeer reference
 const GP_C_ALPHA_F: float = 35000.0
 const GP_C_ALPHA_R: float = 32000.0
 const GP_MU_NOM: float = 1.86
@@ -97,7 +97,7 @@ const GP_MU_DEG_FZ: float = 0.00012
 const GP_K_US: float = 0.015
 const GP_K_US_FZ: float = 0.0015
 
-# ── Control, QP & Filtering Constants ───────────────────────────────────────
+# control, qp & filtering constants
 const GP_W_SMOOTH: float = 5.999
 const GP_W_REG: float = 0.401
 const GP_TV_MAX_MZ: float = 500.0
@@ -107,9 +107,9 @@ const GP_STEER_DEADZONE_RAD: float = 0.0087
 const GP_YAW_DEADZONE_RADS: float = 0.0175
 const GP_ACCEL_LPF_TAU: float = 0.0200
 const GP_UB_LPF_TAU: float = 0.0300
-const FIXED_DT: float = 0.005         # 200 Hz ECU rate
+const FIXED_DT: float = 0.005         # 200 hz ecu rate
 
-# ── Traction Control RLS Constants ──────────────────────────────────────────
+# traction control rls constants
 const GP_TC_KP: float = 23.113
 const GP_TC_KI: float = 12.0
 const GP_TC_B0: float = 14.0
@@ -146,7 +146,7 @@ const KD_MAP: Array[float] = [
 	12.0, 18.0, 25.0, 30.0
 ]
 
-# ── EKF State (2 states: [vy, bw]) ──────────────────────────────────────────
+# ekf state (2 states: [vy, bw])
 var ekf_x: Array[float] = [0.0, 0.0]
 var ekf_p: Array[Array] = [[0.10, 0.0], [0.0, 0.01]]
 var ekf_q: Array[float] = [0.0500, 0.0001]
@@ -156,7 +156,7 @@ var ekf_beta_est: float = 0.0
 var ekf_vy_std: float = sqrt(0.10)
 var ekf_wz_corrected: float = 0.0
 
-# ── TV Controller State ─────────────────────────────────────────────────────
+# tv controller state
 var wz_int: float = 0.0
 var delta_prev: float = 0.0
 var t_qp_prev: Array[float] = [0.0, 0.0, 0.0, 0.0]
@@ -169,7 +169,7 @@ var ay_filt: float = 0.0
 var mz_sat_ratio: float = 1.0
 var qp_residual: float = 0.0
 
-# ── 4WD Traction Control RLS State ──────────────────────────────────────────
+# 4wd traction control rls state
 var tc_pi_integral: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var tc_kappa_filt: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var tc_mu_surface: Array[float] = [GP_TC_MU_NOM, GP_TC_MU_NOM, GP_TC_MU_NOM, GP_TC_MU_NOM]
@@ -181,8 +181,8 @@ var tc_kappa_prev: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var tc_fx_prev: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var tc_kappa_opt: Array[float] = [0.11, 0.11, 0.11, 0.11]
 
-# ── Live Map Profile & Active Tunables ──────────────────────────────────────
-const TV_MAPS_RES_DIR := "res://Scenes/Vehicle/Dynamics/Core/Config/tv_maps/"
+# live map profile & active tunables
+const TV_MAPS_RES_DIR := "res://Scenes/Vehicle/Config/legacy_v3_tv_maps/"
 const TV_MAPS_USER_DIR := "user://tv_maps/"
 const TV_MAP_PROTECTED_FILE := "00_open_4wd.json"
 
@@ -208,13 +208,13 @@ var rear_split_active: float = 0.65
 var open_4wd_tc_enabled: bool = false
 var _custom_params_active: bool = false
 
-# ── Live DiL Tuning Parameters (mutable without resetting EKF) ──────────────
+# live dil tuning parameters (mutable without resetting ekf)
 enum DriveLayout { AWD_4WD = 0, RWD_2WD = 1 }
 var drive_layout: int = DriveLayout.AWD_4WD
 var active_vehicle_id: String = "ter27_4wd"
 var active_tv_maps_dir: String = TV_MAPS_RES_DIR
 
-# Runtime vehicle/powertrain parameters synced from VehicleConfig
+# runtime vehicle/powertrain parameters synced from vehicleconfig
 var _cfg_mass: float = GP_MASS
 var _cfg_r_wheel: float = GP_R_WHEEL
 var _cfg_gear_ratio: float = GP_GEAR_RATIO
@@ -261,7 +261,7 @@ var live_k_beta: float = 4500.0
 var live_throttle_mz_cut: float = 0.40
 var live_grip_cap: float = 0.94
 
-# ── V4_SMC_HYBRID Parameters & Notch / SMC State ────────────────────────────
+# v4_smc_hybrid parameters & notch / smc state
 var live_smc_k_gain: float = 920.0
 var live_smc_k_ffd: float = 95.0
 var live_smc_lambda_beta: float = 6.8
@@ -279,7 +279,7 @@ var smc_s_int: float = 0.0
 var last_smc_s: float = 0.0
 var last_tc_kappa_lim: Array[float] = [0.040, 0.040, 0.040, 0.040]
 
-# ── Hardware Realism (CAN Latency & Encoder Quantization) ───────────────────
+# hardware realism (can latency & encoder quantization)
 var hardware_realism_enabled: bool = false:
 	set(value):
 		hardware_realism_enabled = value
@@ -303,18 +303,18 @@ var _cmd_rb_head: int = 0
 var _cmd_rb_count: int = 0
 var _sim_time_s: float = 0.0
 
-# ── C/C++ SIL Bridge ────────────────────────────────────────────────────────
+# c/c++ sil bridge
 var sil_bridge: TvSilBridgeScript = null
 var use_native_sil: bool = false
 
-# ── Fixed-rate 200 Hz Accumulator & Telemetry ───────────────────────────────
+# fixed-rate 200 hz accumulator & telemetry
 var _time_acc: float = 0.0
 var last_t_cmd: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var last_wz_ref: float = 0.0
 var last_mz_req: float = 0.0
 var tc_active: bool = false
 
-# ── Internal 8-Stage X-Ray Telemetry (zero-alloc in-place updates) ──────────
+# internal 8-stage x-ray telemetry (zero-alloc in-place updates)
 var last_vy_ss: float = 0.0
 var last_ff_mz: float = 0.0
 var last_p_mz: float = 0.0
@@ -400,7 +400,7 @@ func reset() -> void:
 	if sil_bridge != null and sil_bridge.is_using_native_sil():
 		sil_bridge.gp_tv_init(null)
 
-## Selects one of the 4 live TV calibration maps (OPEN_4WD, ENDURANCE_SAFE, AUTOCROSS_NEUTRAL, SKIDPAD_ATTACK).
+## selects one of the 4 live tv calibration maps (open_4wd, endurance_safe, autocross_neutral, skidpad_attack)
 func set_map(map_id: int) -> void:
 	var clamped_id: int = clampi(map_id, TVMap.OPEN_4WD, TVMap.SKIDPAD_ATTACK)
 	active_map_id = clamped_id
@@ -421,7 +421,7 @@ func set_map(map_id: int) -> void:
 	live_grip_cap = 0.87 if clamped_id == TVMap.ENDURANCE_SAFE else (0.97 if clamped_id == TVMap.SKIDPAD_ATTACK else 0.94)
 	_custom_params_active = false
 
-## Cycles to the next live TV map across all JSON files in tv_maps/ and returns the new index.
+## cycles to the next live tv map across all json files in tv_maps/ and returns the new index
 func cycle_map() -> int:
 	var maps: Array[Dictionary] = list_available_tv_maps()
 	if maps.is_empty():
@@ -439,7 +439,7 @@ func cycle_map() -> int:
 	load_tv_map_from_file(String(maps[next_idx]["path"]))
 	return next_idx
 
-## Returns the human-readable name of the currently active TV map profile.
+## returns the human-readable name of the currently active tv map profile
 func get_map_name() -> String:
 	if _custom_params_active:
 		return "CUSTOM"
@@ -449,7 +449,7 @@ func get_map_name() -> String:
 		return String(TV_MAP_PROFILES[active_map_id]["name"])
 	return "UNKNOWN"
 
-## Applies custom live calibration parameters without altering the static reference constants.
+## applies custom live calibration parameters without altering the static reference constants
 func set_custom_parameters(k_us: float, max_mz: float, tc_kp: float, min_fx_reserve: float) -> void:
 	k_us_active = k_us
 	tv_max_mz_active = maxf(max_mz, 0.0)
@@ -461,7 +461,7 @@ func set_custom_parameters(k_us: float, max_mz: float, tc_kp: float, min_fx_rese
 	live_min_fx_reserve = min_fx_reserve_active
 	_custom_params_active = true
 
-## Returns a Dictionary snapshot of all live-tunable DiL TV parameters.
+## returns a dictionary snapshot of all live-tunable dil tv parameters
 func get_live_params() -> Dictionary:
 	return {
 		"control_law_mode": float(control_law_mode),
@@ -481,7 +481,7 @@ func get_live_params() -> Dictionary:
 		"can_latency_ms": can_latency_ms
 	}
 
-## Updates a single live TV parameter in-place without resetting EKF or thermal states.
+## updates a single live tv parameter in-place without resetting ekf or thermal states
 func set_live_param(key: String, val: float) -> void:
 	match key:
 		"control_law_mode":
@@ -522,7 +522,7 @@ func set_live_param(key: String, val: float) -> void:
 			hardware_realism_enabled = can_latency_ms > 0.0
 	_custom_params_active = true
 
-## Arms Launch Control when stationary (vx < 0.5 m/s) with brake held (> 0.25).
+## arms launch control when stationary (vx < 0.5 m/s) with brake held (> 0.25)
 func request_launch_control_arm(vx: float = 0.0, brake_norm: float = 1.0) -> bool:
 	if absf(vx) < 0.5 and brake_norm > 0.25:
 		launch_state = LaunchState.LC_ARMED
@@ -534,7 +534,7 @@ func request_launch_control_arm(vx: float = 0.0, brake_norm: float = 1.0) -> boo
 	_lc_arm_requested = false
 	return false
 
-## Cancels Launch Control and returns smoothly to normal TV control.
+## cancels launch control and returns smoothly to normal tv control
 func disarm_launch_control() -> void:
 	launch_state = LaunchState.LC_OFF
 	_lc_arm_requested = false
@@ -566,7 +566,7 @@ func get_event_mode_display() -> String:
 		_:
 			return "Autocross Pivot"
 
-## Selects the first TV map matching the requested Formula Student event mode.
+## selects the first tv map matching the requested formula student event mode
 func set_event_mode(mode_key: String) -> bool:
 	var target: String = mode_key.to_lower().strip_edges()
 	var maps: Array[Dictionary] = list_available_tv_maps()
@@ -579,7 +579,7 @@ func set_event_mode(mode_key: String) -> bool:
 	active_event_mode = target
 	return false
 
-## Exports the current live TV tuning parameters as a C/C++ #define header snippet for TeR_ECU.
+## exports the current live tv tuning parameters as a c/c++ #define header snippet for ter_ecu
 func export_c_header_snippet() -> String:
 	var dt := Time.get_datetime_string_from_system(false, true)
 	var setup_label := active_map_display_name if active_map_display_name != "" else get_map_name()
@@ -595,7 +595,7 @@ func export_c_header_snippet() -> String:
 		+ "#define GP_CAN_LATENCY_MS    %.1ff\n" % can_latency_ms
 	)
 
-## Configures vehicle geometry, powertrain limits, drive layout (4WD vs RWD), and active TV map directory.
+## configures vehicle geometry, powertrain limits, drive layout (4wd vs rwd), and active tv map directory
 func configure_from_vehicle_config(cfg: VehicleConfig) -> void:
 	if cfg == null:
 		return
@@ -623,7 +623,7 @@ func configure_from_vehicle_config(cfg: VehicleConfig) -> void:
 		rear_split_active = 1.0 - front_split_active
 
 
-## Loads the first TV map matching a filename or display name inside the active vehicle's tv_maps/.
+## loads the first tv map matching a filename or display name inside the active vehicle's tv_maps/
 func load_tv_map_by_filename(target: String) -> bool:
 	var key := target.strip_edges().to_lower()
 	if key == "":
@@ -639,7 +639,7 @@ func load_tv_map_by_filename(target: String) -> bool:
 	return false
 
 
-## Scans active vehicle tv_maps/ and user://tv_maps/ for .json TV setups sorted alphabetically.
+## scans active vehicle tv_maps/ and user://tv_maps/ for .json tv setups sorted alphabetically
 func list_available_tv_maps() -> Array[Dictionary]:
 	var entries: Array[Dictionary] = []
 	var seen_names: Dictionary = {}
@@ -684,7 +684,7 @@ func _read_tv_map_metadata(file_path: String) -> Dictionary:
 		return parsed
 	return {}
 
-## Loads a TV setup JSON file and applies its parameters in-place without resetting EKF or thermal states.
+## loads a tv setup json file and applies its parameters in-place without resetting ekf or thermal states
 func load_tv_map_from_file(file_path: String) -> bool:
 	var f := FileAccess.open(file_path, FileAccess.READ)
 	if f == null:
@@ -769,7 +769,7 @@ func load_tv_map_from_file(file_path: String) -> bool:
 			break
 	return true
 
-## Saves current live TV parameters to a JSON file in tv_maps/ and refreshes the map list.
+## saves current live tv parameters to a json file in tv_maps/ and refreshes the map list
 func save_current_tv_map_to_file(map_name: String, description: String = "", overwrite_path: String = "") -> String:
 	var target_path := overwrite_path
 	if target_path == "":
@@ -814,7 +814,7 @@ func save_current_tv_map_to_file(map_name: String, description: String = "", ove
 	list_available_tv_maps()
 	return target_path
 
-## Deletes a TV map JSON file, protecting 00_open_4wd.json.
+## deletes a tv map json file, protecting 00_open_4wd.json
 func delete_tv_map_file(file_path: String) -> bool:
 	if file_path == "" or file_path.get_file() == TV_MAP_PROTECTED_FILE:
 		return false
@@ -837,7 +837,7 @@ func _sanitize_map_filename(raw_name: String) -> String:
 				out += "_"
 	return out.strip_edges().trim_prefix("_").trim_suffix("_")
 
-## Enables or disables CAN bus latency + 4096 PPR encoder quantization simulation.
+## enables or disables can bus latency + 4096 ppr encoder quantization simulation
 func set_hardware_realism(
 	enabled: bool,
 	latency_ms: float = DEFAULT_CAN_LATENCY_MS,
@@ -854,8 +854,8 @@ func set_hardware_realism(
 		sensor_quantization_enabled = false
 	_reset_ring_buffers()
 
-## Requests switching between GDScript and native C/C++ GDExtension SIL backend.
-## Falls back safely to GDScript when native `GpTorqueVectoringSIL` is not registered.
+## requests switching between gdscript and native c/c++ gdextension sil backend
+## falls back safely to gdscript when native `gptorquevectoringsil` is not registered
 func set_use_native_sil(enabled: bool) -> bool:
 	if sil_bridge == null:
 		sil_bridge = TvSilBridgeScript.new(false)
@@ -910,7 +910,7 @@ static func _sample_ring_buffer(buf: Array[Dictionary], head: int, count: int, c
 			return entry
 	return buf[oldest_idx]
 
-## Quantizes wheel angular speed using integer encoder quadrature counts over window `dt`.
+## quantizes wheel angular speed using integer encoder quadrature counts over window `dt`
 static func quantize_wheel_omega(omega_rad_s: float, dt: float, ppr: int = DEFAULT_ENCODER_PPR) -> float:
 	var window_dt: float = dt if dt > 1e-6 else FIXED_DT
 	var ticks_per_rev: float = float(maxi(ppr, 1)) * 4.0
@@ -927,7 +927,7 @@ static func _compute_motor_speed_scale(wheel_omega: float) -> float:
 		return 0.0
 	return clampf(1.0 - (w_abs - omega_taper_start) / maxf(omega_max_wheel - omega_taper_start, 1e-5), 0.0, 1.0)
 
-# ── gp_math ──────────────────────────────────────────────────────────────────
+# gp_math
 static func gp_softplus(x: float) -> float:
 	if x > 20.0:
 		return x
@@ -960,14 +960,14 @@ static func gp_bilinear_interp_4x4(table: Array[float], x_norm: float, y_norm: f
 		+ c11 * fx * fy
 	)
 
-# ── gp_ekf ───────────────────────────────────────────────────────────────────
+# gp_ekf
 func gp_ekf_predict(delta: float, ax_f: float, ay_f: float, wz_raw: float, vx: float, dt: float) -> void:
 	var _unused = ax_f
 	var _unused_d = delta
 	var vx_safe: float = maxf(absf(vx), 0.5)
 	ekf_wz_corrected = wz_raw - ekf_x[1]
 
-	# Heun RK2 integration
+	# heun rk2 integration
 	var vy_dot_k: float = ay_f - (vx_safe * ekf_wz_corrected)
 	var _vy_pred: float = clampf(ekf_x[0] + vy_dot_k * dt, -6.0, 6.0)
 	var vy_dot_corr: float = ay_f - (vx_safe * ekf_wz_corrected)
@@ -1043,7 +1043,7 @@ func gp_ekf_update_kinematic_ss(ax_f: float, ay_f: float, wz_raw: float, vx: flo
 func gp_ekf_update_friction() -> void:
 	ekf_x[1] = clampf(ekf_x[1], -0.10, 0.10)
 
-# ── gp_vehicle_model (4WD TeR27) ────────────────────────────────────────────
+# gp_vehicle_model (4wd ter27)
 static func gp_estimate_fz(vx: float, ax: float, ay: float) -> Array[float]:
 	var total_weight: float = GP_MASS * GP_GRAVITY
 	var inv_wb: float = 1.0 / (GP_WB + 1e-3)
@@ -1149,7 +1149,7 @@ static func gp_moment_arms() -> Array[float]:
 	var hw_r: float = 0.5 * GP_TRACK_R / GP_R_WHEEL
 	return [-hw_f, hw_f, -hw_r, hw_r]
 
-# ── gp_solver (4WD) ──────────────────────────────────────────────────────────
+# gp_solver (4wd)
 static func gp_nominal_allocation_4wd(
 	fx_driver: float,
 	mz_target: float,
@@ -1212,8 +1212,8 @@ func _gp_nominal_allocation_rwd(fx_driver: float, mz_target: float) -> Array[flo
 	]
 
 
-## Exact closed-form KKT active-set water-filling solver for 4WD:
-## min_{T} 0.5 * sum((T_i - T_blend_i)^2) s.t. sum(T_i) = T_target, T_lb_i <= T_i <= T_ub_i.
+## exact closed-form kkt active-set water-filling solver for 4wd:
+## min_{t} 0.5 * sum((t_i - t_blend_i)^2) s.t. sum(t_i) = t_target, t_lb_i <= t_i <= t_ub_i
 static func gp_qp_solve_4wd_closedform(
 	t_warmstart: Array[float],
 	t_prev: Array[float],
@@ -1287,7 +1287,7 @@ static func gp_qp_solve_4wd_closedform(
 	var residual: float = absf(a_eq * t_sum - fx_driver)
 	return {"torques": t_sol, "residual": residual}
 
-# ── gp_traction_control (4WD RLS) ───────────────────────────────────────────
+# gp_traction_control (4wd rls)
 static func _tc_kappa_star(fz: float, mu_rt: float) -> float:
 	var b_eff: float = maxf(GP_TC_B0 + GP_TC_B1 * fz, 2.0)
 	var kappa_nom: float = tan(PI / (2.0 * GP_TC_C_PAC)) / b_eff
@@ -1350,7 +1350,7 @@ func gp_tc_step_4wd(
 		var sign_i: float = -1.0 if t_req_out[i] < 0.0 else 1.0
 		var mag_in: float = absf(t_req_out[i])
 
-		# Project velocity onto steered wheel plane for front wheels so steering does not fake slip
+		# project velocity onto steered wheel plane for front wheels so steering does not fake slip
 		var vx_wheel: float = vx
 		if i < 2:
 			var delta_i: float = wheel_steers[i] if i < wheel_steers.size() else 0.0
@@ -1440,7 +1440,7 @@ func gp_tc_step_4wd(
 		t_req_out[i] = sign_i * mag_out
 	tc_active = any_tc_cut
 
-## 2nd-order IIR biquad notch filter (default f0=25 Hz, Q=3.5) for clean steering feedforward.
+## 2nd-order iir biquad notch filter (default f0=25 hz, q=3.5) for clean steering feedforward
 func gp_biquad_notch_step(x: float, dt: float, f0: float = 25.0, q_val: float = 3.5) -> float:
 	var dt_safe: float = maxf(dt, 1e-4)
 	if f0 * dt_safe >= 0.49:
@@ -1465,7 +1465,7 @@ func gp_biquad_notch_step(x: float, dt: float, f0: float = 25.0, q_val: float = 
 	_notch_y1 = y
 	return y
 
-## Deterministic, highly restrictive combined-ellipse Traction Control for V4_SMC_HYBRID.
+## deterministic, highly restrictive combined-ellipse traction control for v4_smc_hybrid
 func _gp_tc_step_4wd_smc(
 	t_req_out: Array[float],
 	omega: Array[float],
@@ -1533,7 +1533,7 @@ func _gp_tc_step_4wd_smc(
 			if absf(tc_pi_integral[i]) < 0.05:
 				tc_pi_integral[i] = 0.0
 
-	# Preserve yaw moment direction/magnitude via soft_cap if TC cut creates an unwanted Mz spike
+	# preserve yaw moment direction/magnitude via soft_cap if tc cut creates an unwanted mz spike
 	if any_tc_cut:
 		var dt_after: float = (t_req_out[1] - t_req_out[0]) + (t_req_out[3] - t_req_out[2])
 		if absf(dt_after) > maxf(absf(dt_before), 20.0):
@@ -1550,7 +1550,7 @@ func _gp_tc_step_4wd_smc(
 				t_req_out[2] *= sc_l
 	tc_active = any_tc_cut
 
-# ── gp_torque_vectoring (200 Hz 8-stage step) ───────────────────────────────
+# gp_torque_vectoring (200 hz 8-stage step)
 func step(
 	fx_driver: float,
 	delta: float,
@@ -1860,7 +1860,7 @@ func _gp_tv_step(
 		last_mz_req = 0.0
 		return
 
-	# Stage 1: Standstill hold (bypassed when Launch Control is active)
+	# stage 1: standstill hold (bypassed when launch control is active)
 	if vx < 1.0 and brake_norm > 0.5 and fx_driver > 500.0 and not lc_engaged:
 		for i in range(4):
 			var hold_i: float = 0.0 if (drive_layout == DriveLayout.RWD_2WD and i < 2) else 7.5
@@ -1874,7 +1874,7 @@ func _gp_tv_step(
 		last_mz_req = 0.0
 		return
 
-	# Stage 2: Deadzones & Acceleration LPF
+	# stage 2: deadzones & acceleration lpf
 	var delta_dz: float = 0.0 if absf(delta) < GP_STEER_DEADZONE_RAD else delta
 	var wz_dz: float = 0.0 if absf(wz) < GP_YAW_DEADZONE_RADS else wz
 
@@ -1884,7 +1884,7 @@ func _gp_tv_step(
 
 	var vx_safe: float = maxf(absf(vx), 0.5)
 
-	# Stage 3: EKF 2-state [vy, bw]
+	# stage 3: ekf 2-state [vy, bw]
 	gp_ekf_predict(delta_dz, ax_filt, ay_filt, wz_dz, vx, dt)
 	gp_ekf_update_gps(vy_gps, gps_valid)
 	gp_ekf_update_kinematic_ss(ax_filt, ay_filt, wz_dz, vx)
@@ -1893,11 +1893,11 @@ func _gp_tv_step(
 	var wz_corr: float = ekf_wz_corrected
 	var beta: float = ekf_beta_est
 
-	# Stage 4: 4WD Tire Load & Lateral Force Estimation
+	# stage 4: 4wd tire load & lateral force estimation
 	var fz_est: Array[float] = gp_estimate_fz(vx, ax_filt, ay_filt)
 	var fy_est: Array[float] = gp_estimate_fy(vx, vy_est, wz_corr, delta_dz, fz_est)
 
-	# Map 0 (OPEN_4WD): symmetric axle split with Mz = 0, respecting power & max motor speed limits
+	# map 0 (open_4wd): symmetric axle split with mz = 0, respecting power & max motor speed limits
 	var is_open_map: bool = (active_map_filename == "00_open_4wd") or (active_map_path == "" and active_map_id == TVMap.OPEN_4WD)
 	if is_open_map and not _custom_params_active:
 		var k_us_open: float = gp_adaptive_k_us_param(fz_est, k_us_active)
@@ -1961,7 +1961,7 @@ func _gp_tv_step(
 			last_t_cmd[i] = t_open[i]
 		return
 
-	# Stage 5: Physical Grip-Capped Yaw-Rate Reference & Moment Law (V3_PID_ALQP or V4_SMC_HYBRID)
+	# stage 5: physical grip-capped yaw-rate reference & moment law (v3_pid_alqp or v4_smc_hybrid)
 	var mu_avg: float = 0.25 * (tc_mu_surface[0] + tc_mu_surface[1] + tc_mu_surface[2] + tc_mu_surface[3])
 	var k_us: float = gp_adaptive_k_us_param(fz_est, k_us_active)
 	var wz_kin: float = (vx_safe * delta_dz) / (GP_WB + k_us * vx_safe * vx_safe)
@@ -1987,11 +1987,11 @@ func _gp_tv_step(
 		_smc_wz_prev = wz_corr
 		_smc_wz_dot_filt += clampf(dt / (0.040 + dt), 0.0, 1.0) * (raw_wz_dot - _smc_wz_dot_filt)
 
-		# Instantaneous IMU sideslip rate & velocity-growing beta shield
+		# instantaneous imu sideslip rate & velocity-growing beta shield
 		var beta_dot_imu: float = (ay_filt / maxf(vx_safe, 3.0)) - wz_corr
 		var lambda_beta_eff: float = live_smc_lambda_beta * (1.0 + 0.048 * vx_safe)
 
-		# ISO/ROS (+Y left): left oversteer => vy < 0 => beta < 0 => needs Mz < 0, so +lambda_beta * beta brakes drift
+		# iso/ros (+y left): left oversteer => vy < 0 => beta < 0 => needs mz < 0, so +lambda_beta * beta brakes drift
 		var beta_excess: float = maxf(0.0, absf(beta) - 0.022)
 		var beta_emg: float = (1.0 if beta >= 0.0 else -1.0) * 1200.0 * beta_excess * beta_excess
 		var s_instant: float = wz_err + lambda_beta_eff * beta + 0.45 * beta_dot_imu + beta_emg
@@ -2007,7 +2007,7 @@ func _gp_tv_step(
 		var hs_authority_scale: float = clampf(1.32 - 0.026 * vx_safe, 0.48, 1.0)
 		var smc_mz: float = live_smc_k_gain * hs_authority_scale * tanh(s_surface / phi_eff)
 
-		# Pivot feedforward: only in slow/medium corners (< 60 km/h) before 80% target yaw rate, zero if drifting
+		# pivot feedforward: only in slow/medium corners (< 60 km/h) before 80% target yaw rate, zero if drifting
 		var ff_allowed: bool = (vx_safe < FAST_CORNER_VX_MS) and (absf(wz_corr) < 0.80 * absf(wz_ref)) and (absf(beta) < 0.015)
 		ff_mz = (live_smc_k_ffd * delta_dot_notch) if ff_allowed else 0.0
 
@@ -2039,7 +2039,7 @@ func _gp_tv_step(
 
 		var vy_std_clamped: float = clampf(ekf_vy_std, 0.0, 0.3)
 		var k_beta_dynamic: float = live_k_beta * (1.0 + 2.0 * vy_std_clamped)
-		# ISO/ROS (+X fwd, +Y left): left oversteer => vy < 0 => beta < 0 => needs Mz < 0 (+k_beta * beta)
+		# iso/ros (+x fwd, +y left): left oversteer => vy < 0 => beta < 0 => needs mz < 0 (+k_beta * beta)
 		beta_term = clampf(k_beta_dynamic * beta, -1200.0, 1200.0)
 
 		var is_oversteering: bool = absf(wz_corr) > absf(wz_ref) + 0.03 and (wz_corr * wz_ref) > 0.0
@@ -2052,7 +2052,7 @@ func _gp_tv_step(
 		var os_gate: float = 1.0 - gp_sigmoid((absf(wz_corr) - absf(wz_ref) - 0.04) * 15.0)
 		var counter_steer_factor: float = 1.0 - gp_sigmoid(-(delta_dz * wz_corr + 0.05) * 40.0)
 
-		# Gate only pro-turn feedforward; keep stabilizing feedback active during oversteer/countersteer
+		# gate only pro-turn feedforward; keep stabilizing feedback active during oversteer/countersteer
 		ff_mz = kd * delta_dot * (vx_safe / 10.0) * os_gate * counter_steer_factor
 		p_mz = kp * wz_err
 		i_mz = ki * wz_int
@@ -2076,7 +2076,7 @@ func _gp_tv_step(
 		mz_req = clampf(mz_raw, -stab_limit, stab_limit)
 	last_mz_req = mz_req
 
-	# Stage 6: Friction Ellipse + Power Bounds (filtered tau = 30 ms), respecting 4WD vs RWD layout
+	# stage 6: friction ellipse + power bounds (filtered tau = 30 ms), respecting 4wd vs rwd layout
 	var w_chassis: float = vx_safe / _cfg_r_wheel
 	var omega_power: Array[float] = [w_chassis, w_chassis, w_chassis, w_chassis]
 	var t_ub_friction: Array[float] = gp_friction_ellipse_t_ub_param(fz_est, fy_est, mu_avg, min_fx_reserve_active)
@@ -2127,7 +2127,7 @@ func _gp_tv_step(
 	if req_sum < 0.0:
 		fx_clamped = 0.0
 
-	# Corner-exit throttle Mz cut: attenuate pro-turn yaw moment under longitudinal acceleration
+	# corner-exit throttle mz cut: attenuate pro-turn yaw moment under longitudinal acceleration
 	if mz_req * delta_dz > 0.0:
 		mz_req *= (1.0 - live_throttle_mz_cut * clampf(fx_clamped / 2500.0, 0.0, 1.0))
 
@@ -2148,7 +2148,7 @@ func _gp_tv_step(
 		w_smooth_scale = float(end_pre.get("w_smooth_scale", 1.0))
 	last_mz_req = mz_req
 
-	# Stage 7: Nominal Allocation (4WD or RWD) + Closed-Form KKT QP Solver + Rate Limiter
+	# stage 7: nominal allocation (4wd or rwd) + closed-form kkt qp solver + rate limiter
 	var t_nominal: Array[float] = (
 		_gp_nominal_allocation_rwd(fx_clamped, mz_req)
 		if drive_layout == DriveLayout.RWD_2WD
@@ -2192,7 +2192,7 @@ func _gp_tv_step(
 	var t_pre_tc_2: float = t_cmd[2]
 	var t_pre_tc_3: float = t_cmd[3]
 
-	# Stage 8: Traction Control (Launch Control 0 km/h PI, V4 combined-ellipse, or V3 RLS)
+	# stage 8: traction control (launch control 0 km/h pi, v4 combined-ellipse, or v3 rls)
 	if launch_state == LaunchState.LC_ACTIVE:
 		var lc_tc_on: bool = false
 		var vx_pos: float = maxf(vx, 0.0)

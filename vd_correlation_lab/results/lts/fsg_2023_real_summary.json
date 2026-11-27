@@ -1,0 +1,70 @@
+{
+  "grip_profile": "fsg_real",
+  "elapsed_s": 472.98,
+  "geometry": {
+    "length_0_m": 1183.6161247864518,
+    "length_racing_m": 1178.4016914181548,
+    "r_min_0_m": 4.232589244144213,
+    "r_min_racing_m": 4.607556106833492,
+    "int_k2_reduction_pct": 15.053896942232948,
+    "min_nonadj_clearance_m": 9.45333165910305,
+    "closure_pos_err_m": 6.344008239926271e-05,
+    "closure_psi_err_rad": 5.636306920450045e-07
+  },
+  "controllers": [
+    {
+      "key": "open",
+      "label": "Open-Diff 4WD",
+      "qss_lap_s": 74.27692027166617,
+      "tr_lap_s": 91.197695114977,
+      "valid": true,
+      "alpha_drv": 0.82,
+      "vmax_kmh": 92.7072,
+      "vmed_kmh": 46.51703185872153,
+      "e_net_kj": 1227.04927621721,
+      "e_regen_kj": 0.0,
+      "e_22km_kwh": 6.363394180763235,
+      "max_abs_beta_deg": 7.45172291247353,
+      "torque_fight_kj": 0.0,
+      "p_dc_min_kw": 0.0,
+      "p_dc_max_kw": 45.2557184392181,
+      "dt_vs_open_s": 0.0
+    },
+    {
+      "key": "tv4_auto",
+      "label": "TV 4WD Autocross",
+      "qss_lap_s": 77.09577645391016,
+      "tr_lap_s": 81.387621769905,
+      "valid": true,
+      "alpha_drv": 0.96,
+      "vmax_kmh": 103.6116,
+      "vmed_kmh": 52.1239716415209,
+      "e_net_kj": 996.176927031149,
+      "e_regen_kj": 395.199515997527,
+      "e_22km_kwh": 5.166105863346344,
+      "max_abs_beta_deg": 5.3372857126651,
+      "torque_fight_kj": 18.0528648825811,
+      "p_dc_min_kw": -24.4306697471213,
+      "p_dc_max_kw": 79.4335655365495,
+      "dt_vs_open_s": -9.810073345071999
+    },
+    {
+      "key": "tv4_eff",
+      "label": "TV 4WD Efficiency",
+      "qss_lap_s": 81.89405058249596,
+      "tr_lap_s": 85.8724769928611,
+      "valid": true,
+      "alpha_drv": 0.96,
+      "vmax_kmh": 87.27120000000001,
+      "vmed_kmh": 49.40169700075184,
+      "e_net_kj": 646.834773598826,
+      "e_regen_kj": 388.680310220862,
+      "e_22km_kwh": 3.354441189944075,
+      "max_abs_beta_deg": 6.69241639822597,
+      "torque_fight_kj": 10.4224181334092,
+      "p_dc_min_kw": -24.4547071642257,
+      "p_dc_max_kw": 42.5615462966777,
+      "dt_vs_open_s": -5.325218122115899
+    }
+  ]
+}

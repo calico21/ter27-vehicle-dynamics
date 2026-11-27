@@ -1,0 +1,54 @@
+{
+  "vehicle_id": "ter26_rwd",
+  "display_name": "TeR26",
+  "legend_label": "sim_TeR26",
+  "validation_source": "real_can_track_october",
+  "is_synthetic": false,
+  "ecu_mode": 0,
+  "tv_map_id": 2,
+  "wheel_radius_m": 0.2032,
+  "steer_ratio": 1.255,
+  "imu": {
+    "yaw_offset_deg": -22.25,
+    "accel_advance_samples": 11,
+    "x_lever_m": 0.78,
+    "scale_ax": 1.0,
+    "scale_ay": 1.0,
+    "scale_wz": 1.0
+  },
+  "brakes": {
+    "bpps_full_bar": 17.5,
+    "bpps_emi_apps_thresh": 0.25,
+    "brake_over_throttle_thresh": 0.05
+  },
+  "steering": {
+    "can_shift_samples": 5,
+    "auto_zero_vx_min_ms": 4.0
+  },
+  "powertrain": {
+    "apps_deadzone": 0.075,
+    "default_trq_limit_nm": 120.0
+  },
+  "filtering": {
+    "fs_hz": 100.0,
+    "butter_cutoff_hz": 15.0,
+    "butter_order": 4,
+    "min_active_vx_ms": 3.0,
+    "paddock_vx_p95_thresh_ms": 8.5,
+    "paddock_ay_p95_thresh_ms2": 4.5
+  },
+  "baseline_reference": {
+    "r_vx": 0.892,
+    "r_ax": 0.745,
+    "r_ay": 0.831,
+    "r_wz": 0.864,
+    "r2_vx": 0.741,
+    "r2_ax": 0.482,
+    "r2_ay": 0.618,
+    "r2_wz": 0.695,
+    "rmse_vx": 1.85,
+    "rmse_ax": 1.42,
+    "rmse_ay": 2.15,
+    "rmse_wz": 0.28
+  }
+}

@@ -1,0 +1,172 @@
+{
+  "vehicle": "ter27_4wd",
+  "solver": "CasADi 3.7.2 + IPOPT",
+  "grip_profile": "FSG_RUBBERED",
+  "compound": "R25B",
+  "fsg_rubbered_lambda_muy": 0.57,
+  "cold_test_oct_lambda_muy": 0.47,
+  "env_mu_scale": 1.212766,
+  "setup_bounds": {
+    "lltd": [
+      0.35,
+      0.62
+    ],
+    "camber_f_deg": [
+      -2.5,
+      -0.2
+    ],
+    "camber_r_deg": [
+      -2.2,
+      -0.2
+    ],
+    "toe_f_deg": [
+      -0.5,
+      0.5
+    ],
+    "toe_r_deg": [
+      0.0,
+      0.6
+    ],
+    "brake_bias": [
+      0.55,
+      0.78
+    ],
+    "rake_mm": [
+      -8.0,
+      8.0
+    ]
+  },
+  "base_setup": {
+    "lltd": 0.4474,
+    "camber_f_deg": -2.0,
+    "camber_r_deg": -1.5,
+    "toe_f_deg": 0.0,
+    "toe_r_deg": 0.0,
+    "brake_bias": 0.58,
+    "rake_mm": 0.0
+  },
+  "events": {
+    "skidpad": {
+      "event_name": "Skidpad",
+      "metric_label": "Periodic Circle Time (s)",
+      "base_time_s": 4.6241,
+      "optimal_time_s": 4.6072,
+      "delta_time_s": -0.017,
+      "delta_pct": -0.367,
+      "base_stat_s": 4.6245,
+      "optimal_stat_s": 4.6074,
+      "base_fig8_timed_s": 4.5119,
+      "optimal_fig8_timed_s": 4.4955,
+      "r_eff_star_m": 8.401,
+      "ay_max_g": 1.589,
+      "min_cone_clear_m": 0.15,
+      "hv_violations": 0,
+      "optimal_setup": {
+        "lltd": 0.5007,
+        "camber_f_deg": -0.816,
+        "camber_r_deg": -1.316,
+        "toe_f_deg": 0.5,
+        "toe_r_deg": 0.6,
+        "brake_bias": 0.6159,
+        "rake_mm": 7.282
+      },
+      "preset_file": "src/mirena_sim/Scenes/Vehicle/Config/vehicles/ter27_4wd/setups/optimal_skidpad.json"
+    },
+    "accel": {
+      "event_name": "Acceleration 75 m",
+      "metric_label": "0-75 m Time (s)",
+      "base_time_s": 3.5223,
+      "optimal_time_s": 3.5216,
+      "delta_time_s": -0.0007,
+      "delta_pct": -0.019,
+      "v_exit_kmh": 109.72,
+      "peak_ax_g": 1.524,
+      "max_hv_power_kw": 79.9,
+      "optimal_setup": {
+        "lltd": 0.4493,
+        "camber_f_deg": -0.2,
+        "camber_r_deg": -0.201,
+        "toe_f_deg": 0.01,
+        "toe_r_deg": 0.021,
+        "brake_bias": 0.5893,
+        "rake_mm": 0.719
+      },
+      "preset_file": "src/mirena_sim/Scenes/Vehicle/Config/vehicles/ter27_4wd/setups/optimal_accel.json"
+    },
+    "autocross": {
+      "event_name": "Autocross",
+      "metric_label": "FSG 2023 Lap Time (s)",
+      "base_time_s": 67.5635,
+      "optimal_time_s": 67.1057,
+      "delta_time_s": -0.4578,
+      "delta_pct": -0.678,
+      "v_max_kmh": 109.51,
+      "ay_max_g": 1.755,
+      "tire_temp_mean_c": 65.27,
+      "tire_temp_max_c": 69.3,
+      "e_22km_kwh": 8.649,
+      "drivability_score": 61.81,
+      "min_cone_clear_m": 0.3903,
+      "hv_violations": 0,
+      "bspd_violations": 6,
+      "optimal_setup": {
+        "lltd": 0.4425,
+        "camber_f_deg": -0.645,
+        "camber_r_deg": -1.093,
+        "toe_f_deg": 0.5,
+        "toe_r_deg": 0.6,
+        "brake_bias": 0.78,
+        "rake_mm": 6.223
+      },
+      "preset_file": "src/mirena_sim/Scenes/Vehicle/Config/vehicles/ter27_4wd/setups/optimal_autocross.json"
+    },
+    "endurance": {
+      "event_name": "Endurance 22 km",
+      "metric_label": "22 km Total Time (s)",
+      "base_time_s": 1359.96,
+      "optimal_time_s": 1359.0,
+      "delta_time_s": -0.96,
+      "delta_pct": -0.071,
+      "base_lap_time_s": 73.1666,
+      "optimal_lap_time_s": 73.115,
+      "delta_lap_time_s": -0.0516,
+      "n_laps_22km": 18.587,
+      "energy_budget_kwh": 3.5,
+      "e_22km_kwh": 3.391,
+      "tire_temp_mean_c": 53.02,
+      "tire_temp_max_c": 54.83,
+      "drivability_score": 99.0,
+      "min_cone_clear_m": 0.3903,
+      "hv_violations": 0,
+      "bspd_violations": 0,
+      "optimal_setup": {
+        "lltd": 0.4857,
+        "camber_f_deg": -1.148,
+        "camber_r_deg": -1.355,
+        "toe_f_deg": -0.015,
+        "toe_r_deg": 0.177,
+        "brake_bias": 0.6332,
+        "rake_mm": -1.096
+      },
+      "preset_file": "src/mirena_sim/Scenes/Vehicle/Config/vehicles/ter27_4wd/setups/optimal_endurance.json"
+    }
+  },
+  "fs_points": {
+    "base": {
+      "skidpad": 75.0,
+      "accel": 58.42,
+      "autocross": 18.28,
+      "endurance": 110.95,
+      "total_dynamic_pts": 262.65
+    },
+    "optimal": {
+      "skidpad": 75.0,
+      "accel": 58.46,
+      "autocross": 20.98,
+      "endurance": 111.49,
+      "total_dynamic_pts": 265.93
+    },
+    "delta_total_pts": 3.28
+  },
+  "runtime_s": 579.8
+}

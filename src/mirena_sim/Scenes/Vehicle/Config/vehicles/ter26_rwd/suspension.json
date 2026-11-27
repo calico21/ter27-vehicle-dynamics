@@ -1,0 +1,399 @@
+{
+  "spring_stiffness_front": 44000.0,
+  "spring_stiffness_rear": 53000.0,
+  "motion_ratio_front": 0.870323,
+  "motion_ratio_rear": 0.863458,
+  "damping_ratio": 0.7,
+  "damping_compression_front": 2323.8,
+  "damping_relaxation_front": 2323.8,
+  "damping_compression_rear": 3201.6,
+  "damping_relaxation_rear": 3201.6,
+  "arb_stiffness_front": 8079.2801,
+  "arb_stiffness_rear": 16226.9132,
+  "roll_center_height_front": 0.04,
+  "roll_center_height_rear": 0.06028,
+  "pitch_center_height": 0.06071,
+  "anti_dive_ratio_front": 0.4157,
+  "anti_squat_ratio_rear": 0.3617,
+  "jacking_coeff_front": 0.03,
+  "jacking_coeff_rear": 0.06,
+  "mechanical_trail_front": 0.014209,
+  "scrub_radius_front": 0.02,
+  "steering_compliance_stiffness_nm_rad": 2500.0,
+  "bumpstop_start_front": 0.025,
+  "bumpstop_start_rear": 0.025,
+  "bumpstop_stiffness_front": 115000.0,
+  "bumpstop_stiffness_rear": 140000.0,
+  "bumpstop_quadratic_front": 1800000.0,
+  "bumpstop_quadratic_rear": 2200000.0,
+  "ray_rest_length": 0.32,
+  "ray_cast_length": 0.45,
+  "caster_angle_deg": 4.0,
+  "kpi_angle_deg": 6.0,
+  "static_camber_front_deg": -0.5,
+  "static_camber_rear_deg": -1.0,
+  "toe_front_deg": 0.0,
+  "toe_rear_deg": 0.0,
+  "camber_table_front_deg": [
+    [
+      -0.04,
+      1.0194
+    ],
+    [
+      -0.03,
+      0.6417
+    ],
+    [
+      -0.02,
+      0.2623
+    ],
+    [
+      -0.01,
+      -0.1184
+    ],
+    [
+      0.0,
+      -0.5
+    ],
+    [
+      0.01,
+      -0.8822
+    ],
+    [
+      0.02,
+      -1.2647
+    ],
+    [
+      0.03,
+      -1.647
+    ],
+    [
+      0.04,
+      -2.0289
+    ]
+  ],
+  "camber_table_rear_deg": [
+    [
+      -0.04,
+      0.6479
+    ],
+    [
+      -0.03,
+      0.2869
+    ],
+    [
+      -0.02,
+      -0.1085
+    ],
+    [
+      -0.01,
+      -0.5374
+    ],
+    [
+      0.0,
+      -1.0
+    ],
+    [
+      0.01,
+      -1.4966
+    ],
+    [
+      0.02,
+      -2.0283
+    ],
+    [
+      0.03,
+      -2.5963
+    ],
+    [
+      0.04,
+      -3.2025
+    ]
+  ],
+  "toe_table_front_deg": [
+    [
+      -0.04,
+      -0.4623
+    ],
+    [
+      -0.03,
+      -0.2675
+    ],
+    [
+      -0.02,
+      -0.1259
+    ],
+    [
+      -0.01,
+      -0.0368
+    ],
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.01,
+      -0.0155
+    ],
+    [
+      0.02,
+      -0.0837
+    ],
+    [
+      0.03,
+      -0.2053
+    ],
+    [
+      0.04,
+      -0.3816
+    ]
+  ],
+  "toe_table_rear_deg": [
+    [
+      -0.04,
+      0.1256
+    ],
+    [
+      -0.03,
+      0.0675
+    ],
+    [
+      -0.02,
+      0.0286
+    ],
+    [
+      -0.01,
+      0.0067
+    ],
+    [
+      0.0,
+      -0.0
+    ],
+    [
+      0.01,
+      0.0075
+    ],
+    [
+      0.02,
+      0.0286
+    ],
+    [
+      0.03,
+      0.063
+    ],
+    [
+      0.04,
+      0.1108
+    ]
+  ],
+  "double_wishbone_kinematics": {
+    "use_3d_kinematics": true,
+    "frame": "iso_ros_left_from_front_axle_ground_m",
+    "wheelbase_m": 1.55,
+    "track_front_m": 1.2,
+    "track_rear_m": 1.18,
+    "wheel_radius_m": 0.2032,
+    "front_left": {
+      "lca_front": [
+        0.032774,
+        0.245,
+        0.126645
+      ],
+      "lca_rear": [
+        -0.144948,
+        0.245,
+        0.12898
+      ],
+      "lbj": [
+        0.004797,
+        0.565853,
+        0.1346
+      ],
+      "uca_front": [
+        0.109916,
+        0.245,
+        0.24731
+      ],
+      "uca_rear": [
+        -0.119867,
+        0.245,
+        0.228048
+      ],
+      "ubj": [
+        -0.004993,
+        0.551138,
+        0.2746
+      ],
+      "pushrod_wishbone": [
+        0.002305,
+        0.51078,
+        0.175346
+      ],
+      "pushrod_rocker": [
+        -0.024666,
+        0.240998,
+        0.616322
+      ],
+      "tie_outer": [
+        0.067176,
+        0.571546,
+        0.223748
+      ],
+      "tie_inner": [
+        0.095,
+        0.14478,
+        0.19
+      ],
+      "damper_chassis": [
+        -0.024664,
+        0.025,
+        0.616288
+      ],
+      "damper_rocker": [
+        -0.026618,
+        0.184318,
+        0.648229
+      ],
+      "rocker_axis_p1": [
+        -0.062865,
+        0.195,
+        0.585645
+      ],
+      "rocker_pivot": [
+        -0.022939,
+        0.195,
+        0.588087
+      ],
+      "arb_link_rocker": [
+        -0.02322,
+        0.221131,
+        0.592684
+      ],
+      "arb_arm_tip": [
+        -0.019558,
+        0.221131,
+        0.532796
+      ],
+      "arb_chassis_piv": [
+        0.050312,
+        0.221131,
+        0.537069
+      ],
+      "wheel_center": [
+        0.0,
+        0.6,
+        0.2032
+      ],
+      "contact_patch": [
+        0.0,
+        0.6,
+        0.0
+      ],
+      "pushrod_on_lower": true,
+      "static_camber_deg": -0.5,
+      "static_toe_deg": 0.0,
+      "spring_stiffness_n_m": 44000.0
+    },
+    "rear_left": {
+      "lca_front": [
+        -1.46025,
+        0.307165,
+        0.126164
+      ],
+      "lca_rear": [
+        -1.64192,
+        0.307564,
+        0.130722
+      ],
+      "lbj": [
+        -1.55,
+        0.535385,
+        0.13
+      ],
+      "uca_front": [
+        -1.46957,
+        0.318,
+        0.231596
+      ],
+      "uca_rear": [
+        -1.62779,
+        0.318,
+        0.251211
+      ],
+      "ubj": [
+        -1.55,
+        0.498993,
+        0.265
+      ],
+      "pushrod_wishbone": [
+        -1.54745,
+        0.468425,
+        0.285585
+      ],
+      "pushrod_rocker": [
+        -1.53051,
+        0.265694,
+        0.422107
+      ],
+      "tie_outer": [
+        -1.62,
+        0.55,
+        0.205
+      ],
+      "tie_inner": [
+        -1.645,
+        0.31275,
+        0.1904
+      ],
+      "damper_chassis": [
+        -1.33584,
+        0.246477,
+        0.492514
+      ],
+      "damper_rocker": [
+        -1.49287,
+        0.20756,
+        0.471016
+      ],
+      "rocker_axis_p1": [
+        -1.47683,
+        0.245855,
+        0.409696
+      ],
+      "rocker_pivot": [
+        -1.48497,
+        0.26384,
+        0.437032
+      ],
+      "arb_link_rocker": [
+        -1.51704,
+        0.230398,
+        0.44871
+      ],
+      "arb_arm_tip": [
+        -1.74328,
+        0.230398,
+        0.381672
+      ],
+      "arb_chassis_piv": [
+        -1.72331,
+        0.230398,
+        0.31458
+      ],
+      "wheel_center": [
+        -1.55,
+        0.59,
+        0.2032
+      ],
+      "contact_patch": [
+        -1.55,
+        0.59,
+        0.0
+      ],
+      "pushrod_on_lower": false,
+      "static_camber_deg": -1.0,
+      "static_toe_deg": 0.0,
+      "spring_stiffness_n_m": 53000.0
+    }
+  }
+}

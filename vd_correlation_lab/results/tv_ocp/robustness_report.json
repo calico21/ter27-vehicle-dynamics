@@ -1,0 +1,401 @@
+{
+  "grip_profile": "fsg_real",
+  "elapsed_s": 21.12,
+  "overall_pass": true,
+  "mode_overrides": {},
+  "cases": [
+    {
+      "case_name": "nominal",
+      "pass": true,
+      "failures": [],
+      "directionally_stable": true,
+      "worst_dMz_dbeta_sae_nm_per_deg": -765.58,
+      "spins": 0,
+      "hv_ecu_violations": 0,
+      "hv_phys_violations": 0,
+      "t_cmd_max_hf_rms_nm": 12.6,
+      "t_cmd_max_chatter_ratio": 0.002,
+      "hairpin_time_s": 8.115,
+      "hairpin_pace_loss_pct": 0.0,
+      "skidpad_lap_s": 5.7341,
+      "skidpad_pace_loss_pct": 0.0,
+      "slalom_max_beta_deg": 1.546,
+      "p_ecu_max_kw": 79.0,
+      "p_ecu_min_kw": -23.956,
+      "stability_details": [
+        {
+          "dMz_dbeta_ros_nm_per_deg": 1005.29313151042,
+          "dMz_dbeta_sae_nm_per_deg": -1005.29313151042,
+          "delta_deg": 0.0,
+          "stable": true,
+          "v_kmh": 55.0
+        },
+        {
+          "dMz_dbeta_ros_nm_per_deg": 925.804311116536,
+          "dMz_dbeta_sae_nm_per_deg": -925.804311116536,
+          "delta_deg": 6.0,
+          "stable": true,
+          "v_kmh": 55.0
+        },
+        {
+          "dMz_dbeta_ros_nm_per_deg": 765.578287760417,
+          "dMz_dbeta_sae_nm_per_deg": -765.578287760417,
+          "delta_deg": 0.0,
+          "stable": true,
+          "v_kmh": 80.0
+        },
+        {
+          "dMz_dbeta_ros_nm_per_deg": 903.128295898438,
+          "dMz_dbeta_sae_nm_per_deg": -903.128295898438,
+          "delta_deg": 5.0,
+          "stable": true,
+          "v_kmh": 80.0
+        }
+      ]
+    },
+    {
+      "case_name": "grip_minus_15",
+      "pass": true,
+      "failures": [],
+      "directionally_stable": true,
+      "worst_dMz_dbeta_sae_nm_per_deg": -674.45,
+      "spins": 0,
+      "hv_ecu_violations": 0,
+      "hv_phys_violations": 0,
+      "t_cmd_max_hf_rms_nm": 27.18,
+      "t_cmd_max_chatter_ratio": 0.0084,
+      "hairpin_time_s": 9.41,
+      "hairpin_pace_loss_pct": 15.96,
+      "skidpad_lap_s": 4.3775,
+      "skidpad_pace_loss_pct": -23.66,
+      "slalom_max_beta_deg": 1.341,
+      "p_ecu_max_kw": 79.119,
+      "p_ecu_min_kw": -23.956,
+      "stability_details": [
+        {
+          "dMz_dbeta_ros_nm_per_deg": 855.168212890625,
+          "dMz_dbeta_sae_nm_per_deg": -855.168212890625,
+          "delta_deg": 0.0,
+          "stable": true,
+          "v_kmh": 55.0
+        },
+        {
+          "dMz_dbeta_ros_nm_per_deg": 908.63774617513,
+          "dMz_dbeta_sae_nm_per_deg": -908.63774617513,
+          "delta_deg": 6.0,
+          "stable": true,
+          "v_kmh": 55.0
+        },
+        {
+          "dMz_dbeta_ros_nm_per_deg": 674.451904296875,
+          "dMz_dbeta_sae_nm_per_deg": -674.451904296875,
+          "delta_deg": 0.0,
+          "stable": true,
+          "v_kmh": 80.0
+        },
+        {
+          "dMz_dbeta_ros_nm_per_deg": 909.42881266276,
+          "dMz_dbeta_sae_nm_per_deg": -909.42881266276,
+          "delta_deg": 5.0,
+          "stable": true,
+          "v_kmh": 80.0
+        }
+      ]
+    },
+    {
+      "case_name": "grip_plus_15",
+      "pass": true,
+      "failures": [],
+      "directionally_stable": true,
+      "worst_dMz_dbeta_sae_nm_per_deg": -819.15,
+      "spins": 0,
+      "hv_ecu_violations": 0,
+      "hv_phys_violations": 0,
+      "t_cmd_max_hf_rms_nm": 32.92,
+      "t_cmd_max_chatter_ratio": 0.0063,
+      "hairpin_time_s": 7.255,
+      "hairpin_pace_loss_pct": -10.6,
+      "skidpad_lap_s": 5.662,
+      "skidpad_pace_loss_pct": -1.26,
+      "slalom_max_beta_deg": 1.726,
+      "p_ecu_max_kw": 78.953,
+      "p_ecu_min_kw": -23.956,
+      "stability_details": [
+        {
+          "dMz_dbeta_ros_nm_per_deg": 1116.67374674479,
+          "dMz_dbeta_sae_nm_per_deg": -1116.67374674479,
+          "delta_deg": 0.0,
+          "stable": true,
+          "v_kmh": 55.0
+        },
+        {
+          "dMz_dbeta_ros_nm_per_deg": 945.917073567708,
+          "dMz_dbeta_sae_nm_per_deg": -945.917073567708,
+          "delta_deg": 6.0,
+          "stable": true,
+          "v_kmh": 55.0
+        },
+        {
+          "dMz_dbeta_ros_nm_per_deg": 819.148966471354,
+          "dMz_dbeta_sae_nm_per_deg": -819.148966471354,
+          "delta_deg": 0.0,
+          "stable": true,
+          "v_kmh": 80.0
+        },
+        {
+          "dMz_dbeta_ros_nm_per_deg": 954.551350911458,
+          "dMz_dbeta_sae_nm_per_deg": -954.551350911458,
+          "delta_deg": 5.0,
+          "stable": true,
+          "v_kmh": 80.0
+        }
+      ]
+    },
+    {
+      "case_name": "noise_latency_5ms",
+      "pass": true,
+      "failures": [],
+      "directionally_stable": true,
+      "worst_dMz_dbeta_sae_nm_per_deg": -765.58,
+      "spins": 0,
+      "hv_ecu_violations": 0,
+      "hv_phys_violations": 0,
+      "t_cmd_max_hf_rms_nm": 23.89,
+      "t_cmd_max_chatter_ratio": 0.0345,
+      "hairpin_time_s": 8.085,
+      "hairpin_pace_loss_pct": -0.37,
+      "skidpad_lap_s": 6.087,
+      "skidpad_pace_loss_pct": 6.16,
+      "slalom_max_beta_deg": 1.57,
+      "p_ecu_max_kw": 79.024,
+      "p_ecu_min_kw": -23.956,
+      "stability_details": [
+        {
+          "dMz_dbeta_ros_nm_per_deg": 1005.29313151042,
+          "dMz_dbeta_sae_nm_per_deg": -1005.29313151042,
+          "delta_deg": 0.0,
+          "stable": true,
+          "v_kmh": 55.0
+        },
+        {
+          "dMz_dbeta_ros_nm_per_deg": 925.804311116536,
+          "dMz_dbeta_sae_nm_per_deg": -925.804311116536,
+          "delta_deg": 6.0,
+          "stable": true,
+          "v_kmh": 55.0
+        },
+        {
+          "dMz_dbeta_ros_nm_per_deg": 765.578287760417,
+          "dMz_dbeta_sae_nm_per_deg": -765.578287760417,
+          "delta_deg": 0.0,
+          "stable": true,
+          "v_kmh": 80.0
+        },
+        {
+          "dMz_dbeta_ros_nm_per_deg": 903.128295898438,
+          "dMz_dbeta_sae_nm_per_deg": -903.128295898438,
+          "delta_deg": 5.0,
+          "stable": true,
+          "v_kmh": 80.0
+        }
+      ]
+    },
+    {
+      "case_name": "noise_latency_10ms",
+      "pass": true,
+      "failures": [],
+      "directionally_stable": true,
+      "worst_dMz_dbeta_sae_nm_per_deg": -765.58,
+      "spins": 0,
+      "hv_ecu_violations": 0,
+      "hv_phys_violations": 0,
+      "t_cmd_max_hf_rms_nm": 27.75,
+      "t_cmd_max_chatter_ratio": 0.0473,
+      "hairpin_time_s": 8.125,
+      "hairpin_pace_loss_pct": 0.12,
+      "skidpad_lap_s": 6.0818,
+      "skidpad_pace_loss_pct": 6.06,
+      "slalom_max_beta_deg": 1.62,
+      "p_ecu_max_kw": 79.053,
+      "p_ecu_min_kw": -23.956,
+      "stability_details": [
+        {
+          "dMz_dbeta_ros_nm_per_deg": 1005.29313151042,
+          "dMz_dbeta_sae_nm_per_deg": -1005.29313151042,
+          "delta_deg": 0.0,
+          "stable": true,
+          "v_kmh": 55.0
+        },
+        {
+          "dMz_dbeta_ros_nm_per_deg": 925.804311116536,
+          "dMz_dbeta_sae_nm_per_deg": -925.804311116536,
+          "delta_deg": 6.0,
+          "stable": true,
+          "v_kmh": 55.0
+        },
+        {
+          "dMz_dbeta_ros_nm_per_deg": 765.578287760417,
+          "dMz_dbeta_sae_nm_per_deg": -765.578287760417,
+          "delta_deg": 0.0,
+          "stable": true,
+          "v_kmh": 80.0
+        },
+        {
+          "dMz_dbeta_ros_nm_per_deg": 903.128295898438,
+          "dMz_dbeta_sae_nm_per_deg": -903.128295898438,
+          "delta_deg": 5.0,
+          "stable": true,
+          "v_kmh": 80.0
+        }
+      ]
+    },
+    {
+      "case_name": "mass_plus12_cg_rear15",
+      "pass": true,
+      "failures": [],
+      "directionally_stable": true,
+      "worst_dMz_dbeta_sae_nm_per_deg": -759.18,
+      "spins": 0,
+      "hv_ecu_violations": 0,
+      "hv_phys_violations": 0,
+      "t_cmd_max_hf_rms_nm": 12.56,
+      "t_cmd_max_chatter_ratio": 0.002,
+      "hairpin_time_s": 8.11,
+      "hairpin_pace_loss_pct": -0.06,
+      "skidpad_lap_s": 5.569,
+      "skidpad_pace_loss_pct": -2.88,
+      "slalom_max_beta_deg": 1.619,
+      "p_ecu_max_kw": 78.915,
+      "p_ecu_min_kw": -23.956,
+      "stability_details": [
+        {
+          "dMz_dbeta_ros_nm_per_deg": 1013.40112304688,
+          "dMz_dbeta_sae_nm_per_deg": -1013.40112304688,
+          "delta_deg": 0.0,
+          "stable": true,
+          "v_kmh": 55.0
+        },
+        {
+          "dMz_dbeta_ros_nm_per_deg": 945.041880289714,
+          "dMz_dbeta_sae_nm_per_deg": -945.041880289714,
+          "delta_deg": 6.0,
+          "stable": true,
+          "v_kmh": 55.0
+        },
+        {
+          "dMz_dbeta_ros_nm_per_deg": 759.182373046875,
+          "dMz_dbeta_sae_nm_per_deg": -759.182373046875,
+          "delta_deg": 0.0,
+          "stable": true,
+          "v_kmh": 80.0
+        },
+        {
+          "dMz_dbeta_ros_nm_per_deg": 907.990193684896,
+          "dMz_dbeta_sae_nm_per_deg": -907.990193684896,
+          "delta_deg": 5.0,
+          "stable": true,
+          "v_kmh": 80.0
+        }
+      ]
+    },
+    {
+      "case_name": "mass_minus12_cg_fwd15",
+      "pass": true,
+      "failures": [],
+      "directionally_stable": true,
+      "worst_dMz_dbeta_sae_nm_per_deg": -757.39,
+      "spins": 0,
+      "hv_ecu_violations": 0,
+      "hv_phys_violations": 0,
+      "t_cmd_max_hf_rms_nm": 12.67,
+      "t_cmd_max_chatter_ratio": 0.0035,
+      "hairpin_time_s": 8.185,
+      "hairpin_pace_loss_pct": 0.86,
+      "skidpad_lap_s": 5.8993,
+      "skidpad_pace_loss_pct": 2.88,
+      "slalom_max_beta_deg": 1.431,
+      "p_ecu_max_kw": 79.093,
+      "p_ecu_min_kw": -23.956,
+      "stability_details": [
+        {
+          "dMz_dbeta_ros_nm_per_deg": 979.851481119792,
+          "dMz_dbeta_sae_nm_per_deg": -979.851481119792,
+          "delta_deg": 0.0,
+          "stable": true,
+          "v_kmh": 55.0
+        },
+        {
+          "dMz_dbeta_ros_nm_per_deg": 915.176330566406,
+          "dMz_dbeta_sae_nm_per_deg": -915.176330566406,
+          "delta_deg": 6.0,
+          "stable": true,
+          "v_kmh": 55.0
+        },
+        {
+          "dMz_dbeta_ros_nm_per_deg": 757.388590494792,
+          "dMz_dbeta_sae_nm_per_deg": -757.388590494792,
+          "delta_deg": 0.0,
+          "stable": true,
+          "v_kmh": 80.0
+        },
+        {
+          "dMz_dbeta_ros_nm_per_deg": 915.683634440104,
+          "dMz_dbeta_sae_nm_per_deg": -915.683634440104,
+          "delta_deg": 5.0,
+          "stable": true,
+          "v_kmh": 80.0
+        }
+      ]
+    },
+    {
+      "case_name": "combined_worst",
+      "pass": true,
+      "failures": [],
+      "directionally_stable": true,
+      "worst_dMz_dbeta_sae_nm_per_deg": -673.48,
+      "spins": 0,
+      "hv_ecu_violations": 0,
+      "hv_phys_violations": 0,
+      "t_cmd_max_hf_rms_nm": 17.17,
+      "t_cmd_max_chatter_ratio": 0.0028,
+      "hairpin_time_s": 9.655,
+      "hairpin_pace_loss_pct": 18.98,
+      "skidpad_lap_s": 4.381,
+      "skidpad_pace_loss_pct": -23.6,
+      "slalom_max_beta_deg": 1.545,
+      "p_ecu_max_kw": 79.025,
+      "p_ecu_min_kw": -23.956,
+      "stability_details": [
+        {
+          "dMz_dbeta_ros_nm_per_deg": 863.729329427083,
+          "dMz_dbeta_sae_nm_per_deg": -863.729329427083,
+          "delta_deg": 0.0,
+          "stable": true,
+          "v_kmh": 55.0
+        },
+        {
+          "dMz_dbeta_ros_nm_per_deg": 876.87998453776,
+          "dMz_dbeta_sae_nm_per_deg": -876.87998453776,
+          "delta_deg": 6.0,
+          "stable": true,
+          "v_kmh": 55.0
+        },
+        {
+          "dMz_dbeta_ros_nm_per_deg": 673.482503255208,
+          "dMz_dbeta_sae_nm_per_deg": -673.482503255208,
+          "delta_deg": 0.0,
+          "stable": true,
+          "v_kmh": 80.0
+        },
+        {
+          "dMz_dbeta_ros_nm_per_deg": 915.108439127604,
+          "dMz_dbeta_sae_nm_per_deg": -915.108439127604,
+          "delta_deg": 5.0,
+          "stable": true,
+          "v_kmh": 80.0
+        }
+      ]
+    }
+  ],
+  "selected_candidate_label": "current_config"
+}

@@ -1,0 +1,30 @@
+{
+  "vault": "05_tires_and_thermal_analysis",
+  "r20_at_800n_fsg": {
+    "mu_y_peak": 2.1222,
+    "c_alpha_n_per_deg": 469.81,
+    "vertical_stiffness_n_m": 114663.7,
+    "single_lap_s": 81.48,
+    "endurance_22km_s": 1470.01
+  },
+  "r25b_at_800n_fsg": {
+    "mu_y_peak": 2.229,
+    "c_alpha_n_per_deg": 587.21,
+    "vertical_stiffness_n_m": 116786.2,
+    "single_lap_s": 79.504,
+    "endurance_22km_s": 1441.64
+  },
+  "r25b_minus_r20": {
+    "delta_mu_y_pct": 5.03,
+    "delta_c_alpha_pct": 24.99,
+    "delta_single_lap_s": -1.976,
+    "delta_22km_total_s": -28.37
+  },
+  "pinn_residual_loaded": true,
+  "pinn_output_layer_norm": 0.0,
+  "thermal_optimal_window_c": [
+    70.0,
+    85.0
+  ],
+  "thermal_peak_c": 77.5
+}

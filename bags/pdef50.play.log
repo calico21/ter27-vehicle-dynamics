@@ -1,3 +1,0 @@
-[WARN] [ros2bag]: --storage option is deprecated, use -i,--input to provide an input bag with a specific storage ID
-[INFO] [1793115774.798578720] [rosbag2_player]: Set rate to 1
-[INFO] [1793115774.820989664] [rosbag2_player]: Playback until timestamp: -1

@@ -1,0 +1,351 @@
+{
+  "suite": "09_ter27_skidpad_deep_dive",
+  "fsg_calibration": {
+    "calibration_method": "SciPy brentq + CasADi 3.7.2/IPOPT on validated TeR26 RWD 3D double-wishbone model",
+    "target_ter26_rwd_skidpad_s": 5.5,
+    "tolerance_s": 0.03,
+    "mu_fsg_scale": 1.078548,
+    "T_fsg_c": 75.0,
+    "T_track_fsg_c": 45.0,
+    "env_aero_cl_scale": 0.78,
+    "mu_thermal_at_T_fsg": 1.000023,
+    "ter27_base_lambda_mux": 0.68,
+    "ter27_base_lambda_muy": 0.47,
+    "fsg_effective_lambda_mux": 0.733413,
+    "fsg_effective_lambda_muy": 0.506918,
+    "ter26_rwd_skidpad_s": 5.5,
+    "ter26_ay_g": 1.2139,
+    "ter26_r_eff_m": 9.125,
+    "ter26_v_ms": 10.4244,
+    "ter26_beta_deg": -2.2171,
+    "ter26_delta_deg": 12.4366,
+    "min_clear_m": 0.8585,
+    "ter26_rwd_tight_radius_reference": {
+      "t_skidpad_s": 5.285,
+      "r_eff_m": 8.3575,
+      "ay_g": 1.2041,
+      "min_clear_m": 0.15
+    },
+    "cold_test_oct_preserved": {
+      "sysid_mu_y_scale_untouched": 0.773878,
+      "ter26_tires_json_lambda_muy_untouched": 0.495282,
+      "ter26_cold_oct_skidpad_s": 5.9657,
+      "ter26_cold_oct_ay_g": 1.0318
+    },
+    "legacy_0p88_comparison": {
+      "legacy_env_mu_scale": 0.88,
+      "legacy_lmuy_eff": 0.4136,
+      "legacy_ter26_rwd_skidpad_s": 6.0581,
+      "legacy_ter26_ay_g": 1.0006
+    },
+    "geometry": {
+      "d_inner_m": 15.25,
+      "d_outer_m": 21.25,
+      "r_inner_m": 7.625,
+      "r_outer_m": 10.625,
+      "r_center_m": 9.125,
+      "cone_margin_min_m": 0.15
+    },
+    "runtime_s": 1.26
+  },
+  "scenarios": {
+    "FSG_RUBBERED_R20_OPEN": {
+      "profile": "FSG_RUBBERED",
+      "compound": "R20",
+      "mode": "legacy_open",
+      "r_target_m": 9.125,
+      "t_right_s": 5.197,
+      "t_left_s": 5.197,
+      "t_mean_s": 5.197,
+      "t_crossover_s": 10.294,
+      "v_mean_ms": 11.006,
+      "v_mean_kmh": 39.62,
+      "ay_sustained_g": 1.357,
+      "ay_peak_g": 1.458,
+      "beta_mean_abs_deg": 0.61,
+      "beta_max_abs_deg": 2.0,
+      "p_dc_min_kw": 4.9,
+      "p_dc_max_kw": 7.51,
+      "hv_violations": 0,
+      "min_cone_clear_m": 0.616,
+      "torque_fight_mean_kw": 0.0,
+      "torque_fight_energy_kj": 0.0,
+      "mu_util_mean_4": [
+        0.737,
+        0.736,
+        0.709,
+        0.711
+      ],
+      "mu_util_peak_4": [
+        0.772,
+        0.772,
+        0.819,
+        0.819
+      ]
+    },
+    "FSG_RUBBERED_R20_TV_V1": {
+      "profile": "FSG_RUBBERED",
+      "compound": "R20",
+      "mode": "tv_v1",
+      "r_target_m": 8.6,
+      "t_right_s": 4.892,
+      "t_left_s": 4.892,
+      "t_mean_s": 4.892,
+      "t_crossover_s": 9.706,
+      "v_mean_ms": 11.04,
+      "v_mean_kmh": 39.74,
+      "ay_sustained_g": 1.452,
+      "ay_peak_g": 1.452,
+      "beta_mean_abs_deg": 0.28,
+      "beta_max_abs_deg": 2.39,
+      "p_dc_min_kw": -11.91,
+      "p_dc_max_kw": 8.29,
+      "hv_violations": 0,
+      "min_cone_clear_m": 0.39,
+      "torque_fight_mean_kw": 0.076,
+      "torque_fight_energy_kj": 1.491,
+      "mu_util_mean_4": [
+        0.768,
+        0.773,
+        0.753,
+        0.751
+      ],
+      "mu_util_peak_4": [
+        0.834,
+        0.834,
+        0.855,
+        0.855
+      ]
+    },
+    "FSG_RUBBERED_R20_MAX_ATTACK_V2": {
+      "profile": "FSG_RUBBERED",
+      "compound": "R20",
+      "mode": "max_attack_v2",
+      "r_target_m": 8.31,
+      "t_right_s": 4.703,
+      "t_left_s": 4.703,
+      "t_mean_s": 4.703,
+      "t_crossover_s": 9.331,
+      "v_mean_ms": 11.202,
+      "v_mean_kmh": 40.33,
+      "ay_sustained_g": 1.538,
+      "ay_peak_g": 1.539,
+      "beta_mean_abs_deg": 1.64,
+      "beta_max_abs_deg": 3.58,
+      "p_dc_min_kw": -14.97,
+      "p_dc_max_kw": 12.76,
+      "hv_violations": 0,
+      "min_cone_clear_m": 0.162,
+      "torque_fight_mean_kw": 0.078,
+      "torque_fight_energy_kj": 1.468,
+      "mu_util_mean_4": [
+        0.786,
+        0.797,
+        0.78,
+        0.785
+      ],
+      "mu_util_peak_4": [
+        0.86,
+        0.86,
+        0.853,
+        0.853
+      ]
+    },
+    "FSG_RUBBERED_R25B_MAX_ATTACK_V2": {
+      "profile": "FSG_RUBBERED",
+      "compound": "R25B",
+      "mode": "max_attack_v2",
+      "r_target_m": 8.31,
+      "t_right_s": 4.683,
+      "t_left_s": 4.683,
+      "t_mean_s": 4.683,
+      "t_crossover_s": 9.284,
+      "v_mean_ms": 11.296,
+      "v_mean_kmh": 40.66,
+      "ay_sustained_g": 1.557,
+      "ay_peak_g": 1.557,
+      "beta_mean_abs_deg": 2.08,
+      "beta_max_abs_deg": 4.01,
+      "p_dc_min_kw": -14.88,
+      "p_dc_max_kw": 12.82,
+      "hv_violations": 0,
+      "min_cone_clear_m": 0.175,
+      "torque_fight_mean_kw": 0.077,
+      "torque_fight_energy_kj": 1.452,
+      "mu_util_mean_4": [
+        0.817,
+        0.828,
+        0.815,
+        0.822
+      ],
+      "mu_util_peak_4": [
+        0.927,
+        0.927,
+        0.929,
+        0.929
+      ]
+    },
+    "TTC_PEAK_R20_MAX_ATTACK_V2": {
+      "profile": "TTC_PEAK",
+      "compound": "R20",
+      "mode": "max_attack_v2",
+      "r_target_m": 8.35,
+      "t_right_s": 5.144,
+      "t_left_s": 5.144,
+      "t_mean_s": 5.144,
+      "t_crossover_s": 10.186,
+      "v_mean_ms": 10.286,
+      "v_mean_kmh": 37.03,
+      "ay_sustained_g": 1.289,
+      "ay_peak_g": 1.289,
+      "beta_mean_abs_deg": 1.42,
+      "beta_max_abs_deg": 3.34,
+      "p_dc_min_kw": -13.15,
+      "p_dc_max_kw": 11.91,
+      "hv_violations": 0,
+      "min_cone_clear_m": 0.183,
+      "torque_fight_mean_kw": 0.065,
+      "torque_fight_energy_kj": 1.332,
+      "mu_util_mean_4": [
+        0.787,
+        0.793,
+        0.787,
+        0.782
+      ],
+      "mu_util_peak_4": [
+        0.851,
+        0.851,
+        0.847,
+        0.847
+      ]
+    },
+    "TTC_PEAK_R25B_MAX_ATTACK_V2": {
+      "profile": "TTC_PEAK",
+      "compound": "R25B",
+      "mode": "max_attack_v2",
+      "r_target_m": 8.35,
+      "t_right_s": 5.106,
+      "t_left_s": 5.105,
+      "t_mean_s": 5.105,
+      "t_crossover_s": 10.109,
+      "v_mean_ms": 10.395,
+      "v_mean_kmh": 37.42,
+      "ay_sustained_g": 1.312,
+      "ay_peak_g": 1.312,
+      "beta_mean_abs_deg": 1.78,
+      "beta_max_abs_deg": 3.75,
+      "p_dc_min_kw": -13.1,
+      "p_dc_max_kw": 11.95,
+      "hv_violations": 0,
+      "min_cone_clear_m": 0.2,
+      "torque_fight_mean_kw": 0.065,
+      "torque_fight_energy_kj": 1.326,
+      "mu_util_mean_4": [
+        0.823,
+        0.83,
+        0.825,
+        0.823
+      ],
+      "mu_util_peak_4": [
+        0.933,
+        0.933,
+        0.931,
+        0.931
+      ]
+    },
+    "COLD_18C_R20_MAX_ATTACK_V2": {
+      "profile": "COLD_18C",
+      "compound": "R20",
+      "mode": "max_attack_v2",
+      "r_target_m": 8.85,
+      "t_right_s": 7.882,
+      "t_left_s": 7.883,
+      "t_mean_s": 7.883,
+      "t_crossover_s": 15.565,
+      "v_mean_ms": 6.887,
+      "v_mean_kmh": 24.79,
+      "ay_sustained_g": 0.562,
+      "ay_peak_g": 0.64,
+      "beta_mean_abs_deg": 3.05,
+      "beta_max_abs_deg": 3.12,
+      "p_dc_min_kw": -4.72,
+      "p_dc_max_kw": 4.28,
+      "hv_violations": 0,
+      "min_cone_clear_m": 0.393,
+      "torque_fight_mean_kw": 0.005,
+      "torque_fight_energy_kj": 0.157,
+      "mu_util_mean_4": [
+        0.649,
+        0.666,
+        0.693,
+        0.696
+      ],
+      "mu_util_peak_4": [
+        0.752,
+        0.751,
+        0.743,
+        0.76
+      ]
+    },
+    "COLD_18C_R25B_MAX_ATTACK_V2": {
+      "profile": "COLD_18C",
+      "compound": "R25B",
+      "mode": "max_attack_v2",
+      "r_target_m": 8.85,
+      "t_right_s": 7.695,
+      "t_left_s": 7.696,
+      "t_mean_s": 7.695,
+      "t_crossover_s": 15.195,
+      "v_mean_ms": 7.059,
+      "v_mean_kmh": 25.41,
+      "ay_sustained_g": 0.59,
+      "ay_peak_g": 0.654,
+      "beta_mean_abs_deg": 3.0,
+      "beta_max_abs_deg": 3.09,
+      "p_dc_min_kw": -4.91,
+      "p_dc_max_kw": 4.36,
+      "hv_violations": 0,
+      "min_cone_clear_m": 0.399,
+      "torque_fight_mean_kw": 0.006,
+      "torque_fight_energy_kj": 0.194,
+      "mu_util_mean_4": [
+        0.698,
+        0.718,
+        0.744,
+        0.749
+      ],
+      "mu_util_peak_4": [
+        0.713,
+        0.757,
+        0.853,
+        0.872
+      ]
+    }
+  },
+  "setup_sensitivity_optimum": {
+    "best_lltd": 0.48,
+    "best_rcam_deg": -1.5,
+    "best_setup_time_s": 4.647
+  },
+  "godot_parity": {
+    "godot_trace_loaded": true,
+    "use_3d_kinematics": true,
+    "python_t_mean_s": 4.703,
+    "godot_t_mean_s": 5.29,
+    "circle_time_delta_s": 0.587,
+    "circle_time_delta_pct": 12.48,
+    "vx_rmse_ms": 1.017,
+    "ay_rmse_g": 0.715,
+    "wz_rmse_rads": 0.65,
+    "beta_rmse_deg": 2.62,
+    "godot_hv_violations": 0,
+    "godot_min_cone_clear_m": 0.179
+  },
+  "verification_gates": {
+    "all_cone_clear_ge_015m": true,
+    "all_hv_violations_zero": true,
+    "fsg_r20_sub5_pass": true,
+    "fsg_r25b_sub5_pass": true,
+    "overall_pass": true
+  }
+}

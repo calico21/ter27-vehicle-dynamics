@@ -1,8 +1,8 @@
 extends CanvasLayer
 class_name TvLiveTuningOverlay
 
-const VehicleConfigScript = preload("../Vehicle/Dynamics/Core/VehicleConfig.gd")
-const SetupProfileScript = preload("../Vehicle/Dynamics/Core/SetupProfile.gd")
+const VehicleConfigScript = preload("../Vehicle/Config/VehicleConfig.gd")
+const SetupProfileScript = preload("../Vehicle/Config/SetupProfile.gd")
 const TireModelScript = preload("../Vehicle/Dynamics/Tires/TireModel.gd")
 
 const TV_SLIDER_SPECS := [
@@ -68,11 +68,12 @@ var _map_name_edit: LineEdit = null
 var _tv_maps_cache: Array[Dictionary] = []
 
 const EVENT_MODE_CHOICES: Array = [
-	["endurance", "Endurance Eco"],
-	["autocross", "Autocross Pivot"],
-	["skidpad", "Skidpad Attack"],
-	["wet", "Wet"],
-	["acceleration", "Acceleration"]
+	["open", "OPEN 4WD"],
+	["autocross", "AUTOCROSS"],
+	["endurance", "ENDURANCE"],
+	["skidpad", "SKIDPAD"],
+	["acceleration", "ACCELERATION"],
+	["tire_warmer", "TIRE WARMER"]
 ]
 
 var _steer_raw_bar: ProgressBar = null
@@ -361,7 +362,7 @@ func _build_tv_tab() -> void:
 	map_row.add_child(_map_dropdown)
 
 	var btn_refresh := Button.new()
-	btn_refresh.text = "↻"
+	btn_refresh.text = "Refresh"
 	btn_refresh.tooltip_text = "Refrescar carpeta tv_maps/"
 	btn_refresh.focus_mode = Control.FOCUS_NONE
 	btn_refresh.pressed.connect(_refresh_tv_map_dropdown)
@@ -446,7 +447,7 @@ func _build_tv_tab() -> void:
 	vbox.add_child(btn_row)
 
 	var btn_reset := Button.new()
-	btn_reset.text = "Reset al Mapa F6"
+	btn_reset.text = "Reset Map"
 	btn_reset.focus_mode = Control.FOCUS_NONE
 	btn_reset.pressed.connect(_on_reset_pressed)
 	btn_row.add_child(btn_reset)
@@ -617,23 +618,27 @@ func _refresh_tv_map_dropdown() -> void:
 		_map_dropdown.select(sel_idx)
 		if _map_name_edit != null and not _map_name_edit.has_focus():
 			_map_name_edit.text = String(_tv_maps_cache[sel_idx]["name"])
-	if _event_mode_dropdown != null and _ecu != null:
-		var ev: String = String(_ecu.get("active_event_mode"))
-		for i in range(EVENT_MODE_CHOICES.size()):
-			if String(EVENT_MODE_CHOICES[i][0]) == ev:
-				_event_mode_dropdown.select(i)
-				break
+	if _event_mode_dropdown != null:
+		if _car != null and ("sim_drive_mode" in _car):
+			_event_mode_dropdown.select(clampi(int(_car.sim_drive_mode), 0, EVENT_MODE_CHOICES.size() - 1))
+		elif _ecu != null:
+			var ev: String = String(_ecu.get("active_event_mode"))
+			for i in range(EVENT_MODE_CHOICES.size()):
+				if String(EVENT_MODE_CHOICES[i][0]) == ev:
+					_event_mode_dropdown.select(i)
+					break
 
 
 func _on_event_mode_selected(idx: int) -> void:
-	if idx < 0 or idx >= EVENT_MODE_CHOICES.size() or _ecu == null:
+	if idx < 0 or idx >= EVENT_MODE_CHOICES.size():
 		return
-	var mode_key: String = String(EVENT_MODE_CHOICES[idx][0])
-	if _ecu.has_method("set_event_mode"):
-		_ecu.set_event_mode(mode_key)
+	if _car != null and _car.has_method("set_sim_drive_mode"):
+		_car.set_sim_drive_mode(idx)
+	elif _ecu != null and _ecu.has_method("set_event_mode"):
+		_ecu.set_event_mode(String(EVENT_MODE_CHOICES[idx][0]))
 	sync_from_ecu()
 	if _status_label != null:
-		_status_label.text = "Modo FS: %s" % String(EVENT_MODE_CHOICES[idx][1])
+		_status_label.text = "Drive Mode: %s" % String(EVENT_MODE_CHOICES[idx][1])
 
 
 func _on_launch_arm_pressed() -> void:
@@ -799,7 +804,7 @@ func _build_chassis_tab() -> void:
 	preset_row.add_child(_setup_dropdown)
 
 	var btn_refresh := Button.new()
-	btn_refresh.text = "↻"
+	btn_refresh.text = "Refresh"
 	btn_refresh.tooltip_text = "Refrescar carpeta setup_presets/"
 	btn_refresh.focus_mode = Control.FOCUS_NONE
 	btn_refresh.pressed.connect(_refresh_setup_dropdown)

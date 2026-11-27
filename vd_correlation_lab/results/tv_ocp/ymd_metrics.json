@@ -1,0 +1,129 @@
+{
+  "vehicle_id": "ter27_4wd",
+  "profile": "FSG_REAL_TRACK",
+  "include_final": true,
+  "speeds_kmh": [
+    30.0,
+    55.0,
+    80.0
+  ],
+  "results": {
+    "30kmh": {
+      "OPEN_DIFF": {
+        "a_y_max_trim_g": 0.9579635492533136,
+        "control_reserve_mz_at_limit_nm": 508.5073816561106,
+        "stability_dmz_dbeta_0g_iso_nm_per_deg": 1634.2746143002255,
+        "stability_dmz_dbeta_lim_iso_nm_per_deg": 60.10741382465767,
+        "stability_dmz_dbeta_lim_sae_nm_per_deg": -60.10741382465767,
+        "max_p_dc_kw": 3.7111986316379326,
+        "min_p_dc_kw": 0.1515042254609449,
+        "hv_violations": 0
+      },
+      "TV_BASELINE": {
+        "a_y_max_trim_g": 1.0212854892131769,
+        "control_reserve_mz_at_limit_nm": 646.3249751999892,
+        "stability_dmz_dbeta_0g_iso_nm_per_deg": 1815.869366256417,
+        "stability_dmz_dbeta_lim_iso_nm_per_deg": 111.20674580379159,
+        "stability_dmz_dbeta_lim_sae_nm_per_deg": -111.20674580379159,
+        "max_p_dc_kw": 3.7496782018000867,
+        "min_p_dc_kw": 0.5005885280196363,
+        "hv_violations": 0
+      },
+      "ORACLE": {
+        "a_y_max_trim_g": 1.0801842446187635,
+        "control_reserve_mz_at_limit_nm": 1400.2249593415863,
+        "stability_dmz_dbeta_iso_nm_per_deg": 440.5665051790636,
+        "stability_dmz_dbeta_sae_nm_per_deg": -440.5665051790636,
+        "hv_violations": 0
+      },
+      "TV_OPTIMIZED": {
+        "a_y_max_trim_g": 1.0238920015384971,
+        "control_reserve_mz_at_limit_nm": 649.5152273026271,
+        "stability_dmz_dbeta_0g_iso_nm_per_deg": 1815.869366256417,
+        "stability_dmz_dbeta_lim_iso_nm_per_deg": 105.69003275833018,
+        "stability_dmz_dbeta_lim_sae_nm_per_deg": -105.69003275833018,
+        "max_p_dc_kw": 3.7399963063541186,
+        "min_p_dc_kw": 0.365261549212521,
+        "hv_violations": 0
+      }
+    },
+    "55kmh": {
+      "OPEN_DIFF": {
+        "a_y_max_trim_g": 1.1342708868083273,
+        "control_reserve_mz_at_limit_nm": 377.18304577933776,
+        "stability_dmz_dbeta_0g_iso_nm_per_deg": 967.4167502111343,
+        "stability_dmz_dbeta_lim_iso_nm_per_deg": 633.1569843366105,
+        "stability_dmz_dbeta_lim_sae_nm_per_deg": -633.1569843366105,
+        "max_p_dc_kw": 10.128441128448523,
+        "min_p_dc_kw": 3.983808891510452,
+        "hv_violations": 0
+      },
+      "TV_BASELINE": {
+        "a_y_max_trim_g": 1.1360281686304812,
+        "control_reserve_mz_at_limit_nm": 1145.6954004984746,
+        "stability_dmz_dbeta_0g_iso_nm_per_deg": 1248.0850666313927,
+        "stability_dmz_dbeta_lim_iso_nm_per_deg": 888.6165361511482,
+        "stability_dmz_dbeta_lim_sae_nm_per_deg": -888.6165361511482,
+        "max_p_dc_kw": 10.440928544343318,
+        "min_p_dc_kw": 4.391868851663119,
+        "hv_violations": 0
+      },
+      "ORACLE": {
+        "a_y_max_trim_g": 1.1821542402769472,
+        "control_reserve_mz_at_limit_nm": 1378.906825294042,
+        "stability_dmz_dbeta_iso_nm_per_deg": 167.11301214835595,
+        "stability_dmz_dbeta_sae_nm_per_deg": -167.11301214835595,
+        "hv_violations": 0
+      },
+      "TV_OPTIMIZED": {
+        "a_y_max_trim_g": 1.1494191406160066,
+        "control_reserve_mz_at_limit_nm": 1130.8848232738376,
+        "stability_dmz_dbeta_0g_iso_nm_per_deg": 1248.0850666313927,
+        "stability_dmz_dbeta_lim_iso_nm_per_deg": 928.2115517721618,
+        "stability_dmz_dbeta_lim_sae_nm_per_deg": -928.2115517721618,
+        "max_p_dc_kw": 10.440928544343318,
+        "min_p_dc_kw": 4.391868851663119,
+        "hv_violations": 0
+      }
+    },
+    "80kmh": {
+      "OPEN_DIFF": {
+        "a_y_max_trim_g": 1.3286922757253496,
+        "control_reserve_mz_at_limit_nm": 407.1668209153545,
+        "stability_dmz_dbeta_0g_iso_nm_per_deg": 610.2754152678729,
+        "stability_dmz_dbeta_lim_iso_nm_per_deg": 621.7373773804011,
+        "stability_dmz_dbeta_lim_sae_nm_per_deg": -621.7373773804011,
+        "max_p_dc_kw": 22.159972829077525,
+        "min_p_dc_kw": 11.741244993157919,
+        "hv_violations": 0
+      },
+      "TV_BASELINE": {
+        "a_y_max_trim_g": 1.281001185645981,
+        "control_reserve_mz_at_limit_nm": 1183.69296356683,
+        "stability_dmz_dbeta_0g_iso_nm_per_deg": 910.2193252510303,
+        "stability_dmz_dbeta_lim_iso_nm_per_deg": 992.2422269593262,
+        "stability_dmz_dbeta_lim_sae_nm_per_deg": -992.2422269593262,
+        "max_p_dc_kw": 22.52954826773697,
+        "min_p_dc_kw": 12.049124832606397,
+        "hv_violations": 0
+      },
+      "ORACLE": {
+        "a_y_max_trim_g": 1.381269851776567,
+        "control_reserve_mz_at_limit_nm": 1314.526932550821,
+        "stability_dmz_dbeta_iso_nm_per_deg": 126.27664933615114,
+        "stability_dmz_dbeta_sae_nm_per_deg": -126.27664933615114,
+        "hv_violations": 0
+      },
+      "TV_OPTIMIZED": {
+        "a_y_max_trim_g": 1.3166398809535897,
+        "control_reserve_mz_at_limit_nm": 1173.1573655359298,
+        "stability_dmz_dbeta_0g_iso_nm_per_deg": 910.2193252510303,
+        "stability_dmz_dbeta_lim_iso_nm_per_deg": 972.0263857737468,
+        "stability_dmz_dbeta_lim_sae_nm_per_deg": -972.0263857737468,
+        "max_p_dc_kw": 22.533232419485305,
+        "min_p_dc_kw": 12.34701108212234,
+        "hv_violations": 0
+      }
+    }
+  }
+}

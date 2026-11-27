@@ -1,0 +1,30 @@
+{
+  "vault": "06_suspension_kinematics_and_fea",
+  "ter26_3d_kinematics": {
+    "closure_residual_mm": 8.826273045769994e-12,
+    "front_camber_gain_deg_per_m": -38.2,
+    "rear_camber_gain_deg_per_m": -47.95,
+    "front_bump_steer_deg_per_m": 1.072,
+    "front_mr_spring": 0.8703,
+    "rear_mr_spring": 0.8635,
+    "lltd_mechanical_pct": 40.13
+  },
+  "ter27_steering_and_setup": {
+    "ackermann_factor": -0.11,
+    "peak_steer_torque_18ms_nm": 27.39,
+    "anti_dive_pct": 56.9,
+    "anti_squat_pct": 41.2
+  },
+  "fea_summary": {
+    "max_member_axle": "rear_left",
+    "max_member": "pushrod",
+    "max_design_load_n": 6314.37,
+    "max_design_load_sf15_n": 9471.56,
+    "governing_case": "CURB_STRIKE_4G"
+  },
+  "max_miner_damage_22km": 1.6244e-07,
+  "fea_exports": [
+    "fea_hardpoint_loads.json",
+    "fea_hardpoint_loads.csv"
+  ]
+}

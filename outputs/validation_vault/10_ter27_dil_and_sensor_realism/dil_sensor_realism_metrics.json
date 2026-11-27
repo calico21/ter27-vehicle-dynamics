@@ -1,0 +1,83 @@
+{
+  "suite": "10_ter27_dil_and_sensor_realism",
+  "can_accel_latency_ms": 125.0,
+  "can_steer_latency_ms": 25.0,
+  "sensor_characterization": {
+    "can_accel_latency_ms": 125.0,
+    "can_steer_latency_ms": 25.0,
+    "ideal_passthrough_max_err": 0.0,
+    "ekf_beta_rmse_deg": 1.1130458017954605,
+    "ekf_fz_fl_rmse_n": 315.5303638605092
+  },
+  "skidpad": {
+    "ideal": {
+      "circle_time_s": 5.5125,
+      "ay_ss_mean_g": 1.2084,
+      "beta_rms_deg": 1.276,
+      "beta_max_deg": 1.5077,
+      "mz_diff_std_nm": 127.0879,
+      "hv_violations": 0
+    },
+    "track_realism": {
+      "circle_time_s": 5.4446,
+      "ay_ss_mean_g": 1.2388,
+      "beta_rms_deg": 1.1955,
+      "beta_max_deg": 1.4358,
+      "mz_diff_std_nm": 125.1289,
+      "hv_violations": 0
+    },
+    "delta_time_s": -0.0679
+  },
+  "trail_braking_slalom": {
+    "ideal": {
+      "beta_rms_deg": 1.3561,
+      "beta_max_deg": 3.7062,
+      "wz_rmse_rads": 0.2688,
+      "ekf_beta_rmse_deg": 0.0,
+      "ekf_fz_mean_rmse_n": 0.0,
+      "hv_violations": 0
+    },
+    "track_realism": {
+      "beta_rms_deg": 1.0098,
+      "beta_max_deg": 3.159,
+      "wz_rmse_rads": 0.2716,
+      "ekf_beta_rmse_deg": 1.5712,
+      "ekf_fz_mean_rmse_n": 232.09,
+      "hv_violations": 0
+    }
+  },
+  "autocross": {
+    "t_ref_s": 81.848,
+    "t_ideal_s": 82.1062,
+    "t_track_realism_s": 82.1908,
+    "total_delta_t_s": 0.3428,
+    "sensor_penalty_s": 0.0847,
+    "sector_deltas_s": [
+      0.1007,
+      0.1112,
+      0.131
+    ],
+    "phase_deltas_s": {
+      "braking": 0.1172,
+      "entry": 0.0225,
+      "apex": 0.0131,
+      "exit": 0.19
+    },
+    "e_lat_rms_ideal_m": 0.0425,
+    "e_lat_rms_real_m": 0.0473
+  },
+  "braking_ramp_3d": {
+    "fsg_2023_braking_zone_count": 23,
+    "brake_elevation_scale_m": 0.45,
+    "peak_elevation_m": 0.45,
+    "peak_elevation_overspeed_m": 0.702,
+    "base_ribbon_y_m": 0.045,
+    "nan_count": 0
+  },
+  "figures": [
+    "fig01_can_latency_ekf_step_and_noise.png",
+    "fig02_skidpad_and_slalom_sensor_stress.png",
+    "fig03_autocross_casadi_sector_deltas.png",
+    "fig04_3d_braking_ramp_and_dil_telemetry.png"
+  ]
+}

@@ -28,5 +28,5 @@ ao_texture_channel = 3
 heightmap_enabled = true
 heightmap_texture = ExtResource("2_qnj2v")
 refraction_enabled = true
-uv1_scale = Vector3(100, 100, 100)
+uv1_scale = Vector3(400, 400, 400)
 grow_amount = -0.09

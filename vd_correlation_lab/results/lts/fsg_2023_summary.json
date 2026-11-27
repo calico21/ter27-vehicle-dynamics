@@ -1,0 +1,70 @@
+{
+  "grip_profile": "ttc_lab",
+  "elapsed_s": 441.84,
+  "geometry": {
+    "length_0_m": 1183.6161247864518,
+    "length_racing_m": 1180.9018106179822,
+    "r_min_0_m": 4.232589244144213,
+    "r_min_racing_m": 5.076448991549424,
+    "int_k2_reduction_pct": 14.195570805319457,
+    "min_nonadj_clearance_m": 9.45333165910305,
+    "closure_pos_err_m": 6.344008239926271e-05,
+    "closure_psi_err_rad": 5.636306920450045e-07
+  },
+  "controllers": [
+    {
+      "key": "open",
+      "label": "Open-Diff 4WD",
+      "qss_lap_s": 67.52910669226202,
+      "tr_lap_s": 999.0,
+      "valid": false,
+      "alpha_drv": 0.9,
+      "vmax_kmh": 0.0,
+      "vmed_kmh": 4.255502020244982,
+      "e_net_kj": 0.0,
+      "e_regen_kj": 0.0,
+      "e_22km_kwh": 0.0,
+      "max_abs_beta_deg": 0.0,
+      "torque_fight_kj": 0.0,
+      "p_dc_min_kw": 0.0,
+      "p_dc_max_kw": 0.0,
+      "dt_vs_open_s": 0.0
+    },
+    {
+      "key": "tv4_auto",
+      "label": "TV 4WD Autocross",
+      "qss_lap_s": 72.38448812500086,
+      "tr_lap_s": 76.5027358254185,
+      "valid": true,
+      "alpha_drv": 0.9525,
+      "vmax_kmh": 102.8412,
+      "vmed_kmh": 55.5698625984593,
+      "e_net_kj": 938.315917691308,
+      "e_regen_kj": 399.709537909927,
+      "e_22km_kwh": 4.855740569433973,
+      "max_abs_beta_deg": 4.89559960358244,
+      "torque_fight_kj": 19.8348981010074,
+      "p_dc_min_kw": -24.4361437444281,
+      "p_dc_max_kw": 75.8059531791233,
+      "dt_vs_open_s": -922.4972641745815
+    },
+    {
+      "key": "tv4_eff",
+      "label": "TV 4WD Efficiency",
+      "qss_lap_s": 76.26127842340506,
+      "tr_lap_s": 78.8796688135111,
+      "valid": true,
+      "alpha_drv": 0.975,
+      "vmax_kmh": 90.1836,
+      "vmed_kmh": 53.895339346259405,
+      "e_net_kj": 775.579704580971,
+      "e_regen_kj": 313.818138682613,
+      "e_22km_kwh": 4.013588350530785,
+      "max_abs_beta_deg": 6.59609583354971,
+      "torque_fight_kj": 15.0473939628672,
+      "p_dc_min_kw": -24.4968527323772,
+      "p_dc_max_kw": 53.4238596806459,
+      "dt_vs_open_s": -920.1203311864889
+    }
+  ]
+}

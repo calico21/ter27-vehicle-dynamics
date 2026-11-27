@@ -302,7 +302,7 @@ class ChartPlotCanvas extends Control:
 			return
 		var keys: Array[String] = chart_window.selected_channels
 		if keys.is_empty():
-			draw_string(font, Vector2(10.0, sz.y * 0.5), "Pulsa [⚙ Canales] para seleccionar variables", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.62, 0.72, 0.84))
+			draw_string(font, Vector2(10.0, sz.y * 0.5), "Pulsa [Canales] para seleccionar variables", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.62, 0.72, 0.84))
 			return
 		var samples: Array[Dictionary] = owner_overlay.get_ordered_samples()
 		if samples.size() < 2:
@@ -432,7 +432,7 @@ class CustomChartWindow extends PanelContainer:
 		hdr.add_child(title_label)
 
 		channels_btn = Button.new()
-		channels_btn.text = "⚙ Canales"
+		channels_btn.text = "Canales"
 		channels_btn.focus_mode = Control.FOCUS_NONE
 		if font != null:
 			channels_btn.add_theme_font_override("font", font)
@@ -650,47 +650,7 @@ var _mono_font: SystemFont = null
 var _root_ctrl: Control = null
 var _left_panel: DraggableSidePanel = null
 var _right_panel: DraggableSidePanel = null
-var _gg_view: GGDiagramView = null
 var _charts_layer: Control = null
-
-class GGDiagramView extends Control:
-	var trail: Array[Vector2] = []
-	var cur_g: Vector2 = Vector2.ZERO # x = ay_g, y = ax_g
-	var mu_eff: float = 1.86
-	var font_ref: Font = null
-
-	func push_sample(ay_g: float, ax_g: float, mu_val: float) -> void:
-		cur_g = Vector2(ay_g, ax_g)
-		mu_eff = maxf(mu_val, 0.5)
-		trail.append(cur_g)
-		if trail.size() > 120:
-			trail.pop_front()
-		queue_redraw()
-
-	func _draw() -> void:
-		var sz := size
-		var c := Vector2(sz.x * 0.5, sz.y * 0.52)
-		var max_g := maxf(mu_eff * 1.15, 2.2)
-		var r_max := minf(sz.x, sz.y) * 0.42
-		draw_rect(Rect2(Vector2.ZERO, sz), Color(0.043, 0.059, 0.090, 0.85))
-		draw_line(Vector2(c.x - r_max, c.y), Vector2(c.x + r_max, c.y), Color(0.25, 0.32, 0.42, 0.6), 1.0)
-		draw_line(Vector2(c.x, c.y - r_max), Vector2(c.x, c.y + r_max), Color(0.25, 0.32, 0.42, 0.6), 1.0)
-		for g_ring in [1.0, mu_eff]:
-			var gf: float = float(g_ring)
-			var rr: float = (gf / max_g) * r_max
-			var col := Color(0.0, 0.90, 1.0, 0.55) if gf > 1.2 else Color(0.35, 0.45, 0.60, 0.45)
-			draw_arc(c, rr, 0.0, TAU, 48, col, 1.5 if gf > 1.2 else 1.0)
-		for i in range(1, trail.size()):
-			var p0 := c + Vector2(trail[i - 1].x, -trail[i - 1].y) * (r_max / max_g)
-			var p1 := c + Vector2(trail[i].x, -trail[i].y) * (r_max / max_g)
-			var a := float(i) / float(trail.size())
-			draw_line(p0, p1, Color(0.0, 0.90, 1.0, 0.15 + 0.55 * a), 1.5)
-		var p_cur := c + Vector2(cur_g.x, -cur_g.y) * (r_max / max_g)
-		var g_comb := cur_g.length()
-		var dot_col := Color(0.94, 0.27, 0.27) if g_comb > 0.95 * mu_eff else Color(0.0, 0.90, 1.0)
-		draw_circle(p_cur, 4.5, dot_col)
-		if font_ref != null:
-			draw_string(font_ref, Vector2(6.0, 13.0), "g-g: %.2fg / mu %.2f" % [g_comb, mu_eff], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.88, 0.95, 1.0))
 var _chart_windows: Array[CustomChartWindow] = []
 
 var _freeze_btn: Button = null
@@ -903,11 +863,6 @@ func _build_ui() -> void:
 	_friction_view.custom_minimum_size = Vector2(0, 178)
 	_right_panel.body_container.add_child(_friction_view)
 
-	_gg_view = GGDiagramView.new()
-	_gg_view.font_ref = _mono_font
-	_gg_view.custom_minimum_size = Vector2(0, 136)
-	_right_panel.body_container.add_child(_gg_view)
-
 	_wheels_label = Label.new()
 	_apply_mono(_wheels_label, 9)
 	_wheels_label.add_theme_color_override("font_color", Color(0.88, 0.94, 0.98))
@@ -1117,7 +1072,7 @@ func update_from_car(car: Node, dt: float) -> void:
 	var grip_pcts: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	if wheels.size() >= 4:
 		for i in range(4):
-			var f_max := maxf(float(wheels[i].F_z) * 1.86 * float(wheels[i].surface_mu_scale), 1.0)
+			var f_max := maxf(float(wheels[i].F_z) * 1.5 * float(wheels[i].surface_mu_scale), 1.0)
 			var f_res := sqrt(float(wheels[i].F_x) * float(wheels[i].F_x) + float(wheels[i].F_y) * float(wheels[i].F_y))
 			grip_pcts[i] = clampf(f_res / f_max, 0.0, 1.2) * 100.0
 		if _friction_view != null:
@@ -1125,13 +1080,8 @@ func update_from_car(car: Node, dt: float) -> void:
 				_friction_view.wheel_fx[i] = float(wheels[i].F_x)
 				_friction_view.wheel_fy[i] = float(wheels[i].F_y)
 				_friction_view.wheel_fz[i] = float(wheels[i].F_z)
-				_friction_view.wheel_mu[i] = 1.86 * float(wheels[i].surface_mu_scale)
+				_friction_view.wheel_mu[i] = 1.5 * float(wheels[i].surface_mu_scale)
 			_friction_view.queue_redraw()
-		if _gg_view != null:
-			var ay_g_val: float = float(car.get("_prev_ay_ros")) / 9.81 if car.get("_prev_ay_ros") != null else 0.0
-			var ax_g_val: float = float(car.get("_prev_ax_ros")) / 9.81 if car.get("_prev_ax_ros") != null else 0.0
-			var mu_avg_val: float = 1.86 * float(wheels[0].surface_mu_scale)
-			_gg_view.push_sample(ay_g_val, ax_g_val, mu_avg_val)
 		if _wheels_label != null:
 			var wl := "Whl |  Fz  | Fx/Fy   | k[%] | a[°] | RPM  | I/M/O°C | Tdisc | mu\n"
 			var wn := ["FL ", "FR ", "RL ", "RR "]

@@ -1,0 +1,747 @@
+{
+  "vehicle": "TeR27 4WD",
+  "coordinate_system": "ISO 8855 (+X forward, +Y left, +Z up)",
+  "sign_convention": "Positive (+N) = Tension, Negative (-N) = Compression",
+  "telemetry_source": "trace_casadi_fsg_real.csv",
+  "n_telemetry_samples": 16602,
+  "endurance_laps_22km": 18,
+  "axles": {
+    "front_left": {
+      "static_corner_fz_n": 640.1,
+      "equilibrium_matrix_cond": 42.318,
+      "members": {
+        "lca_front": {
+          "label": "LCA Front Leg",
+          "lap_max_tension_n": 3448.83,
+          "lap_max_compression_n": -2245.91,
+          "lap_rms_n": 1285.82,
+          "extreme_max_tension_n": 4165.12,
+          "extreme_max_compression_n": -1047.14,
+          "governing_load_case": "2G_BRAKE",
+          "design_peak_abs_n": 4165.12,
+          "design_peak_with_sf15_n": 6247.68,
+          "fatigue_22km": {
+            "cycles_per_lap": 1851.5,
+            "max_amplitude_n": 2847.37,
+            "miner_damage_22km": 8.7705e-08,
+            "estimated_life_laps": 1000000.0,
+            "estimated_life_km": 1000000.0,
+            "fatigue_pass_22km": true
+          }
+        },
+        "lca_rear": {
+          "label": "LCA Rear Leg",
+          "lap_max_tension_n": 2094.55,
+          "lap_max_compression_n": -4118.16,
+          "lap_rms_n": 1418.21,
+          "extreme_max_tension_n": 1419.26,
+          "extreme_max_compression_n": -3821.86,
+          "governing_load_case": "2G_BRAKE",
+          "design_peak_abs_n": 4118.16,
+          "design_peak_with_sf15_n": 6177.24,
+          "fatigue_22km": {
+            "cycles_per_lap": 1926.5,
+            "max_amplitude_n": 3106.36,
+            "miner_damage_22km": 1.6244e-07,
+            "estimated_life_laps": 1000000.0,
+            "estimated_life_km": 1000000.0,
+            "fatigue_pass_22km": true
+          }
+        },
+        "uca_front": {
+          "label": "UCA Front Leg",
+          "lap_max_tension_n": 1667.03,
+          "lap_max_compression_n": -1025.09,
+          "lap_rms_n": 594.55,
+          "extreme_max_tension_n": 1024.87,
+          "extreme_max_compression_n": -1390.83,
+          "governing_load_case": "2G_BRAKE",
+          "design_peak_abs_n": 1667.03,
+          "design_peak_with_sf15_n": 2500.55,
+          "fatigue_22km": {
+            "cycles_per_lap": 1765.5,
+            "max_amplitude_n": 1346.06,
+            "miner_damage_22km": 0.0,
+            "estimated_life_laps": 1000000.0,
+            "estimated_life_km": 1000000.0,
+            "fatigue_pass_22km": true
+          }
+        },
+        "uca_rear": {
+          "label": "UCA Rear Leg",
+          "lap_max_tension_n": 2129.02,
+          "lap_max_compression_n": -482.53,
+          "lap_rms_n": 798.09,
+          "extreme_max_tension_n": 1883.95,
+          "extreme_max_compression_n": -451.5,
+          "governing_load_case": "2G_BRAKE",
+          "design_peak_abs_n": 2129.02,
+          "design_peak_with_sf15_n": 3193.52,
+          "fatigue_22km": {
+            "cycles_per_lap": 1929.5,
+            "max_amplitude_n": 1305.77,
+            "miner_damage_22km": 0.0,
+            "estimated_life_laps": 1000000.0,
+            "estimated_life_km": 1000000.0,
+            "fatigue_pass_22km": true
+          }
+        },
+        "tie_rod": {
+          "label": "Tie-Rod / Toe-Link",
+          "lap_max_tension_n": 332.15,
+          "lap_max_compression_n": -175.45,
+          "lap_rms_n": 126.74,
+          "extreme_max_tension_n": 278.69,
+          "extreme_max_compression_n": -239.72,
+          "governing_load_case": "COMBINED_1.5G_BRK_CORN",
+          "design_peak_abs_n": 332.15,
+          "design_peak_with_sf15_n": 498.22,
+          "fatigue_22km": {
+            "cycles_per_lap": 2090.0,
+            "max_amplitude_n": 253.8,
+            "miner_damage_22km": 0.0,
+            "estimated_life_laps": 1000000.0,
+            "estimated_life_km": 1000000.0,
+            "fatigue_pass_22km": true
+          }
+        },
+        "pushrod": {
+          "label": "Pushrod",
+          "lap_max_tension_n": -503.97,
+          "lap_max_compression_n": -2249.64,
+          "lap_rms_n": 1246.92,
+          "extreme_max_tension_n": -515.02,
+          "extreme_max_compression_n": -3866.7,
+          "governing_load_case": "CURB_STRIKE_4G",
+          "design_peak_abs_n": 3866.7,
+          "design_peak_with_sf15_n": 5800.05,
+          "fatigue_22km": {
+            "cycles_per_lap": 1594.5,
+            "max_amplitude_n": 872.84,
+            "miner_damage_22km": 0.0,
+            "estimated_life_laps": 1000000.0,
+            "estimated_life_km": 1000000.0,
+            "fatigue_pass_22km": true
+          }
+        },
+        "rocker_pivot": {
+          "label": "Rocker Pivot Bearing",
+          "lap_max_tension_n": 2388.37,
+          "lap_max_compression_n": 605.02,
+          "lap_rms_n": 1274.38,
+          "extreme_max_tension_n": 4361.16,
+          "extreme_max_compression_n": 662.68,
+          "governing_load_case": "CURB_STRIKE_4G",
+          "design_peak_abs_n": 4361.16,
+          "design_peak_with_sf15_n": 6541.73
+        },
+        "damper_mount": {
+          "label": "Damper / Coilover Mount",
+          "lap_max_tension_n": 857.44,
+          "lap_max_compression_n": -347.93,
+          "lap_rms_n": 266.48,
+          "extreme_max_tension_n": 2169.95,
+          "extreme_max_compression_n": -397.82,
+          "governing_load_case": "CURB_STRIKE_4G",
+          "design_peak_abs_n": 2169.95,
+          "design_peak_with_sf15_n": 3254.92
+        },
+        "arb_link": {
+          "label": "ARB Drop-Link",
+          "lap_max_tension_n": 78.76,
+          "lap_max_compression_n": -73.22,
+          "lap_rms_n": 44.29,
+          "extreme_max_tension_n": 759.48,
+          "extreme_max_compression_n": -139.24,
+          "governing_load_case": "CURB_STRIKE_4G",
+          "design_peak_abs_n": 759.48,
+          "design_peak_with_sf15_n": 1139.22
+        }
+      },
+      "rainflow_spectra_22km": {
+        "lca_front": {
+          "bin_edges_n": [
+            0.01,
+            406.77,
+            813.54,
+            1220.31,
+            1627.07,
+            2033.84,
+            2440.61,
+            2847.37,
+            3254.14,
+            3660.91,
+            4067.67,
+            4474.44,
+            4881.21,
+            5287.97,
+            5694.74
+          ],
+          "cycles_22km": [
+            28575.0,
+            2493.0,
+            1116.0,
+            513.0,
+            171.0,
+            90.0,
+            54.0,
+            27.0,
+            36.0,
+            99.0,
+            72.0,
+            27.0,
+            27.0,
+            27.0
+          ]
+        },
+        "lca_rear": {
+          "bin_edges_n": [
+            0.0,
+            443.77,
+            887.53,
+            1331.3,
+            1775.06,
+            2218.83,
+            2662.59,
+            3106.36,
+            3550.12,
+            3993.89,
+            4437.65,
+            4881.42,
+            5325.18,
+            5768.95,
+            6212.71
+          ],
+          "cycles_22km": [
+            30249.0,
+            2331.0,
+            1161.0,
+            414.0,
+            144.0,
+            90.0,
+            9.0,
+            36.0,
+            54.0,
+            36.0,
+            27.0,
+            81.0,
+            27.0,
+            18.0
+          ]
+        },
+        "uca_front": {
+          "bin_edges_n": [
+            0.0,
+            192.29,
+            384.59,
+            576.88,
+            769.18,
+            961.47,
+            1153.77,
+            1346.06,
+            1538.35,
+            1730.65,
+            1922.94,
+            2115.24,
+            2307.53,
+            2499.82,
+            2692.12
+          ],
+          "cycles_22km": [
+            27171.0,
+            2529.0,
+            1017.0,
+            522.0,
+            153.0,
+            36.0,
+            54.0,
+            63.0,
+            72.0,
+            45.0,
+            45.0,
+            45.0,
+            9.0,
+            18.0
+          ]
+        },
+        "uca_rear": {
+          "bin_edges_n": [
+            0.01,
+            186.54,
+            373.08,
+            559.62,
+            746.16,
+            932.7,
+            1119.24,
+            1305.77,
+            1492.31,
+            1678.85,
+            1865.39,
+            2051.93,
+            2238.46,
+            2425.0,
+            2611.54
+          ],
+          "cycles_22km": [
+            30294.0,
+            2394.0,
+            1143.0,
+            396.0,
+            90.0,
+            81.0,
+            54.0,
+            36.0,
+            0.0,
+            54.0,
+            45.0,
+            18.0,
+            72.0,
+            54.0
+          ]
+        },
+        "tie_rod": {
+          "bin_edges_n": [
+            0.0,
+            36.26,
+            72.52,
+            108.77,
+            145.03,
+            181.29,
+            217.55,
+            253.8,
+            290.06,
+            326.32,
+            362.57,
+            398.83,
+            435.09,
+            471.35,
+            507.6
+          ],
+          "cycles_22km": [
+            34146.0,
+            2358.0,
+            576.0,
+            189.0,
+            27.0,
+            54.0,
+            18.0,
+            45.0,
+            0.0,
+            45.0,
+            72.0,
+            36.0,
+            36.0,
+            18.0
+          ]
+        },
+        "pushrod": {
+          "bin_edges_n": [
+            0.0,
+            124.69,
+            249.38,
+            374.07,
+            498.76,
+            623.45,
+            748.15,
+            872.84,
+            997.53,
+            1122.22,
+            1246.91,
+            1371.6,
+            1496.29,
+            1620.98,
+            1745.67
+          ],
+          "cycles_22km": [
+            27657.0,
+            486.0,
+            162.0,
+            90.0,
+            36.0,
+            36.0,
+            18.0,
+            27.0,
+            0.0,
+            54.0,
+            45.0,
+            36.0,
+            18.0,
+            36.0
+          ]
+        }
+      }
+    },
+    "rear_left": {
+      "static_corner_fz_n": 782.35,
+      "equilibrium_matrix_cond": 36.99,
+      "members": {
+        "lca_front": {
+          "label": "LCA Front Leg",
+          "lap_max_tension_n": 1578.21,
+          "lap_max_compression_n": -2734.75,
+          "lap_rms_n": 1094.54,
+          "extreme_max_tension_n": 2586.17,
+          "extreme_max_compression_n": -969.28,
+          "governing_load_case": "2G_BRAKE",
+          "design_peak_abs_n": 2734.75,
+          "design_peak_with_sf15_n": 4102.13,
+          "fatigue_22km": {
+            "cycles_per_lap": 1431.0,
+            "max_amplitude_n": 2156.48,
+            "miner_damage_22km": 0.0,
+            "estimated_life_laps": 1000000.0,
+            "estimated_life_km": 1000000.0,
+            "fatigue_pass_22km": true
+          }
+        },
+        "lca_rear": {
+          "label": "LCA Rear Leg",
+          "lap_max_tension_n": 3203.18,
+          "lap_max_compression_n": -1893.0,
+          "lap_rms_n": 1304.37,
+          "extreme_max_tension_n": 1546.08,
+          "extreme_max_compression_n": -2951.46,
+          "governing_load_case": "COMBINED_1.5G_BRK_CORN",
+          "design_peak_abs_n": 3203.18,
+          "design_peak_with_sf15_n": 4804.78,
+          "fatigue_22km": {
+            "cycles_per_lap": 1394.0,
+            "max_amplitude_n": 2548.09,
+            "miner_damage_22km": 8.8875e-09,
+            "estimated_life_laps": 1000000.0,
+            "estimated_life_km": 1000000.0,
+            "fatigue_pass_22km": true
+          }
+        },
+        "uca_front": {
+          "label": "UCA Front Leg",
+          "lap_max_tension_n": 2637.46,
+          "lap_max_compression_n": 72.12,
+          "lap_rms_n": 1370.59,
+          "extreme_max_tension_n": 2992.44,
+          "extreme_max_compression_n": -155.88,
+          "governing_load_case": "CURB_STRIKE_4G",
+          "design_peak_abs_n": 2992.44,
+          "design_peak_with_sf15_n": 4488.66,
+          "fatigue_22km": {
+            "cycles_per_lap": 1313.0,
+            "max_amplitude_n": 1282.67,
+            "miner_damage_22km": 0.0,
+            "estimated_life_laps": 1000000.0,
+            "estimated_life_km": 1000000.0,
+            "fatigue_pass_22km": true
+          }
+        },
+        "uca_rear": {
+          "label": "UCA Rear Leg",
+          "lap_max_tension_n": 1273.08,
+          "lap_max_compression_n": -682.48,
+          "lap_rms_n": 505.34,
+          "extreme_max_tension_n": 1992.64,
+          "extreme_max_compression_n": -392.47,
+          "governing_load_case": "COMBINED_1.5G_BRK_CORN",
+          "design_peak_abs_n": 1992.64,
+          "design_peak_with_sf15_n": 2988.97,
+          "fatigue_22km": {
+            "cycles_per_lap": 1464.0,
+            "max_amplitude_n": 977.78,
+            "miner_damage_22km": 0.0,
+            "estimated_life_laps": 1000000.0,
+            "estimated_life_km": 1000000.0,
+            "fatigue_pass_22km": true
+          }
+        },
+        "tie_rod": {
+          "label": "Tie-Rod / Toe-Link",
+          "lap_max_tension_n": -10.05,
+          "lap_max_compression_n": -56.67,
+          "lap_rms_n": 30.08,
+          "extreme_max_tension_n": -13.92,
+          "extreme_max_compression_n": -96.96,
+          "governing_load_case": "CURB_STRIKE_4G",
+          "design_peak_abs_n": 96.96,
+          "design_peak_with_sf15_n": 145.44,
+          "fatigue_22km": {
+            "cycles_per_lap": 1629.5,
+            "max_amplitude_n": 23.31,
+            "miner_damage_22km": 0.0,
+            "estimated_life_laps": 1000000.0,
+            "estimated_life_km": 1000000.0,
+            "fatigue_pass_22km": true
+          }
+        },
+        "pushrod": {
+          "label": "Pushrod",
+          "lap_max_tension_n": -654.62,
+          "lap_max_compression_n": -3690.76,
+          "lap_rms_n": 1958.76,
+          "extreme_max_tension_n": -906.73,
+          "extreme_max_compression_n": -6314.37,
+          "governing_load_case": "CURB_STRIKE_4G",
+          "design_peak_abs_n": 6314.37,
+          "design_peak_with_sf15_n": 9471.55,
+          "fatigue_22km": {
+            "cycles_per_lap": 1630.5,
+            "max_amplitude_n": 1518.07,
+            "miner_damage_22km": 0.0,
+            "estimated_life_laps": 1000000.0,
+            "estimated_life_km": 1000000.0,
+            "fatigue_pass_22km": true
+          }
+        },
+        "rocker_pivot": {
+          "label": "Rocker Pivot Bearing",
+          "lap_max_tension_n": 3442.66,
+          "lap_max_compression_n": 925.85,
+          "lap_rms_n": 1896.54,
+          "extreme_max_tension_n": 5890.14,
+          "extreme_max_compression_n": 1174.76,
+          "governing_load_case": "CURB_STRIKE_4G",
+          "design_peak_abs_n": 5890.14,
+          "design_peak_with_sf15_n": 8835.22
+        },
+        "damper_mount": {
+          "label": "Damper / Coilover Mount",
+          "lap_max_tension_n": 1150.11,
+          "lap_max_compression_n": -377.98,
+          "lap_rms_n": 335.05,
+          "extreme_max_tension_n": 2652.16,
+          "extreme_max_compression_n": -486.23,
+          "governing_load_case": "CURB_STRIKE_4G",
+          "design_peak_abs_n": 2652.16,
+          "design_peak_with_sf15_n": 3978.24
+        },
+        "arb_link": {
+          "label": "ARB Drop-Link",
+          "lap_max_tension_n": 81.81,
+          "lap_max_compression_n": -87.12,
+          "lap_rms_n": 53.97,
+          "extreme_max_tension_n": 928.26,
+          "extreme_max_compression_n": -170.18,
+          "governing_load_case": "CURB_STRIKE_4G",
+          "design_peak_abs_n": 928.26,
+          "design_peak_with_sf15_n": 1392.38
+        }
+      },
+      "rainflow_spectra_22km": {
+        "lca_front": {
+          "bin_edges_n": [
+            0.0,
+            308.07,
+            616.14,
+            924.21,
+            1232.28,
+            1540.35,
+            1848.41,
+            2156.48,
+            2464.55,
+            2772.62,
+            3080.69,
+            3388.76,
+            3696.83,
+            4004.89,
+            4312.96
+          ],
+          "cycles_22km": [
+            21285.0,
+            2664.0,
+            891.0,
+            387.0,
+            90.0,
+            63.0,
+            63.0,
+            54.0,
+            18.0,
+            36.0,
+            45.0,
+            90.0,
+            36.0,
+            36.0
+          ]
+        },
+        "lca_rear": {
+          "bin_edges_n": [
+            0.01,
+            364.02,
+            728.03,
+            1092.04,
+            1456.06,
+            1820.07,
+            2184.08,
+            2548.1,
+            2912.11,
+            3276.12,
+            3640.13,
+            4004.15,
+            4368.16,
+            4732.17,
+            5096.19
+          ],
+          "cycles_22km": [
+            21375.0,
+            2169.0,
+            918.0,
+            180.0,
+            36.0,
+            54.0,
+            72.0,
+            18.0,
+            27.0,
+            36.0,
+            18.0,
+            81.0,
+            54.0,
+            54.0
+          ]
+        },
+        "uca_front": {
+          "bin_edges_n": [
+            0.01,
+            183.25,
+            366.48,
+            549.72,
+            732.96,
+            916.2,
+            1099.44,
+            1282.67,
+            1465.91,
+            1649.15,
+            1832.39,
+            2015.63,
+            2198.87,
+            2382.1,
+            2565.34
+          ],
+          "cycles_22km": [
+            21501.0,
+            1404.0,
+            225.0,
+            45.0,
+            99.0,
+            90.0,
+            18.0,
+            36.0,
+            18.0,
+            45.0,
+            18.0,
+            54.0,
+            45.0,
+            36.0
+          ]
+        },
+        "uca_rear": {
+          "bin_edges_n": [
+            0.0,
+            139.68,
+            279.37,
+            419.05,
+            558.73,
+            698.42,
+            838.1,
+            977.78,
+            1117.46,
+            1257.15,
+            1396.83,
+            1536.51,
+            1676.2,
+            1815.88,
+            1955.56
+          ],
+          "cycles_22km": [
+            22788.0,
+            2034.0,
+            828.0,
+            234.0,
+            72.0,
+            54.0,
+            54.0,
+            72.0,
+            18.0,
+            9.0,
+            36.0,
+            63.0,
+            72.0,
+            18.0
+          ]
+        },
+        "tie_rod": {
+          "bin_edges_n": [
+            0.0,
+            3.33,
+            6.66,
+            9.99,
+            13.32,
+            16.65,
+            19.98,
+            23.31,
+            26.64,
+            29.97,
+            33.3,
+            36.63,
+            39.96,
+            43.29,
+            46.62
+          ],
+          "cycles_22km": [
+            28431.0,
+            306.0,
+            216.0,
+            126.0,
+            63.0,
+            9.0,
+            0.0,
+            36.0,
+            45.0,
+            9.0,
+            36.0,
+            36.0,
+            0.0,
+            18.0
+          ]
+        },
+        "pushrod": {
+          "bin_edges_n": [
+            0.0,
+            216.87,
+            433.73,
+            650.6,
+            867.47,
+            1084.33,
+            1301.2,
+            1518.07,
+            1734.93,
+            1951.8,
+            2168.67,
+            2385.53,
+            2602.4,
+            2819.27,
+            3036.13
+          ],
+          "cycles_22km": [
+            28449.0,
+            306.0,
+            216.0,
+            126.0,
+            63.0,
+            9.0,
+            0.0,
+            36.0,
+            45.0,
+            9.0,
+            36.0,
+            36.0,
+            0.0,
+            18.0
+          ]
+        }
+      }
+    }
+  },
+  "global_peak_summary": {
+    "max_member_axle": "rear_left",
+    "max_member": "pushrod",
+    "max_design_load_n": 6314.37,
+    "max_design_load_sf15_n": 9471.56,
+    "governing_case": "CURB_STRIKE_4G"
+  }
+}

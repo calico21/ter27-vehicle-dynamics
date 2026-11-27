@@ -1,0 +1,48 @@
+{
+  "calibration_method": "SciPy brentq + CasADi 3.7.2/IPOPT on validated TeR26 RWD 3D double-wishbone model",
+  "target_ter26_rwd_skidpad_s": 5.5,
+  "tolerance_s": 0.03,
+  "mu_fsg_scale": 1.078548,
+  "T_fsg_c": 75.0,
+  "T_track_fsg_c": 45.0,
+  "env_aero_cl_scale": 0.78,
+  "mu_thermal_at_T_fsg": 1.000023,
+  "ter27_base_lambda_mux": 0.68,
+  "ter27_base_lambda_muy": 0.47,
+  "fsg_effective_lambda_mux": 0.733413,
+  "fsg_effective_lambda_muy": 0.506918,
+  "ter26_rwd_skidpad_s": 5.5,
+  "ter26_ay_g": 1.2139,
+  "ter26_r_eff_m": 9.125,
+  "ter26_v_ms": 10.4244,
+  "ter26_beta_deg": -2.2171,
+  "ter26_delta_deg": 12.4366,
+  "min_clear_m": 0.8585,
+  "ter26_rwd_tight_radius_reference": {
+    "t_skidpad_s": 5.285,
+    "r_eff_m": 8.3575,
+    "ay_g": 1.2041,
+    "min_clear_m": 0.15
+  },
+  "cold_test_oct_preserved": {
+    "sysid_mu_y_scale_untouched": 0.773878,
+    "ter26_tires_json_lambda_muy_untouched": 0.495282,
+    "ter26_cold_oct_skidpad_s": 5.9657,
+    "ter26_cold_oct_ay_g": 1.0318
+  },
+  "legacy_0p88_comparison": {
+    "legacy_env_mu_scale": 0.88,
+    "legacy_lmuy_eff": 0.4136,
+    "legacy_ter26_rwd_skidpad_s": 6.0581,
+    "legacy_ter26_ay_g": 1.0006
+  },
+  "geometry": {
+    "d_inner_m": 15.25,
+    "d_outer_m": 21.25,
+    "r_inner_m": 7.625,
+    "r_outer_m": 10.625,
+    "r_center_m": 9.125,
+    "cone_margin_min_m": 0.15
+  },
+  "runtime_s": 1.26
+}

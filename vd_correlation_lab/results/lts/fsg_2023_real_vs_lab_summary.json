@@ -1,0 +1,39 @@
+{
+  "track": "fsg_2023",
+  "controller": "tv4_auto",
+  "TTC_LAB_PEAK": {
+    "qss_s": 72.384,
+    "lap_14dof_s": 76.503,
+    "gap_pct": 5.69,
+    "vmax_kmh": 102.84,
+    "vmed_kmh": 55.57,
+    "peak_ay_g": 1.67,
+    "peak_brake_g": 1.663,
+    "e_22km_kwh": 4.856,
+    "rms_ey_m": 0.157,
+    "corners_cones_hit": 2,
+    "min_14dof_clear_m": -0.109
+  },
+  "FSG_REAL_TRACK": {
+    "qss_s": 77.096,
+    "lap_14dof_s": 81.388,
+    "gap_pct": 5.57,
+    "vmax_kmh": 103.61,
+    "vmed_kmh": 52.12,
+    "peak_ay_g": 1.307,
+    "peak_brake_g": 1.452,
+    "e_22km_kwh": 5.166,
+    "rms_ey_m": 0.1293,
+    "corners_cones_hit": 0,
+    "min_14dof_clear_m": 0.103
+  },
+  "delta_real_minus_lab": {
+    "qss_s": 4.712,
+    "lap_14dof_s": 4.885,
+    "vmax_kmh": 0.77,
+    "vmed_kmh": -3.45,
+    "peak_ay_g": -0.363,
+    "peak_brake_g": -0.211,
+    "e_22km_kwh": 0.31
+  }
+}

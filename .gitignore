@@ -73,3 +73,39 @@ core.*
 *.tar.gz
 *.pdf
 rosbag2_*/
+
+# Personal VD correlation reports & cached artifacts
+vd_correlation_lab/reports/*
+!vd_correlation_lab/reports/.gitkeep
+vd_correlation_lab/tmp/
+
+# Python caches, compiled artifacts & OS junk
+__pycache__/
+*.pyc
+*.pyo
+*.o
+*.so
+*.tmp
+*.bak
+.pytest_cache/
+.DS_Store
+Thumbs.db
+
+# Godot editor cache (keep project.godot, *.tscn, *.gd, *.json, *.uid tracked)
+.godot/
+
+# Temporary telemetry / calibration artifacts
+batch_*.json
+*_decoded.csv
+*_sim_out.csv
+*.play.log
+*.record.log
+*.node.log
+
+# Quarantined legacy files (preserved locally, excluded from VCS)
+_archive_legacy/
+
+# CasADi solver and NLP warm-start cache
+outputs/casadi_cache/*
+!outputs/casadi_cache/.gitkeep
+!outputs/casadi_cache/README.md

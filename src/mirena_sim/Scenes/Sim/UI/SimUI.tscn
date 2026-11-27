@@ -6,13 +6,7 @@
 [ext_resource type="Script" uid="uid://btpbxj5260gcn" path="res://Scenes/Sim/UI/vehicle_menu.gd" id="3_xhllv"]
 [ext_resource type="Script" uid="uid://t2c8u12dg5bk" path="res://Scenes/Sim/track_menu.gd" id="3_xmg1i"]
 [ext_resource type="Script" uid="uid://mvywmawpyl07" path="res://Scenes/Sim/UI/extra_menu.gd" id="6_ac68a"]
-
-[sub_resource type="GDScript" id="GDScript_xhllv"]
-script/source = "extends PanelContainer
-	
-func _ready() -> void:
-	print(\"main menu ready\")
-"
+[ext_resource type="Script" path="res://Scenes/Sim/UI/options_tabs_controller.gd" id="7_tabs"]
 
 [sub_resource type="LabelSettings" id="LabelSettings_0tiax"]
 font_size = 22
@@ -61,14 +55,33 @@ text = "Timer:"
 layout_mode = 2
 text = "Fallen Cones:"
 
+[node name="DilTimingBar" type="PanelContainer" parent="." unique_id=1950003001]
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -255.0
+offset_top = 12.0
+offset_right = 255.0
+offset_bottom = 44.0
+grow_horizontal = 2
+focus_mode = 0
+
+[node name="DilTimingLabel" type="Label" parent="DilTimingBar" unique_id=1950003002]
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "LAP 00:00.00  |  BEST --:--.--  |  DELTA +0.00s  |  DOO: 0 (+0.0s)"
+horizontal_alignment = 1
+vertical_alignment = 1
+
 [node name="MainMenu" type="PanelContainer" parent="." unique_id=527270208]
-custom_minimum_size = Vector2(400, 500)
+custom_minimum_size = Vector2(470, 560)
 layout_mode = 0
 offset_left = 20.0
 offset_top = 20.0
-offset_right = 320.0
-offset_bottom = 520.0
-script = SubResource("GDScript_xhllv")
+offset_right = 490.0
+offset_bottom = 580.0
+script = ExtResource("7_tabs")
 
 [node name="MarginContainer" type="MarginContainer" parent="MainMenu" unique_id=1022736181]
 layout_mode = 2
@@ -89,6 +102,7 @@ label_settings = SubResource("LabelSettings_0tiax")
 [node name="MenuTabs" type="TabContainer" parent="MainMenu/MarginContainer/VBoxContainer" unique_id=1858219786]
 layout_mode = 2
 size_flags_vertical = 3
+focus_mode = 0
 current_tab = 0
 
 [node name="VEHICLE" type="MarginContainer" parent="MainMenu/MarginContainer/VBoxContainer/MenuTabs" unique_id=1780155961]
@@ -132,11 +146,6 @@ popup/item_2/text = "FollowTrack"
 popup/item_2/id = 2
 popup/item_3/text = "NoPilot"
 popup/item_3/id = 3
-
-[node name="ResetCarButton" type="Button" parent="MainMenu/MarginContainer/VBoxContainer/MenuTabs/VEHICLE/Vehicle" unique_id=599819201]
-layout_mode = 2
-theme_override_styles/focus = SubResource("StyleBoxEmpty_val13")
-text = "Reset Car Position"
 
 [node name="AsStatus" type="VBoxContainer" parent="MainMenu/MarginContainer/VBoxContainer/MenuTabs/VEHICLE/Vehicle" unique_id=1784271774]
 layout_mode = 2
@@ -216,6 +225,20 @@ layout_mode = 2
 layout_mode = 2
 text = "STATUS: "
 
+[node name="ExtraTools" type="MarginContainer" parent="MainMenu/MarginContainer/VBoxContainer/MenuTabs/VEHICLE/Vehicle" unique_id=137354673]
+layout_mode = 2
+script = ExtResource("6_ac68a")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MainMenu/MarginContainer/VBoxContainer/MenuTabs/VEHICLE/Vehicle/ExtraTools" unique_id=1688313888]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="39" type="Button" parent="MainMenu/MarginContainer/VBoxContainer/MenuTabs/VEHICLE/Vehicle/ExtraTools/VBoxContainer" unique_id=275094366]
+layout_mode = 2
+focus_mode = 0
+theme_override_styles/focus = SubResource("StyleBoxEmpty_val13")
+text = "39"
+
 [node name="TRACK" type="MarginContainer" parent="MainMenu/MarginContainer/VBoxContainer/MenuTabs" unique_id=1626101123]
 visible = false
 layout_mode = 2
@@ -233,6 +256,16 @@ theme_override_constants/separation = 13
 [node name="VBoxContainer" type="VBoxContainer" parent="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK/HBoxContainer" unique_id=687881883]
 layout_mode = 2
 theme_override_constants/separation = 8
+
+[node name="TrackPresetLabel" type="Label" parent="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK/HBoxContainer/VBoxContainer" unique_id=1950002001]
+layout_mode = 2
+text = "Track Preset"
+
+[node name="TrackPreset" type="OptionButton" parent="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK/HBoxContainer/VBoxContainer" unique_id=1950002002]
+layout_mode = 2
+focus_mode = 0
+theme_override_styles/focus = SubResource("StyleBoxEmpty_val13")
+clip_text = true
 
 [node name="GenerateTrack" type="Button" parent="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK/HBoxContainer/VBoxContainer" unique_id=2111812978]
 layout_mode = 2
@@ -277,24 +310,21 @@ display_mode = 1
 root_subfolder = "TrackFiles"
 filters = PackedStringArray("*.json ; Track files")
 
-[node name="EXTRA" type="MarginContainer" parent="MainMenu/MarginContainer/VBoxContainer/MenuTabs" unique_id=137354673]
-visible = false
+[node name="FooterSeparator" type="HSeparator" parent="MainMenu/MarginContainer/VBoxContainer" unique_id=1950001001]
 layout_mode = 2
-theme_override_constants/margin_left = 10
-theme_override_constants/margin_top = 10
-theme_override_constants/margin_right = 10
-theme_override_constants/margin_bottom = 10
-script = ExtResource("6_ac68a")
-metadata/_tab_index = 2
 
-[node name="VBoxContainer" type="VBoxContainer" parent="MainMenu/MarginContainer/VBoxContainer/MenuTabs/EXTRA" unique_id=1688313888]
+[node name="ResetCarButton" type="Button" parent="MainMenu/MarginContainer/VBoxContainer" unique_id=599819201]
 layout_mode = 2
-theme_override_constants/separation = 10
-
-[node name="39" type="Button" parent="MainMenu/MarginContainer/VBoxContainer/MenuTabs/EXTRA/VBoxContainer" unique_id=275094366]
-layout_mode = 2
+focus_mode = 0
 theme_override_styles/focus = SubResource("StyleBoxEmpty_val13")
-text = "39"
+text = "Reset Car Position"
+
+[node name="FooterShortcuts" type="Label" parent="MainMenu/MarginContainer/VBoxContainer" unique_id=1950001002]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.68, 0.76, 0.86, 1)
+theme_override_font_sizes/font_size = 11
+text = "[M] Mode [C/F3] Cam [R] Rew [G/B] Pin [F5/F6] Lap/Cones [F7] SloMo [Esc]"
+horizontal_alignment = 1
 
 [node name="ControlsLabel" type="Label" parent="." unique_id=1827473245]
 layout_mode = 1
@@ -310,9 +340,10 @@ text = "Initializing..."
 script = ExtResource("2_hox2s")
 
 [connection signal="item_selected" from="MainMenu/MarginContainer/VBoxContainer/MenuTabs/VEHICLE/Vehicle/PilotSelector/PilotMode" to="MainMenu/MarginContainer/VBoxContainer/MenuTabs/VEHICLE" method="_on_pilot_mode_item_selected"]
-[connection signal="pressed" from="MainMenu/MarginContainer/VBoxContainer/MenuTabs/VEHICLE/Vehicle/ResetCarButton" to="MainMenu/MarginContainer/VBoxContainer/MenuTabs/VEHICLE" method="_on_reset_car_button_pressed"]
+[connection signal="pressed" from="MainMenu/MarginContainer/VBoxContainer/ResetCarButton" to="MainMenu/MarginContainer/VBoxContainer/MenuTabs/VEHICLE" method="_on_reset_car_button_pressed"]
 [connection signal="item_selected" from="MainMenu/MarginContainer/VBoxContainer/MenuTabs/VEHICLE/Vehicle/AsStatus/StateSelector/State" to="MainMenu/MarginContainer/VBoxContainer/MenuTabs/VEHICLE" method="_on_as_state_item_selected"]
 [connection signal="item_selected" from="MainMenu/MarginContainer/VBoxContainer/MenuTabs/VEHICLE/Vehicle/AsStatus/MissionSelector/Mission" to="MainMenu/MarginContainer/VBoxContainer/MenuTabs/VEHICLE" method="_on_mission_item_selected"]
+[connection signal="item_selected" from="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK/HBoxContainer/VBoxContainer/TrackPreset" to="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK" method="_on_track_preset_selected"]
 [connection signal="pressed" from="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK/HBoxContainer/VBoxContainer/GenerateTrack" to="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK" method="_on_generate_track"]
 [connection signal="pressed" from="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK/HBoxContainer/VBoxContainer/ClearTrack" to="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK" method="_on_clear_track_pressed"]
 [connection signal="pressed" from="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK/HBoxContainer/VBoxContainer/OpenTrack" to="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK" method="_on_open_track_pressed"]
@@ -320,4 +351,4 @@ script = ExtResource("2_hox2s")
 [connection signal="toggled" from="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK/HBoxContainer/VBoxContainer/EnableConeCollision" to="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK" method="_on_enable_cone_collision_toggled"]
 [connection signal="file_selected" from="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK/FileDialog" to="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK" method="_on_track_file_selected"]
 [connection signal="file_selected" from="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK/ExportDialog" to="MainMenu/MarginContainer/VBoxContainer/MenuTabs/TRACK" method="_on_export_file_selected"]
-[connection signal="pressed" from="MainMenu/MarginContainer/VBoxContainer/MenuTabs/EXTRA/VBoxContainer/39" to="MainMenu/MarginContainer/VBoxContainer/MenuTabs/EXTRA" method="_miku_truco"]
+[connection signal="pressed" from="MainMenu/MarginContainer/VBoxContainer/MenuTabs/VEHICLE/Vehicle/ExtraTools/VBoxContainer/39" to="MainMenu/MarginContainer/VBoxContainer/MenuTabs/VEHICLE/Vehicle/ExtraTools" method="_miku_truco"]

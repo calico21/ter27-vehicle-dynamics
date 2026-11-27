@@ -1,0 +1,136 @@
+{
+  "seed": 42,
+  "elapsed_s": 23.11,
+  "applied_to_config": {
+    "skidpad": false,
+    "autocross": false,
+    "efficiency": false
+  },
+  "skidpad": {
+    "baseline": {
+      "label": "baseline",
+      "params": {
+        "k_us_low_deg_g": 0.1415,
+        "k_us_deg_g": 0.2468,
+        "dynamic_rear_bias_gain": 0.5944,
+        "k_ff_low_mult": 1.5,
+        "beta_soft_deg": 3.2
+      },
+      "metrics": {
+        "t_lap_s": 5.2044,
+        "vx_ss_ms": 11.017,
+        "trans_wz_overshoot": 0.0141,
+        "max_abs_beta_deg": 1.473,
+        "p_dc_min_kw": -23.96,
+        "p_dc_max_kw": 39.04
+      },
+      "feasible": true,
+      "score": 5.2044
+    },
+    "best": {
+      "label": "baseline",
+      "params": {
+        "k_us_low_deg_g": 0.1415,
+        "k_us_deg_g": 0.2468,
+        "dynamic_rear_bias_gain": 0.5944,
+        "k_ff_low_mult": 1.5,
+        "beta_soft_deg": 3.2
+      },
+      "metrics": {
+        "t_lap_s": 5.2044,
+        "vx_ss_ms": 11.017,
+        "trans_wz_overshoot": 0.0141,
+        "max_abs_beta_deg": 1.473,
+        "p_dc_min_kw": -23.96,
+        "p_dc_max_kw": 39.04
+      },
+      "feasible": true,
+      "score": 5.2044
+    },
+    "history": [
+      {
+        "label": "baseline",
+        "params": {
+          "k_us_low_deg_g": 0.1415,
+          "k_us_deg_g": 0.2468,
+          "dynamic_rear_bias_gain": 0.5944,
+          "k_ff_low_mult": 1.5,
+          "beta_soft_deg": 3.2
+        },
+        "metrics": {
+          "t_lap_s": 5.2044,
+          "vx_ss_ms": 11.017,
+          "trans_wz_overshoot": 0.0141,
+          "max_abs_beta_deg": 1.473,
+          "p_dc_min_kw": -23.96,
+          "p_dc_max_kw": 39.04
+        },
+        "feasible": true,
+        "score": 5.2044
+      },
+      {
+        "label": "lhs_0",
+        "params": {
+          "k_us_low_deg_g": 0.0783,
+          "k_us_deg_g": 0.2342,
+          "dynamic_rear_bias_gain": 0.2818,
+          "k_ff_low_mult": 1.3257,
+          "beta_soft_deg": 3.7247
+        },
+        "metrics": {
+          "t_lap_s": 5.2427,
+          "vx_ss_ms": 10.936,
+          "trans_wz_overshoot": 0.0245,
+          "max_abs_beta_deg": 1.456,
+          "p_dc_min_kw": -23.96,
+          "p_dc_max_kw": 39.04
+        },
+        "feasible": true,
+        "score": 5.2427
+      },
+      {
+        "label": "lhs_1",
+        "params": {
+          "k_us_low_deg_g": 0.178,
+          "k_us_deg_g": 0.3358,
+          "dynamic_rear_bias_gain": 0.5231,
+          "k_ff_low_mult": 1.218,
+          "beta_soft_deg": 2.6397
+        },
+        "metrics": {
+          "t_lap_s": 5.2527,
+          "vx_ss_ms": 10.915,
+          "trans_wz_overshoot": 0.0161,
+          "max_abs_beta_deg": 1.444,
+          "p_dc_min_kw": -23.96,
+          "p_dc_max_kw": 39.04
+        },
+        "feasible": true,
+        "score": 5.2527
+      },
+      {
+        "label": "refine_0",
+        "params": {
+          "k_us_low_deg_g": 0.1579,
+          "k_us_deg_g": 0.2424,
+          "dynamic_rear_bias_gain": 0.6331,
+          "k_ff_low_mult": 1.5,
+          "beta_soft_deg": 3.0442
+        },
+        "metrics": {
+          "t_lap_s": 5.2079,
+          "vx_ss_ms": 11.009,
+          "trans_wz_overshoot": 0.0131,
+          "max_abs_beta_deg": 1.473,
+          "p_dc_min_kw": -23.96,
+          "p_dc_max_kw": 39.04
+        },
+        "feasible": true,
+        "score": 5.2079
+      }
+    ]
+  },
+  "autocross": null,
+  "efficiency": null,
+  "plot_path": ""
+}

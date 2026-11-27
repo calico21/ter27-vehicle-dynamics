@@ -1,11 +1,11 @@
 class_name WheelDynamics
 extends RefCounted
 
-## Individual Wheel Dynamics & Contact Model for Mirena Dynamics
-## Represents a single wheel with slip kinematics, transient carcass relaxation,
-## hybrid tire contact forces (MF 6.2 + Neural Residual), and rotational spin.
+## individual wheel dynamics & contact model for mirena dynamics
+## represents a single wheel with slip kinematics, transient carcass relaxation,
+## hybrid tire contact forces (mf 6.2 + neural residual), and rotational spin
 
-const VehicleConfig = preload("../Core/VehicleConfig.gd")
+const VehicleConfig = preload("../../Config/VehicleConfig.gd")
 const TireModel = preload("TireModel.gd")
 const Pacejka62 = preload("MF62/Pacejka62.gd")
 
@@ -23,76 +23,76 @@ var wheel_id: int = 0
 var name: String = "Wheel"
 var is_right_side: bool = false
 
-# --- Wheel Kinematics State ---
-## Rotational speed around wheel spindle axis (rad/s).
+# wheel kinematics state
+## rotational speed around wheel spindle axis (rad/s)
 var omega: float = 0.0
 
-## Accumulated rotation angle (rad).
+## accumulated rotation angle (rad)
 var rotation_angle: float = 0.0
 
-## Steer angle around suspension vertical axis (rad).
+## steer angle around susp vertical axis (rad)
 var steer_angle: float = 0.0
 
-## Hub linear velocity expressed in chassis frame (m/s).
+## hub linear velocity expressed in chassis frame (m/s)
 var v_hub_chassis: Vector3 = Vector3.ZERO
 
-## Contact velocity expressed along wheel heading and lateral directions (m/s).
+## contact velocity expressed along wheel heading and lateral directions (m/s)
 var v_longitudinal: float = 0.0
 var v_lateral: float = 0.0
 
-# --- Slip Quantities ---
-## Steady-state kinematic longitudinal slip ratio: kappa = (omega * R - vx) / max(|vx|, eps)
+# slip quantities
+## steady-state kinematic longitudinal slip ratio: kappa = (omega * r - vx) / max(|vx|, eps)
 var kappa: float = 0.0
 
-## Steady-state kinematic lateral slip angle: alpha = -atan2(vy, |vx|) (rad)
+## steady-state kinematic lateral slip angle: alpha = -atan2(vy, |vx|) (rad)
 var alpha: float = 0.0
 
-## Transient (carcass-deflected) longitudinal slip ratio
+## transient (carcass-deflected) longitudinal slip ratio
 var kappa_transient: float = 0.0
 
-## Transient (carcass-deflected) lateral slip angle (rad)
+## transient (carcass-deflected) lateral slip angle (rad)
 var alpha_transient: float = 0.0
 
-## Wheel camber / inclination angle (rad)
+## wheel camber / inclination angle (rad)
 var camber_angle: float = 0.0
 
-## Tire inflation pressure (kPa)
+## tire inflation pressure (kpa)
 var inflation_pressure_kpa: float = 83.0
 
-# --- Contact Forces in Wheel Frame ---
-## Normal contact load perpendicular to road surface (N).
+# contact forces in wheel frame
+## normal contact load perpendicular to road surface (n)
 var F_z: float = 0.0
 
-## Longitudinal tractive / braking force in wheel heading direction (N).
+## longitudinal tractive / braking force in wheel heading direction (n)
 var F_x: float = 0.0
 
-## Lateral cornering force perpendicular to wheel heading direction (N).
+## lateral cornering force perpendicular to wheel heading direction (n)
 var F_y: float = 0.0
 
-## Self-aligning torque around vertical axis (Nm).
+## self-aligning torque around vertical axis (nm)
 var M_z: float = 0.0
 
-## Overturning moment around longitudinal contact axis (Nm).
+## overturning moment around longitudinal contact axis (nm)
 var M_x: float = 0.0
 
-## Rolling resistance moment around wheel spindle (Nm).
+## rolling resistance moment around wheel spindle (nm)
 var M_y: float = 0.0
 
-# --- Diagnostics ---
+# diagnostics
 var delta_Fx: float = 0.0
 var delta_Fy: float = 0.0
 var delta_Mz: float = 0.0
 
-# --- Suspension & Tire Radial Deflection State ---
+# susp & tire radial deflection state
 var is_grounded: bool = true
 var suspension_compression: float = 0.0 # m
 var suspension_velocity: float = 0.0    # m/s
-var radial_deflection: float = 0.0      # rho_i = max(0, Fz / kz) (m)
-var loaded_radius: float = 0.2032       # R_l = R0 - rho_i (m)
-var effective_radius: float = 0.2032    # R_e = R0 - rho_i / 3 (m)
-var ride_rate: float = 0.0              # k_ride = (k_wheel * kz) / (k_wheel + kz) (N/m)
+var radial_deflection: float = 0.0      # rho_i = max(0, fz / kz) (m)
+var loaded_radius: float = 0.2032       # r_l = r0 - rho_i (m)
+var effective_radius: float = 0.2032    # r_e = r0 - rho_i / 3 (m)
+var ride_rate: float = 0.0              # k_ride = (k_wheel * kz) / (k_wheel + kz) (n/m)
 
-# --- 3-Zone Tire Thermal State (Surface Tread + Core Carcass) ---
+# 3-zone tire thermal state (surface tread + core carcass)
 var t_surf_c: float = THERM_INIT_C
 var t_core_c: float = THERM_INIT_C
 var t_zone_inner_c: float = THERM_INIT_C
@@ -102,6 +102,7 @@ var t_track_c: float = THERM_TRACK_DEFAULT_C
 var thermal_mu_factor: float = 1.0
 var surface_mu_scale: float = 1.0
 var slip_power_w: float = 0.0
+var sigma_alpha_override: float = -1.0
 
 static func _cfg_float(config: VehicleConfig, prop: String, default_val: float) -> float:
 	if config == null:
@@ -114,36 +115,38 @@ func _init(id: int = 0, wheel_name: String = "Wheel", right_side: bool = false) 
 	name = wheel_name
 	is_right_side = right_side
 
-## Computes slip kinematics and transient carcass relaxation.
+## saca deslizamientos y relajacion transitoria de carcasa
 func compute_slip(
 	vx_chassis: float,
 	vy_chassis: float,
 	steer_rad: float,
 	v_eps: float,
 	wheel_radius: float,
-	dt: float = 0.0025
+	dt: float = 0.0025,
+	p_sigma_alpha_override: float = -999.0
 ) -> void:
 	steer_angle = steer_rad
 	var cos_s = cos(steer_angle)
 	var sin_s = sin(steer_angle)
 	
-	# Transform velocity from chassis frame into wheel frame
-	# (+X_w steered forward, +Y_w steered left)
+	# transform velocity from chassis frame into wheel frame
+	# (+x_w steered forward, +y_w steered left)
 	v_longitudinal = vx_chassis * cos_s + vy_chassis * sin_s
 	v_lateral = -vx_chassis * sin_s + vy_chassis * cos_s
 	
 	var u_denom = maxf(absf(v_longitudinal), v_eps)
 	
-	# Longitudinal slip ratio: kappa = (omega * R - vx) / max(|vx|, eps)
+	# longitudinal slip ratio: kappa = (omega * r - vx) / max(|vx|, eps)
 	kappa = (omega * wheel_radius - v_longitudinal) / u_denom
 	
-	# Lateral slip angle: alpha = -atan2(vy, |vx|)
+	# lateral slip angle: alpha = -atan2(vy, |vx|)
 	alpha = -atan2(v_lateral, u_denom)
 	
-	# First-order sub-stepped transient carcass relaxation integration (Pacejka62)
+	# first-order sub-stepped transient carcass relaxation integration (pacejka62)
 	if TireModel.enable_transient_relaxation and dt > 0.0:
-		# Allow longitudinal slip to relax during standstill launch when wheel spins while v_x == 0
+		# allow longitudinal slip to relax during standstill launch when wheel spins while v_x == 0
 		var v_kappa_rel: float = v_longitudinal if absf(v_longitudinal) >= absf(omega * wheel_radius) else (omega * wheel_radius)
+		var sig_y_ov: float = p_sigma_alpha_override if p_sigma_alpha_override > -900.0 else sigma_alpha_override
 		var eff_slip: Vector2 = Pacejka62.integrate_transient_slip_substep(
 			alpha_transient,
 			alpha,
@@ -152,7 +155,9 @@ func compute_slip(
 			v_longitudinal,
 			dt,
 			F_z,
-			v_kappa_rel
+			v_kappa_rel,
+			4,
+			sig_y_ov
 		)
 		alpha_transient = eff_slip.x
 		kappa_transient = eff_slip.y
@@ -160,8 +165,8 @@ func compute_slip(
 		alpha_transient = alpha
 		kappa_transient = kappa
 
-## Updates radial tire deflection rho_i, loaded radius R_l, effective rolling radius R_e,
-## and series ride rate k_ride from normal load F_z and tire vertical stiffness k_z.
+## updates radial tire deflection rho_i, loaded radius r_l, effective rolling radius r_e,
+## and series ride rate k_ride from normal load f_z and tire vertical stiffness k_z
 func update_radial_deflection(normal_force: float, is_front: bool, config: VehicleConfig) -> void:
 	var r0: float = config.wheel_radius if config != null else 0.2032
 	if config == null:
@@ -180,10 +185,12 @@ func update_radial_deflection(normal_force: float, is_front: bool, config: Vehic
 	var k_wheel: float = k_spring * mr * mr
 	ride_rate = (k_wheel * kz) / maxf(k_wheel + kz, 1.0)
 
-## Computes tire forces using the high-performance hybrid tire model (MF 6.2 + Neural Residual).
+## saca fuerzas de neuma using the high-performance hybrid tire model (mf 6.2 + neural residual)
 func compute_forces(normal_force: float, config: VehicleConfig) -> void:
 	F_z = maxf(0.0, normal_force)
 	var is_front: bool = (wheel_id < 2)
+	if config != null:
+		sigma_alpha_override = config.tire_relaxation_sigma_y
 	update_radial_deflection(F_z, is_front, config)
 	
 	if not is_grounded or F_z <= 1e-3:
@@ -224,9 +231,9 @@ func compute_forces(normal_force: float, config: VehicleConfig) -> void:
 	delta_Fy = tire_res.get("delta_Fy", 0.0)
 	delta_Mz = tire_res.get("delta_Mz", 0.0)
 
-## Integrates the rotational equation of motion for this wheel:
-## I_w * d(omega)/dt = T_drive - T_brake * sgn(omega) - F_x * R_w - F_rr * R_w
-## Guarantees clean zero-crossing hold without chatter or spurious reversal when T_drive == 0.
+## integra ecuacion de giro de rueda for this wheel:
+## i_w * d(omega)/dt = t_drive - t_brake * sgn(omega) - f_x * r_w - f_rr * r_w
+## guarantees clean zero-crossing hold without chatter or spurious reversal when t_drive == 0
 func integrate_wheel_spin(T_drive: float, T_brake: float, dt: float, config: VehicleConfig) -> void:
 	if dt <= 0.0:
 		return
@@ -235,12 +242,12 @@ func integrate_wheel_spin(T_drive: float, T_brake: float, dt: float, config: Veh
 	var I_w = config.get_effective_wheel_inertia()
 	var no_drive: bool = absf(T_drive) <= 1e-6
 	
-	# Rolling resistance torque opposing rotation
+	# par de resistencia a la rodadura
 	var F_rr = config.rolling_resistance_coeff * F_z
 	var sign_w = 1.0 if omega > 0.0 else (-1.0 if omega < 0.0 else 0.0)
 	var T_rr = F_rr * r * sign_w
 	
-	# Net tyre reaction torque on wheel
+	# par neto de reaccion del neuma en rueda
 	var T_tyre = F_x * r
 	
 	if absf(omega) > 0.1:
@@ -248,13 +255,13 @@ func integrate_wheel_spin(T_drive: float, T_brake: float, dt: float, config: Veh
 		var net_torque = T_drive - T_brk_applied - T_tyre - T_rr
 		var d_omega = (net_torque / I_w) * dt
 		
-		# Clean zero-crossing prevention when braking without drive torque
+		# corte limpio al cruzar x cero frenando sin gas
 		if no_drive and T_brake > 0.0 and ((sign_w > 0.0 and (omega + d_omega) <= 0.0) or (sign_w < 0.0 and (omega + d_omega) >= 0.0)):
 			omega = 0.0
 		else:
 			omega += d_omega
 	else:
-		# Standstill / low-speed caliper hold: prevent residual-torque chatter or reverse creep
+		# retencion de pinza en parado / baja vel: prevent residual-torque chatter or reverse creep
 		var hold_capacity: float = T_brake + F_rr * r
 		var disturbing_torque: float = absf(T_drive - T_tyre)
 		if no_drive and T_brake > 0.0 and (hold_capacity >= disturbing_torque or omega * (omega + ((T_drive - T_brake * sign_w - T_tyre - T_rr) / I_w) * dt) <= 0.0):
@@ -268,25 +275,25 @@ func integrate_wheel_spin(T_drive: float, T_brake: float, dt: float, config: Veh
 			else:
 				omega = next_omega
 	
-	# Update accumulated roll angle
+	# actualiza angulo acumulado de giro
 	rotation_angle += omega * dt
 
-## Returns wheel rotational speed in RPM.
+## devuelve vel de rueda en rpm
 func get_rpm() -> float:
 	return (omega * 60.0) / (2.0 * PI)
 
-## Snapshots dynamic integrator state for multi-stage ODE integration (RK2).
+## guarda estado del integrador for multi-stage ode integration (rk2)
 func get_integrator_state() -> Vector4:
 	return Vector4(omega, rotation_angle, alpha_transient, kappa_transient)
 
-## Restores dynamic integrator state from a Vector4 snapshot.
+## restaura estado del integrador from a vector4 snapshot
 func set_integrator_state(s: Vector4) -> void:
 	omega = s.x
 	rotation_angle = s.y
 	alpha_transient = s.z
 	kappa_transient = s.w
 
-## Sets tread surface and core temperatures (C) and refreshes thermal grip multiplier.
+## sets tread surface and core temperatures (c) and refreshes thermal grip multiplier
 func set_tire_temperature(surf_c: float, core_c: float = -999.0) -> void:
 	t_surf_c = surf_c
 	t_zone_inner_c = surf_c
@@ -295,7 +302,7 @@ func set_tire_temperature(surf_c: float, core_c: float = -999.0) -> void:
 	t_core_c = surf_c if core_c < -900.0 else core_c
 	thermal_mu_factor = compute_thermal_grip_factor(t_surf_c)
 
-## Computes tire grip multiplier from tread surface temperature (C) for Hoosier R20/R25B.
+## computes tire grip multiplier from tread surface temperature (c) for hoosier r20/r25b
 static func compute_thermal_grip_factor(temp_c: float) -> float:
 	if temp_c <= 25.0:
 		return clampf(0.88 + (temp_c - 25.0) * 0.0020, 0.80, 0.88)
@@ -312,7 +319,7 @@ static func compute_thermal_grip_factor(temp_c: float) -> float:
 		return lerpf(1.00, 0.95, (temp_c - 80.0) / 15.0)
 	return maxf(0.75, 0.95 - 0.006 * (temp_c - 95.0))
 
-## Advances 3-zone tread surface + core carcass thermal model over dt (s).
+## avanza modelo termico 3 zonas + carcasa over dt (s)
 func step_thermal(dt: float, config: VehicleConfig = null) -> void:
 	if config != null:
 		t_track_c = _cfg_float(config, "track_temp_c", t_track_c)
@@ -325,8 +332,8 @@ func step_thermal(dt: float, config: VehicleConfig = null) -> void:
 		thermal_mu_factor = compute_thermal_grip_factor(t_surf_c)
 		return
 
-	# Camber shifts contact heating & track conduction toward inner or outer shoulder:
-	# left wheel: negative camber (camber_angle < 0) loads inner; right wheel: positive camber loads inner.
+	# camber shifts contact heating & track conduction toward inner or outer shoulder:
+	# left wheel: negative camber (camber_angle < 0) loads inner; right wheel: positive camber loads inner
 	var camber_inward: float = camber_angle if is_right_side else -camber_angle
 	var shift: float = clampf(camber_inward / deg_to_rad(5.0), -1.0, 1.0) * 0.22
 	var w_in: float = (1.0 / 3.0) + shift
@@ -366,7 +373,7 @@ func step_thermal(dt: float, config: VehicleConfig = null) -> void:
 	t_surf_c = (t_zone_inner_c + t_zone_mid_c + t_zone_outer_c) / 3.0
 	thermal_mu_factor = compute_thermal_grip_factor(t_surf_c)
 
-## Resets dynamic states to zero.
+## resets dynamic states to zero
 func reset() -> void:
 	omega = 0.0
 	rotation_angle = 0.0

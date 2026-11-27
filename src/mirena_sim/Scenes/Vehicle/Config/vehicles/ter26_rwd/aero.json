@@ -1,0 +1,12 @@
+{
+  "air_density": 1.18,
+  "frontal_area": 1.1,
+  "cd_a": 1.031749,
+  "cl": 3.716636,
+  "cl_a": 4.0883,
+  "aero_balance_front": 0.45,
+  "cp_height": 0.15,
+  "static_ride_height_front": 0.036,
+  "static_ride_height_rear": 0.036,
+  "stall_ride_height_front": 0.018
+}

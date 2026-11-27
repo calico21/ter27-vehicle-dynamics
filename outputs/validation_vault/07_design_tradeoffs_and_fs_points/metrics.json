@@ -1,0 +1,74 @@
+{
+  "vault": "07_design_tradeoffs_and_fs_points",
+  "mass_vs_aero": {
+    "dt_dm_s_per_kg": 0.03882,
+    "dt_dm_s_per_10kg": 0.3882,
+    "mass_minus_15kg_s": 63.6367,
+    "mass_nominal_s": 64.2374,
+    "mass_plus_15kg_s": 64.8012,
+    "plus_10pct_cl_a": {
+      "delta_lap_time_s": -0.5711,
+      "equivalent_mass_kg": 14.71,
+      "interpretation": "positive kg = mass saving equivalent of +10% CL*A"
+    },
+    "plus_10pct_cd_a": {
+      "delta_lap_time_s": 0.0406,
+      "equivalent_mass_kg": 1.05,
+      "interpretation": "positive kg = added mass penalty equivalent of +10% CD*A"
+    },
+    "cop_shift_minus_3pct": {
+      "cop_front_frac": 0.45,
+      "delta_lap_time_s": -0.0261,
+      "equivalent_mass_kg": -0.67
+    },
+    "cop_shift_plus_3pct": {
+      "cop_front_frac": 0.51,
+      "delta_lap_time_s": 0.0367,
+      "equivalent_mass_kg": 0.95
+    }
+  },
+  "cg_and_inertia": {
+    "h_cg_minus_15mm": {
+      "h_cg_m": 0.275,
+      "lap_time_s": 64.147,
+      "delta_lap_time_s": -0.0904,
+      "drivability_score": 93.37,
+      "delta_drivability": 0.04
+    },
+    "h_cg_plus_15mm": {
+      "h_cg_m": 0.305,
+      "lap_time_s": 64.3361,
+      "delta_lap_time_s": 0.0987,
+      "drivability_score": 93.29,
+      "delta_drivability": -0.04
+    },
+    "i_zz_minus_10pct": {
+      "i_zz_kgm2": 123.43,
+      "lap_time_s": 64.2149,
+      "delta_lap_time_s": -0.0225,
+      "drivability_score": 93.32,
+      "delta_drivability": -0.01
+    },
+    "i_zz_plus_10pct": {
+      "i_zz_kgm2": 150.86,
+      "lap_time_s": 64.2599,
+      "delta_lap_time_s": 0.0225,
+      "drivability_score": 93.33,
+      "delta_drivability": 0.0
+    }
+  },
+  "track_setup_gain_ocp_s": -0.1992,
+  "track_setup_gain_14dof_s": -26.0446,
+  "fs_points_optimizer": {
+    "fsg_optimal_energy_kwh": 3.12,
+    "fsg_optimal_total_points": 282.69,
+    "fsg_optimal_endurance_points": 183.19,
+    "fsg_optimal_efficiency_points": 99.5,
+    "fss_optimal_energy_kwh": 3.12,
+    "fss_optimal_total_points": 335.42,
+    "fss_optimal_endurance_points": 235.92,
+    "fss_optimal_efficiency_points": 99.5,
+    "optimal_lap_time_s": 83.225,
+    "cutoff_145pct_time_s": 1972.0
+  }
+}

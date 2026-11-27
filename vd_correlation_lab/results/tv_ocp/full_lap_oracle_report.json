@@ -1,0 +1,494 @@
+{
+  "track": "fsg_2023",
+  "solver": "CasADi-3.7.2 + IPOPT (Separated Hermite-Simpson Direct Collocation)",
+  "boundary_conditions": "periodic_flying_lap",
+  "corridor_definition": {
+    "car_width_m": 1.42,
+    "car_l_front_m": 1.15,
+    "car_l_rear_m": 0.95,
+    "cone_safety_margin_m": 0.14,
+    "track_half_width_m": 1.8,
+    "exact_4corner_swept_path": true
+  },
+  "hv_bounds_kw": {
+    "min": -25.0,
+    "max": 80.0
+  },
+  "total_wall_time_s": 226.45,
+  "profiles": {
+    "FSG_REAL_TRACK": {
+      "ipopt": {
+        "status": "Solve_Succeeded",
+        "iterations": 242,
+        "build_time_s": 0.625,
+        "solve_time_s": 93.312,
+        "n_intervals": 380,
+        "n_collocation_points": 760,
+        "n_vars": 9880,
+        "n_cons": 21280,
+        "hessian_mode": "exact",
+        "max_defect_mid_scaled": 7.963536262367565e-08,
+        "max_defect_end_scaled": 1.930554329121481e-06,
+        "max_lt_ax_err_mps2": 3.1366730320669944e-05,
+        "max_lt_ay_err_mps2": 5.663693548818571e-06,
+        "max_motor_torque_over_nm": -0.00013493550852672342,
+        "max_motor_torque_under_nm": -0.00012457481750516308
+      },
+      "summary": {
+        "lap_time_s": 65.7961,
+        "track_length_centerline_m": 1183.616,
+        "racing_line_length_m": 1162.26,
+        "v_max_ms": 30.497,
+        "v_max_kmh": 109.79,
+        "v_mean_ms": 17.989,
+        "v_mean_kmh": 64.76,
+        "v_mean_racing_kmh": 63.59,
+        "a_y_max_mps2": 15.373,
+        "a_y_max_g": 1.567,
+        "a_x_min_mps2": -20.147,
+        "a_x_min_g": -2.054,
+        "a_x_max_mps2": 12.499,
+        "a_x_max_g": 1.274,
+        "beta_max_deg": 6.819,
+        "P_dc_min_kw_casadi": -24.394,
+        "P_dc_max_kw_casadi": 79.95,
+        "P_dc_min_kw_exact": -24.394,
+        "P_dc_max_kw_exact": 79.95,
+        "P_dc_drv_min_kw_exact": -24.95,
+        "P_dc_drv_max_kw_exact": 79.95,
+        "hv_violations_casadi": 0,
+        "hv_violations_exact": 0,
+        "min_cone_clearance_m": 0.14,
+        "cones_hit": 0,
+        "n_min_m": -0.9468,
+        "n_max_m": 0.95,
+        "e_net_lap_kj": 1572.87,
+        "e_regen_lap_kj": 440.86,
+        "e_22km_kwh": 8.121,
+        "mz_tv_rms_nm": 617.11,
+        "mz_tv_max_nm": 1565.15,
+        "inner_outer_coupling_frac": 0.1145
+      },
+      "comparison_vs_14dof": {
+        "baseline_qss_lap_s": 77.0958,
+        "baseline_14dof_lap_s": 81.3876,
+        "oracle_lap_s": 65.7961,
+        "delta_oracle_minus_14dof_s": -15.5915,
+        "delta_oracle_minus_14dof_pct": -19.16,
+        "delta_oracle_minus_qss_s": -11.2997,
+        "delta_oracle_minus_qss_pct": -14.66,
+        "racing_line_deviation": {
+          "n_rms_diff_m": 0.4917,
+          "n_max_abs_diff_m": 1.5832,
+          "oracle_n_range_m": [
+            -0.947,
+            0.95
+          ],
+          "dof14_n_range_m": [
+            -0.823,
+            0.936
+          ]
+        },
+        "sectors": [
+          {
+            "sector": "S1",
+            "s_range_m": [
+              0.0,
+              197.3
+            ],
+            "t_oracle_s": 9.544,
+            "t_14dof_s": 12.522,
+            "delta_t_s": -2.978,
+            "v_mean_oracle_kmh": 77.12,
+            "v_mean_14dof_kmh": 57.74,
+            "ay_max_oracle_g": 1.523,
+            "ay_max_14dof_g": 1.152,
+            "n_rms_diff_m": 0.323,
+            "max_abs_kappa_1pm": 0.1041
+          },
+          {
+            "sector": "S2",
+            "s_range_m": [
+              197.3,
+              394.5
+            ],
+            "t_oracle_s": 11.442,
+            "t_14dof_s": 14.022,
+            "delta_t_s": -2.58,
+            "v_mean_oracle_kmh": 65.96,
+            "v_mean_14dof_kmh": 53.2,
+            "ay_max_oracle_g": 1.427,
+            "ay_max_14dof_g": 1.1,
+            "n_rms_diff_m": 0.424,
+            "max_abs_kappa_1pm": 0.1269
+          },
+          {
+            "sector": "S3",
+            "s_range_m": [
+              394.5,
+              591.8
+            ],
+            "t_oracle_s": 9.575,
+            "t_14dof_s": 11.92,
+            "delta_t_s": -2.345,
+            "v_mean_oracle_kmh": 82.67,
+            "v_mean_14dof_kmh": 67.31,
+            "ay_max_oracle_g": 1.567,
+            "ay_max_14dof_g": 1.216,
+            "n_rms_diff_m": 0.584,
+            "max_abs_kappa_1pm": 0.2325
+          },
+          {
+            "sector": "S4",
+            "s_range_m": [
+              591.8,
+              789.1
+            ],
+            "t_oracle_s": 11.453,
+            "t_14dof_s": 13.932,
+            "delta_t_s": -2.479,
+            "v_mean_oracle_kmh": 66.52,
+            "v_mean_14dof_kmh": 54.24,
+            "ay_max_oracle_g": 1.498,
+            "ay_max_14dof_g": 1.187,
+            "n_rms_diff_m": 0.449,
+            "max_abs_kappa_1pm": 0.1068
+          },
+          {
+            "sector": "S5",
+            "s_range_m": [
+              789.1,
+              986.3
+            ],
+            "t_oracle_s": 12.347,
+            "t_14dof_s": 14.865,
+            "delta_t_s": -2.518,
+            "v_mean_oracle_kmh": 62.09,
+            "v_mean_14dof_kmh": 51.15,
+            "ay_max_oracle_g": 1.391,
+            "ay_max_14dof_g": 1.305,
+            "n_rms_diff_m": 0.507,
+            "max_abs_kappa_1pm": 0.138
+          },
+          {
+            "sector": "S6",
+            "s_range_m": [
+              986.3,
+              1183.6
+            ],
+            "t_oracle_s": 11.435,
+            "t_14dof_s": 14.127,
+            "delta_t_s": -2.692,
+            "v_mean_oracle_kmh": 69.45,
+            "v_mean_14dof_kmh": 54.0,
+            "ay_max_oracle_g": 1.473,
+            "ay_max_14dof_g": 1.042,
+            "n_rms_diff_m": 0.607,
+            "max_abs_kappa_1pm": 0.127
+          }
+        ],
+        "curvature_regimes": {
+          "tight_hairpins_R_le_10m": {
+            "distance_m": 90.3,
+            "distance_pct": 7.6,
+            "t_oracle_s": 9.08,
+            "t_14dof_s": 9.419,
+            "delta_t_s": -0.339,
+            "v_mean_oracle_kmh": 35.81,
+            "v_mean_14dof_kmh": 34.52
+          },
+          "medium_corners_R_10_20m": {
+            "distance_m": 299.0,
+            "distance_pct": 25.3,
+            "t_oracle_s": 20.032,
+            "t_14dof_s": 24.476,
+            "delta_t_s": -4.443,
+            "v_mean_oracle_kmh": 53.74,
+            "v_mean_14dof_kmh": 43.98
+          },
+          "fast_corners_R_20_67m": {
+            "distance_m": 467.2,
+            "distance_pct": 39.5,
+            "t_oracle_s": 22.713,
+            "t_14dof_s": 29.691,
+            "delta_t_s": -6.978,
+            "v_mean_oracle_kmh": 74.05,
+            "v_mean_14dof_kmh": 56.65
+          },
+          "straights_R_gt_67m": {
+            "distance_m": 327.1,
+            "distance_pct": 27.6,
+            "t_oracle_s": 13.971,
+            "t_14dof_s": 17.802,
+            "delta_t_s": -3.831,
+            "v_mean_oracle_kmh": 84.27,
+            "v_mean_14dof_kmh": 66.14
+          }
+        },
+        "dynamic_phases": {
+          "braking_and_turn_in": {
+            "distance_m": 404.9,
+            "t_oracle_s": 23.138,
+            "t_14dof_s": 27.701,
+            "delta_t_s": -4.564
+          },
+          "mid_corner_apex": {
+            "distance_m": 118.4,
+            "t_oracle_s": 6.787,
+            "t_14dof_s": 7.893,
+            "delta_t_s": -1.106
+          },
+          "corner_exit_accel": {
+            "distance_m": 623.0,
+            "t_oracle_s": 34.514,
+            "t_14dof_s": 44.134,
+            "delta_t_s": -9.621
+          },
+          "straight_accel_and_cruise": {
+            "distance_m": 37.4,
+            "t_oracle_s": 1.357,
+            "t_14dof_s": 1.659,
+            "delta_t_s": -0.301
+          }
+        }
+      }
+    },
+    "TTC_LAB_PEAK": {
+      "ipopt": {
+        "status": "Solve_Succeeded",
+        "iterations": 336,
+        "build_time_s": 0.46,
+        "solve_time_s": 131.408,
+        "n_intervals": 380,
+        "n_collocation_points": 760,
+        "n_vars": 9880,
+        "n_cons": 21280,
+        "hessian_mode": "exact",
+        "max_defect_mid_scaled": 3.002860518019901e-07,
+        "max_defect_end_scaled": 5.880862197771286e-07,
+        "max_lt_ax_err_mps2": 2.2614000062759487e-05,
+        "max_lt_ay_err_mps2": 1.9977486083178064e-06,
+        "max_motor_torque_over_nm": -0.0002250807927947245,
+        "max_motor_torque_under_nm": -0.0002256244964474012
+      },
+      "summary": {
+        "lap_time_s": 58.8273,
+        "track_length_centerline_m": 1183.616,
+        "racing_line_length_m": 1164.143,
+        "v_max_ms": 30.414,
+        "v_max_kmh": 109.49,
+        "v_mean_ms": 20.12,
+        "v_mean_kmh": 72.43,
+        "v_mean_racing_kmh": 71.24,
+        "a_y_max_mps2": 22.754,
+        "a_y_max_g": 2.319,
+        "a_x_min_mps2": -23.405,
+        "a_x_min_g": -2.386,
+        "a_x_max_mps2": 13.363,
+        "a_x_max_g": 1.362,
+        "beta_max_deg": 9.872,
+        "P_dc_min_kw_casadi": -24.392,
+        "P_dc_max_kw_casadi": 79.947,
+        "P_dc_min_kw_exact": -24.392,
+        "P_dc_max_kw_exact": 79.947,
+        "P_dc_drv_min_kw_exact": -24.948,
+        "P_dc_drv_max_kw_exact": 79.947,
+        "hv_violations_casadi": 0,
+        "hv_violations_exact": 0,
+        "min_cone_clearance_m": 0.14,
+        "cones_hit": 0,
+        "n_min_m": -0.95,
+        "n_max_m": 0.95,
+        "e_net_lap_kj": 1877.58,
+        "e_regen_lap_kj": 371.81,
+        "e_22km_kwh": 9.694,
+        "mz_tv_rms_nm": 729.81,
+        "mz_tv_max_nm": 1884.96,
+        "inner_outer_coupling_frac": 0.1197
+      },
+      "comparison_vs_14dof": {
+        "baseline_qss_lap_s": 72.3845,
+        "baseline_14dof_lap_s": 76.5027,
+        "oracle_lap_s": 58.8273,
+        "delta_oracle_minus_14dof_s": -17.6754,
+        "delta_oracle_minus_14dof_pct": -23.1,
+        "delta_oracle_minus_qss_s": -13.5572,
+        "delta_oracle_minus_qss_pct": -18.73,
+        "racing_line_deviation": {
+          "n_rms_diff_m": 0.4725,
+          "n_max_abs_diff_m": 1.9631,
+          "oracle_n_range_m": [
+            -0.95,
+            0.95
+          ],
+          "dof14_n_range_m": [
+            -0.893,
+            1.169
+          ]
+        },
+        "sectors": [
+          {
+            "sector": "S1",
+            "s_range_m": [
+              0.0,
+              197.3
+            ],
+            "t_oracle_s": 8.239,
+            "t_14dof_s": 11.306,
+            "delta_t_s": -3.066,
+            "v_mean_oracle_kmh": 89.04,
+            "v_mean_14dof_kmh": 64.03,
+            "ay_max_oracle_g": 2.319,
+            "ay_max_14dof_g": 1.664,
+            "n_rms_diff_m": 0.34,
+            "max_abs_kappa_1pm": 0.1041
+          },
+          {
+            "sector": "S2",
+            "s_range_m": [
+              197.3,
+              394.5
+            ],
+            "t_oracle_s": 10.247,
+            "t_14dof_s": 13.215,
+            "delta_t_s": -2.968,
+            "v_mean_oracle_kmh": 73.06,
+            "v_mean_14dof_kmh": 56.43,
+            "ay_max_oracle_g": 2.078,
+            "ay_max_14dof_g": 1.503,
+            "n_rms_diff_m": 0.427,
+            "max_abs_kappa_1pm": 0.1269
+          },
+          {
+            "sector": "S3",
+            "s_range_m": [
+              394.5,
+              591.8
+            ],
+            "t_oracle_s": 8.808,
+            "t_14dof_s": 11.344,
+            "delta_t_s": -2.536,
+            "v_mean_oracle_kmh": 87.78,
+            "v_mean_14dof_kmh": 69.98,
+            "ay_max_oracle_g": 2.176,
+            "ay_max_14dof_g": 1.606,
+            "n_rms_diff_m": 0.469,
+            "max_abs_kappa_1pm": 0.2325
+          },
+          {
+            "sector": "S4",
+            "s_range_m": [
+              591.8,
+              789.1
+            ],
+            "t_oracle_s": 10.276,
+            "t_14dof_s": 13.237,
+            "delta_t_s": -2.961,
+            "v_mean_oracle_kmh": 72.93,
+            "v_mean_14dof_kmh": 56.23,
+            "ay_max_oracle_g": 1.872,
+            "ay_max_14dof_g": 1.367,
+            "n_rms_diff_m": 0.417,
+            "max_abs_kappa_1pm": 0.1068
+          },
+          {
+            "sector": "S5",
+            "s_range_m": [
+              789.1,
+              986.3
+            ],
+            "t_oracle_s": 11.125,
+            "t_14dof_s": 14.206,
+            "delta_t_s": -3.081,
+            "v_mean_oracle_kmh": 68.6,
+            "v_mean_14dof_kmh": 53.97,
+            "ay_max_oracle_g": 2.01,
+            "ay_max_14dof_g": 1.629,
+            "n_rms_diff_m": 0.613,
+            "max_abs_kappa_1pm": 0.138
+          },
+          {
+            "sector": "S6",
+            "s_range_m": [
+              986.3,
+              1183.6
+            ],
+            "t_oracle_s": 10.132,
+            "t_14dof_s": 13.194,
+            "delta_t_s": -3.063,
+            "v_mean_oracle_kmh": 77.82,
+            "v_mean_14dof_kmh": 57.77,
+            "ay_max_oracle_g": 2.293,
+            "ay_max_14dof_g": 1.452,
+            "n_rms_diff_m": 0.522,
+            "max_abs_kappa_1pm": 0.127
+          }
+        ],
+        "curvature_regimes": {
+          "tight_hairpins_R_le_10m": {
+            "distance_m": 90.3,
+            "distance_pct": 7.6,
+            "t_oracle_s": 7.98,
+            "t_14dof_s": 8.686,
+            "delta_t_s": -0.706,
+            "v_mean_oracle_kmh": 40.75,
+            "v_mean_14dof_kmh": 37.44
+          },
+          "medium_corners_R_10_20m": {
+            "distance_m": 299.0,
+            "distance_pct": 25.3,
+            "t_oracle_s": 17.417,
+            "t_14dof_s": 22.589,
+            "delta_t_s": -5.172,
+            "v_mean_oracle_kmh": 61.81,
+            "v_mean_14dof_kmh": 47.66
+          },
+          "fast_corners_R_20_67m": {
+            "distance_m": 467.2,
+            "distance_pct": 39.5,
+            "t_oracle_s": 20.525,
+            "t_14dof_s": 28.171,
+            "delta_t_s": -7.646,
+            "v_mean_oracle_kmh": 81.95,
+            "v_mean_14dof_kmh": 59.71
+          },
+          "straights_R_gt_67m": {
+            "distance_m": 327.1,
+            "distance_pct": 27.6,
+            "t_oracle_s": 12.905,
+            "t_14dof_s": 17.057,
+            "delta_t_s": -4.152,
+            "v_mean_oracle_kmh": 91.23,
+            "v_mean_14dof_kmh": 69.02
+          }
+        },
+        "dynamic_phases": {
+          "braking_and_turn_in": {
+            "distance_m": 367.5,
+            "t_oracle_s": 19.371,
+            "t_14dof_s": 24.274,
+            "delta_t_s": -4.902
+          },
+          "mid_corner_apex": {
+            "distance_m": 105.9,
+            "t_oracle_s": 5.217,
+            "t_14dof_s": 5.987,
+            "delta_t_s": -0.77
+          },
+          "corner_exit_accel": {
+            "distance_m": 638.5,
+            "t_oracle_s": 31.688,
+            "t_14dof_s": 42.998,
+            "delta_t_s": -11.31
+          },
+          "straight_accel_and_cruise": {
+            "distance_m": 71.6,
+            "t_oracle_s": 2.551,
+            "t_14dof_s": 3.244,
+            "delta_t_s": -0.693
+          }
+        }
+      }
+    }
+  }
+}

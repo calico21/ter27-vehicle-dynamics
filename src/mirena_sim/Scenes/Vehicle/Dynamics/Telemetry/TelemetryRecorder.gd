@@ -1,19 +1,19 @@
 class_name TelemetryRecorder
 extends RefCounted
 
-## Exportable CSV Telemetry Recorder (100-200 Hz, MoTeC i2 & Pandas compatible).
-## Logs physical vehicle states, Torque Vectoring commands, tire temperatures,
-## and HV powertrain channels to `user://telemetry/<track>_<map_name>_<timestamp>.csv`.
+## exportable csv telemetry recorder (100-200 hz, motec i2 & pandas compatible)
+## logs physical vehicle states, torque vectoring commands, tire temperatures,
+## and hv powertrain channels to `user://telemetry/<track>_<map_name>_<timestamp>.csv`
 
-const VehicleDynamicsModel = preload("../Core/VehicleDynamicsModel.gd")
-const VehicleInputs = preload("../Core/VehicleInputs.gd")
+const VehicleDynamicsModel = preload("../Models/full_14dof/Full14DofModel.gd")
+const VehicleInputs = preload("../../Inputs/VehicleInputs.gd")
 const VehicleTelemetry = preload("VehicleTelemetry.gd")
 
 const TELEMETRY_DIR: String = "user://telemetry/"
 const FLUSH_INTERVAL_SAMPLES: int = 50
 const CSV_HEADER: String = "time,dist_m,vx,vy,wz,wz_ref,beta_deg,ax,ay,steer_deg,gas,brake,map_id,mz_req,T_fl,T_fr,T_rl,T_rr,kappa_fl,kappa_fr,kappa_rl,kappa_rr,tire_temp_fl,tire_temp_fr,tire_temp_rl,tire_temp_rr,v_dc,i_dc,power_kw,energy_kwh,fz_fl,fz_fr,fz_rl,fz_rr,brake_bias_front,regen_blending_enabled,disc_temp_fl,disc_temp_fr,disc_temp_rl,disc_temp_rr,surface_mu_fl,surface_mu_fr,surface_mu_rl,surface_mu_rr,regen_power_kw"
 
-## Target logging frequency in Hz (typically 100.0 - 200.0 Hz).
+## target logging frequency in hz (typically 100.0 - 200.0 hz)
 var sample_rate_hz: float = 200.0:
 	set(value):
 		sample_rate_hz = clampf(value, 10.0, 400.0)
@@ -66,7 +66,7 @@ static func _make_timestamp_tag() -> String:
 		int(dt_dict.get("second", 0))
 	]
 
-## Starts a new CSV telemetry recording session and returns the output file path.
+## starts a new csv telemetry recording session and returns the output file path
 func start_recording(track_name: String = "manual", map_name: String = "map2", custom_path: String = "") -> String:
 	if is_recording:
 		stop_recording()
@@ -104,7 +104,7 @@ func start_recording(track_name: String = "manual", map_name: String = "map2", c
 	_last_file_path = target_path
 	return _last_file_path
 
-## Flushes and closes the active CSV recording, returning the recorded file path.
+## flushes and closes the active csv recording, returning the recorded file path
 func stop_recording() -> String:
 	if _file != null:
 		_file.flush()
@@ -113,7 +113,7 @@ func stop_recording() -> String:
 	is_recording = false
 	return _last_file_path
 
-## Toggles active telemetry recording on/off; returns the new recording state.
+## toggles active telemetry recording on/off; returns the new recording state
 func toggle_recording(track_name: String = "manual", map_name: String = "map2") -> bool:
 	if is_recording:
 		stop_recording()
@@ -121,10 +121,10 @@ func toggle_recording(track_name: String = "manual", map_name: String = "map2") 
 	var path: String = start_recording(track_name, map_name)
 	return is_recording and path != ""
 
-## Advances distance, simulation time, energy integration, and writes samples at 1 / sample_rate_hz.
+## advances distance, simulation time, energy integration, and writes samples at 1 / sample_rate_hz
 func record_step(
 	dt: float,
-	model: VehicleDynamicsModel,
+	model,
 	inputs: VehicleInputs,
 	step_res: Dictionary = {},
 	extra: Dictionary = {}
@@ -140,7 +140,7 @@ func record_step(
 	dist_m += sqrt(vx * vx + vy * vy) * dt
 	_sample_acc += dt
 
-	# Extract torques and integrate HV energy at full physics tick resolution
+	# extract torques and integrate hv energy at full physics tick resolution
 	var forces_data: Dictionary = step_res.get("forces", step_res) if step_res.get("forces") is Dictionary else step_res
 	var d_trqs: Array = forces_data.get("drive_torques", [0.0, 0.0, 0.0, 0.0])
 	if extra.has("drive_torques") and extra["drive_torques"] is Array:
@@ -222,14 +222,14 @@ func record_step(
 	if _sample_count % FLUSH_INTERVAL_SAMPLES == 0:
 		_file.flush()
 
-## Returns HUD recording indicator string.
+## returns hud recording indicator string
 func get_hud_indicator() -> String:
 	return "  |  [REC]" if is_recording else ""
 
-## Returns path of the current or most recent telemetry CSV file.
+## returns path of the current or most recent telemetry csv file
 func get_last_file_path() -> String:
 	return _last_file_path
 
-## Returns number of CSV data rows written in the current or last session.
+## returns number of csv data rows written in the current or last session
 func get_sample_count() -> int:
 	return _sample_count

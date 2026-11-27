@@ -1,15 +1,14 @@
 class_name NeuralTireCorrection
 extends RefCounted
 
-## Gated residual MLP (4-16-16-2, tanh) for Mirena Dynamics: [dFy, dMz] = F_exp - F_MF62.
-## Must be loaded against the exact MF62 calibration it was trained on: load_for(mf) checks compound and
-## CALIBRATION_ID and refuses to arm otherwise (is_ready=false => zero correction).
-##
-## Formulas are identical to train_residual_mlp.py (float64 there, GDScript float is double):
-##   gate = (1-exp(-(a^2+g^2)/(2 s^2))) * smoothstep(fz/load_trans) * sigmoid(-(sqrt(a^2+eps)-a_lim)/a_slope) * sigmoid(-(fz-fz_lim)/fz_slope)
-##   out  = clip * tanh(gate * denorm(MLP(norm(x))) / clip)
-## Right wheel: dF_R(alpha, gamma) = -dF_L(-alpha, -gamma) (training data are left-as-tested).
-## Hot path predict_residual() performs no heap allocation (flat PackedFloat64Array buffers, Vector2 return).
+## gated residual mlp (4-16-16-2, tanh) for mirena dynamics: [dfy, dmz] = f_exp - f_mf62
+## must be loaded against the exact mf62 calibration it was trained on: load_for(mf) checks compound and
+## calibration_id and refuses to arm otherwise (is_ready=false => zero correction)
+## formulas are identical to train_residual_mlp.py (float64 there, gdscript float is double):
+## gate = (1-exp(-(a^2+g^2)/(2 s^2))) * smoothstep(fz/load_trans) * sigmoid(-(sqrt(a^2+eps)-a_lim)/a_slope) * sigmoid(-(fz-fz_lim)/fz_slope)
+## out = clip * tanh(gate * denorm(mlp(norm(x))) / clip)
+## right wheel: df_r(alpha, gamma) = -df_l(-alpha, -gamma) (training data are left-as-tested)
+## hot path predict_residual() performs no heap allocation (flat packedfloat64array buffers, vector2 return)
 
 const NEURAL_DIR: String = "res://Scenes/Vehicle/Dynamics/Tires/NeuralCorrection/"
 const EDITOR_FALLBACK_DIR: String = "src/mirena_sim/Scenes/Vehicle/Dynamics/Tires/NeuralCorrection/"
@@ -28,11 +27,11 @@ var _x_mean: PackedFloat64Array = PackedFloat64Array()
 var _x_std: PackedFloat64Array = PackedFloat64Array()
 var _y_mean: PackedFloat64Array = PackedFloat64Array()
 var _y_std: PackedFloat64Array = PackedFloat64Array()
-var _w1: PackedFloat64Array = PackedFloat64Array()  # N_H x N_IN, row-major
+var _w1: PackedFloat64Array = PackedFloat64Array()  # n_h x n_in, row-major
 var _b1: PackedFloat64Array = PackedFloat64Array()
-var _w2: PackedFloat64Array = PackedFloat64Array()  # N_H x N_H
+var _w2: PackedFloat64Array = PackedFloat64Array()  # n_h x n_h
 var _b2: PackedFloat64Array = PackedFloat64Array()
-var _w3: PackedFloat64Array = PackedFloat64Array()  # N_OUT x N_H
+var _w3: PackedFloat64Array = PackedFloat64Array()  # n_out x n_h
 var _b3: PackedFloat64Array = PackedFloat64Array()
 
 var _slip_scale: float = 0.006
@@ -54,13 +53,13 @@ func _init(mf: Pacejka62 = null, weights_path: String = "") -> void:
 	if mf != null:
 		load_for(mf, weights_path)
 	else:
-		# Auto-bind to default MF62 model if none provided
+		# auto-bind to default mf62 model if none provided
 		var default_mf: Pacejka62 = Pacejka62.new()
 		if default_mf.is_loaded:
 			load_for(default_mf, weights_path)
 
 
-## Loads neural_residual_weights_<compound>.json (or `weights_path`) and binds it to `mf`.
+## loads neural_residual_weights_<compound>.json (or `weights_path`) and binds it to `mf`
 func load_for(mf: Pacejka62, weights_path: String = "") -> bool:
 	is_ready = false
 	if mf == null or not mf.is_loaded:
@@ -191,7 +190,7 @@ func _load_file(path: String, expected_compound: String, expected_calibration_id
 	return ""
 
 
-## Residual (dFy [N], dMz [Nm]). Zero when not ready, airborne, or outside the gates.
+## residual (dfy [n], dmz [nm]). zero when not ready, airborne, or outside the gates
 func predict_residual(alpha: float, f_z: float, gamma: float = 0.0, p_kpa: float = 83.0, is_right_side: bool = false) -> Vector2:
 	if not is_ready or f_z <= 1e-3:
 		return Vector2.ZERO
@@ -232,7 +231,7 @@ func predict_residual(alpha: float, f_z: float, gamma: float = 0.0, p_kpa: float
 	return Vector2(_clip_fy * tanh(y0 * gate / _clip_fy), _clip_mz * tanh(y1 * gate / _clip_mz)) * side
 
 
-## Backward-compatible wrapper (allocates a Dictionary; use predict_residual() in the physics loop).
+## backward-compatible wrapper (allocates a dictionary; use predict_residual() in the physics loop)
 func predict_correction(alpha: float, f_z: float, gamma: float = 0.0, p_kpa: float = 83.0, is_right_side: bool = false) -> Dictionary:
 	var r: Vector2 = predict_residual(alpha, f_z, gamma, p_kpa, is_right_side)
 	return {"delta_Fy": r.x, "delta_Mz": r.y, "delta_Fx": 0.0}

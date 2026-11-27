@@ -1,0 +1,397 @@
+{
+  "track": "fsg_2023",
+  "conditions": [
+    {
+      "id": "cold_asphalt",
+      "label": "Cold Asphalt (mu=0.72, 18 C)",
+      "mu_scale": 0.72,
+      "temp_c": 18.0,
+      "tire_temp_c": 32.0,
+      "mu_thermal": 0.8338,
+      "ocp_lap_time_s": 78.3546,
+      "ocp_hv_violations": 0,
+      "ocp_cones_hit": 0,
+      "ocp_min_cone_clearance_m": 0.22
+    },
+    {
+      "id": "optimal_fsg_rubbered",
+      "label": "Optimal FSG_RUBBERED (mu=0.88, 45 C)",
+      "mu_scale": 0.88,
+      "temp_c": 45.0,
+      "tire_temp_c": 77.5,
+      "mu_thermal": 0.9999,
+      "ocp_lap_time_s": 63.4476,
+      "ocp_hv_violations": 0,
+      "ocp_cones_hit": 0,
+      "ocp_min_cone_clearance_m": 0.22
+    },
+    {
+      "id": "hot_degraded_endurance",
+      "label": "Hot/Degraded Endurance (mu=0.82, 65 C)",
+      "mu_scale": 0.82,
+      "temp_c": 65.0,
+      "tire_temp_c": 104.0,
+      "mu_thermal": 0.9077,
+      "ocp_lap_time_s": 69.544,
+      "ocp_hv_violations": 0,
+      "ocp_cones_hit": 0,
+      "ocp_min_cone_clearance_m": 0.22
+    }
+  ],
+  "synthesis": {
+    "ipopt_status": "Solve_Succeeded",
+    "iterations": 17,
+    "synthesized_params": {
+      "centripetal_fx_gain": 18.15,
+      "delta_alpha_eq_gain": 600.0,
+      "w_load": [
+        1.0055,
+        1.0055,
+        0.9945,
+        0.9945
+      ],
+      "k_us_deg_g": 1.05,
+      "k_us_low_deg_g": 0.2195,
+      "brake_bias_front": 0.6181,
+      "trail_brake_yaw_gain": 0.45,
+      "turnin_pitch_gain_nm": 247.7,
+      "hairpin_pivot_gain": 1.234,
+      "yaw_agility_gain": 0.9,
+      "yaw_accel_ff_gain": 0.75,
+      "delta_dot_lead_gain": 15.0,
+      "slalom_beta_damp": 220.0,
+      "exit_traction_blend": 0.73,
+      "lqr_gain_schedule": {
+        "vx_breakpoints_ms": [
+          4.0,
+          10.0,
+          16.0,
+          24.0,
+          32.0
+        ],
+        "k_r": [
+          280.0,
+          450.0,
+          700.0,
+          900.0,
+          1050.0
+        ],
+        "k_beta": [
+          154.89,
+          280.0,
+          450.0,
+          600.0,
+          740.0
+        ],
+        "k_beta_dot": [
+          41.09,
+          70.0,
+          100.0,
+          130.0,
+          186.73
+        ]
+      },
+      "inner_regen_max_nm": 95.0,
+      "launch_rear_bias_pct": 70.0,
+      "tc_slip_target": 0.13,
+      "friction_ellipse_margin": 0.94,
+      "skidpad_neutral_trim": 0.0,
+      "beta_soft_deg": 4.5,
+      "power_limit_kw": 80.0,
+      "regen_limit_kw": -25.0,
+      "lift_regen_nm": 12.0,
+      "arb_front_balance_pct": 45.0,
+      "throttle_exp": 1.15
+    },
+    "oracle_tracking_fit": {
+      "cold_asphalt": {
+        "mz_rmse_baseline_nm": 856.67,
+        "mz_rmse_synthesized_nm": 740.11,
+        "mz_rmse_reduction_pct": 13.61,
+        "torque_rmse_baseline_nm": 61.49,
+        "torque_rmse_synthesized_nm": 55.24
+      },
+      "optimal_fsg_rubbered": {
+        "mz_rmse_baseline_nm": 1725.96,
+        "mz_rmse_synthesized_nm": 1440.34,
+        "mz_rmse_reduction_pct": 16.55,
+        "torque_rmse_baseline_nm": 92.02,
+        "torque_rmse_synthesized_nm": 79.24
+      },
+      "hot_degraded_endurance": {
+        "mz_rmse_baseline_nm": 1382.49,
+        "mz_rmse_synthesized_nm": 1156.84,
+        "mz_rmse_reduction_pct": 16.32,
+        "torque_rmse_baseline_nm": 81.49,
+        "torque_rmse_synthesized_nm": 71.01
+      }
+    },
+    "directional_stability_audit": {
+      "cold_asphalt": {
+        "vx_breakpoints_ms": [
+          4.0,
+          10.0,
+          16.0,
+          24.0,
+          32.0
+        ],
+        "dMz_dbeta_passive_nm_per_rad": [
+          -3761.7,
+          -11638.7,
+          -12418.5,
+          -13975.0,
+          -14864.6
+        ],
+        "dMz_dbeta_closed_loop_nm_per_rad": [
+          -3916.6,
+          -11918.7,
+          -12868.5,
+          -14575.0,
+          -15604.6
+        ],
+        "max_dMz_dbeta_nm_per_rad": -3916.6,
+        "strictly_negative": true
+      },
+      "optimal_fsg_rubbered": {
+        "vx_breakpoints_ms": [
+          4.0,
+          10.0,
+          16.0,
+          24.0,
+          32.0
+        ],
+        "dMz_dbeta_passive_nm_per_rad": [
+          -7085.2,
+          -11719.0,
+          -11579.0,
+          -10869.1,
+          -8036.2
+        ],
+        "dMz_dbeta_closed_loop_nm_per_rad": [
+          -7240.1,
+          -11999.0,
+          -12029.0,
+          -11469.1,
+          -8776.2
+        ],
+        "max_dMz_dbeta_nm_per_rad": -7240.1,
+        "strictly_negative": true
+      },
+      "hot_degraded_endurance": {
+        "vx_breakpoints_ms": [
+          4.0,
+          10.0,
+          16.0,
+          24.0,
+          32.0
+        ],
+        "dMz_dbeta_passive_nm_per_rad": [
+          -5867.4,
+          -12273.2,
+          -12635.2,
+          -13188.6,
+          -11780.6
+        ],
+        "dMz_dbeta_closed_loop_nm_per_rad": [
+          -6022.3,
+          -12553.2,
+          -13085.2,
+          -13788.6,
+          -12520.6
+        ],
+        "max_dMz_dbeta_nm_per_rad": -6022.3,
+        "strictly_negative": true
+      }
+    },
+    "all_conditions_directionally_stable": true
+  },
+  "validation_14dof_matrix": {
+    "cold_asphalt": {
+      "current_tv": {
+        "variant": "current_tv",
+        "condition": "cold_asphalt",
+        "alpha_drv": 0.8,
+        "lap_time_s": 103.5167,
+        "drivability_score": 79.01,
+        "max_beta_deg": 5.312,
+        "beta_rms_deg": 1.109,
+        "steer_rate_rms_dps": 58.54,
+        "pedal_reversals": 35,
+        "cones_hit": 0,
+        "corners_cones_hit": 0,
+        "p_dc_min_kw": -24.23,
+        "p_dc_max_kw": 46.6,
+        "hv_violations": 0,
+        "torque_fight_kj": 32.48
+      },
+      "casadi_robust_tv": {
+        "variant": "casadi_robust_tv",
+        "condition": "cold_asphalt",
+        "alpha_drv": 0.8,
+        "lap_time_s": 103.6676,
+        "drivability_score": 79.29,
+        "max_beta_deg": 5.165,
+        "beta_rms_deg": 1.033,
+        "steer_rate_rms_dps": 58.46,
+        "pedal_reversals": 25,
+        "cones_hit": 0,
+        "corners_cones_hit": 0,
+        "p_dc_min_kw": -24.24,
+        "p_dc_max_kw": 46.59,
+        "hv_violations": 0,
+        "torque_fight_kj": 22.3
+      },
+      "open_diff": {
+        "variant": "open_diff",
+        "condition": "cold_asphalt",
+        "alpha_drv": 0.7844,
+        "lap_time_s": 105.2875,
+        "drivability_score": 73.23,
+        "max_beta_deg": 8.213,
+        "beta_rms_deg": 1.593,
+        "steer_rate_rms_dps": 56.19,
+        "pedal_reversals": 23,
+        "cones_hit": 0,
+        "corners_cones_hit": 0,
+        "p_dc_min_kw": 0.0,
+        "p_dc_max_kw": 44.3,
+        "hv_violations": 0,
+        "torque_fight_kj": 0.0
+      }
+    },
+    "optimal_fsg_rubbered": {
+      "open_diff": {
+        "variant": "open_diff",
+        "condition": "optimal_fsg_rubbered",
+        "alpha_drv": 0.9544,
+        "lap_time_s": 86.7072,
+        "drivability_score": 64.34,
+        "max_beta_deg": 12.844,
+        "beta_rms_deg": 1.581,
+        "steer_rate_rms_dps": 63.08,
+        "pedal_reversals": 39,
+        "cones_hit": 0,
+        "corners_cones_hit": 0,
+        "p_dc_min_kw": 0.0,
+        "p_dc_max_kw": 79.21,
+        "hv_violations": 0,
+        "torque_fight_kj": 0.0
+      },
+      "current_tv": {
+        "variant": "current_tv",
+        "condition": "optimal_fsg_rubbered",
+        "alpha_drv": 0.9544,
+        "lap_time_s": 85.8668,
+        "drivability_score": 80.86,
+        "max_beta_deg": 4.353,
+        "beta_rms_deg": 0.819,
+        "steer_rate_rms_dps": 64.18,
+        "pedal_reversals": 47,
+        "cones_hit": 0,
+        "corners_cones_hit": 0,
+        "p_dc_min_kw": -24.47,
+        "p_dc_max_kw": 77.33,
+        "hv_violations": 0,
+        "torque_fight_kj": 30.73
+      },
+      "casadi_robust_tv": {
+        "variant": "casadi_robust_tv",
+        "condition": "optimal_fsg_rubbered",
+        "alpha_drv": 0.9544,
+        "lap_time_s": 85.932,
+        "drivability_score": 82.02,
+        "max_beta_deg": 3.749,
+        "beta_rms_deg": 0.771,
+        "steer_rate_rms_dps": 64.01,
+        "pedal_reversals": 45,
+        "cones_hit": 0,
+        "corners_cones_hit": 0,
+        "p_dc_min_kw": -24.47,
+        "p_dc_max_kw": 77.34,
+        "hv_violations": 0,
+        "torque_fight_kj": 21.85
+      }
+    },
+    "hot_degraded_endurance": {
+      "open_diff": {
+        "variant": "open_diff",
+        "condition": "hot_degraded_endurance",
+        "alpha_drv": 0.9187,
+        "lap_time_s": 89.984,
+        "drivability_score": 74.17,
+        "max_beta_deg": 7.825,
+        "beta_rms_deg": 1.429,
+        "steer_rate_rms_dps": 61.5,
+        "pedal_reversals": 33,
+        "cones_hit": 0,
+        "corners_cones_hit": 0,
+        "p_dc_min_kw": 0.0,
+        "p_dc_max_kw": 70.86,
+        "hv_violations": 0,
+        "torque_fight_kj": 0.0
+      },
+      "current_tv": {
+        "variant": "current_tv",
+        "condition": "hot_degraded_endurance",
+        "alpha_drv": 0.9306,
+        "lap_time_s": 88.022,
+        "drivability_score": 81.12,
+        "max_beta_deg": 4.218,
+        "beta_rms_deg": 0.823,
+        "steer_rate_rms_dps": 63.29,
+        "pedal_reversals": 46,
+        "cones_hit": 0,
+        "corners_cones_hit": 0,
+        "p_dc_min_kw": -24.49,
+        "p_dc_max_kw": 72.13,
+        "hv_violations": 0,
+        "torque_fight_kj": 29.09
+      },
+      "casadi_robust_tv": {
+        "variant": "casadi_robust_tv",
+        "condition": "hot_degraded_endurance",
+        "alpha_drv": 0.9306,
+        "lap_time_s": 88.1299,
+        "drivability_score": 82.07,
+        "max_beta_deg": 3.725,
+        "beta_rms_deg": 0.785,
+        "steer_rate_rms_dps": 62.86,
+        "pedal_reversals": 44,
+        "cones_hit": 0,
+        "corners_cones_hit": 0,
+        "p_dc_min_kw": -24.46,
+        "p_dc_max_kw": 72.13,
+        "hv_violations": 0,
+        "torque_fight_kj": 20.52
+      }
+    }
+  },
+  "comparison_summary": {
+    "cold_asphalt": {
+      "delta_vs_open_diff_s": -1.6199,
+      "delta_vs_current_tv_s": 0.1509,
+      "drivability_delta_vs_open_diff": 6.06,
+      "drivability_delta_vs_current_tv": 0.28
+    },
+    "optimal_fsg_rubbered": {
+      "delta_vs_open_diff_s": -0.7752,
+      "delta_vs_current_tv_s": 0.0652,
+      "drivability_delta_vs_open_diff": 17.68,
+      "drivability_delta_vs_current_tv": 1.16
+    },
+    "hot_degraded_endurance": {
+      "delta_vs_open_diff_s": -1.8541,
+      "delta_vs_current_tv_s": 0.1079,
+      "drivability_delta_vs_open_diff": 7.9,
+      "drivability_delta_vs_current_tv": 0.95
+    }
+  },
+  "checks": {
+    "all_conditions_directionally_stable": true,
+    "all_14dof_zero_cones_hit": true,
+    "all_14dof_zero_hv_violations": true,
+    "stm32_header_exported": true
+  },
+  "exported_header_path": "vd_correlation_lab/results/casadi_suite/exported_tv_params.h",
+  "total_runtime_s": 827.96
+}

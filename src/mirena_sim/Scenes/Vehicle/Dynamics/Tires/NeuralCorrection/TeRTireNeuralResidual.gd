@@ -1,23 +1,21 @@
 class_name TeRTireNeuralResidual
 extends RefCounted
 
-## Physics-Informed Residual Neural Network (TeR_Tire PINN) over Pacejka MF 6.2.
-## Architecture: 5 -> 16 -> 16 -> 3 MLP with tanh activations and pre-allocated
-## flat PackedFloat64Array buffers (zero heap allocations on hot path).
-##
-## Inputs:  [alpha_rad, kappa, fz_n, camber_rad, t_surf_c]
-## Outputs: Vector3(delta_Fx_N, delta_Fy_N, delta_Mz_Nm)
-##
-## Physics-informed structural guarantees:
-##   1. Exact algebraic odd symmetry in slip:
-##      r(alpha, kappa, ...) = 0.5 * (MLP(alpha, kappa, Fz, gamma, T) - MLP(-alpha, -kappa, Fz, -gamma, T))
-##      Strictly satisfies r(-kappa, -alpha, Fz, 0, T) == -r(kappa, alpha, Fz, 0, T)
-##      and r(0, 0, Fz, 0, T) == Vector3.ZERO.
-##   2. Smooth cubic smoothstep load attenuation as Fz -> 0 (exact zero at Fz <= 0).
-##   3. Smooth load-proportional tanh bounding preventing friction-ellipse violations.
+## physics-informed residual neural network (ter_tire pinn) over pacejka mf 6.2
+## architecture: 5 -> 16 -> 16 -> 3 mlp with tanh activations and pre-allocated
+## flat packedfloat64array buffers (zero heap allocations on hot path)
+## inputs: [alpha_rad, kappa, fz_n, camber_rad, t_surf_c]
+## outputs: vector3(delta_fx_n, delta_fy_n, delta_mz_nm)
+## physics-informed structural guarantees:
+## 1. exact algebraic odd symmetry in slip:
+## r(alpha, kappa, ...) = 0.5 * (mlp(alpha, kappa, fz, gamma, t) - mlp(-alpha, -kappa, fz, -gamma, t))
+## strictly satisfies r(-kappa, -alpha, fz, 0, t) == -r(kappa, alpha, fz, 0, t)
+## and r(0, 0, fz, 0, t) == vector3.zero
+## 2. smooth cubic smoothstep load attenuation as fz -> 0 (exact zero at fz <= 0)
+## 3. smooth load-proportional tanh bounding preventing friction-ellipse violations
 
-const DEFAULT_WEIGHTS_PATH: String = "res://Scenes/Vehicle/Dynamics/Core/Config/ter_tire_pinn_weights.json"
-const EDITOR_FALLBACK_PATH: String = "src/mirena_sim/Scenes/Vehicle/Dynamics/Core/Config/ter_tire_pinn_weights.json"
+const DEFAULT_WEIGHTS_PATH: String = "res://Scenes/Vehicle/Config/shared/ter_tire_pinn_weights.json"
+const EDITOR_FALLBACK_PATH: String = "src/mirena_sim/Scenes/Vehicle/Config/vehicles/ter27_4wd/ter_tire_pinn_weights.json"
 const N_IN: int = 5
 const N_H: int = 16
 const N_OUT: int = 3
@@ -29,12 +27,12 @@ var _x_mean: PackedFloat64Array = PackedFloat64Array()
 var _x_std: PackedFloat64Array = PackedFloat64Array()
 var _y_mean: PackedFloat64Array = PackedFloat64Array()
 var _y_std: PackedFloat64Array = PackedFloat64Array()
-var _w1: PackedFloat64Array = PackedFloat64Array()  # N_H x N_IN, row-major
-var _b1: PackedFloat64Array = PackedFloat64Array()  # N_H
-var _w2: PackedFloat64Array = PackedFloat64Array()  # N_H x N_H, row-major
-var _b2: PackedFloat64Array = PackedFloat64Array()  # N_H
-var _w3: PackedFloat64Array = PackedFloat64Array()  # N_OUT x N_H, row-major
-var _b3: PackedFloat64Array = PackedFloat64Array()  # N_OUT
+var _w1: PackedFloat64Array = PackedFloat64Array()  # n_h x n_in, row-major
+var _b1: PackedFloat64Array = PackedFloat64Array()  # n_h
+var _w2: PackedFloat64Array = PackedFloat64Array()  # n_h x n_h, row-major
+var _b2: PackedFloat64Array = PackedFloat64Array()  # n_h
+var _w3: PackedFloat64Array = PackedFloat64Array()  # n_out x n_h, row-major
+var _b3: PackedFloat64Array = PackedFloat64Array()  # n_out
 
 var _h1: PackedFloat64Array = PackedFloat64Array()
 var _h2: PackedFloat64Array = PackedFloat64Array()
@@ -53,7 +51,7 @@ func _init(weights_path: String = "") -> void:
 	load_weights(weights_path)
 
 
-## Loads TeR_Tire PINN weights JSON from `path` or the default Core/Config path.
+## loads ter_tire pinn weights json from `path` or the default core/config path
 func load_weights(path: String = "") -> bool:
 	var resolved: String = path
 	if resolved.is_empty():
@@ -84,7 +82,7 @@ func load_weights(path: String = "") -> bool:
 	return true
 
 
-## Loads and validates weights, normalization, and physics bounds from an in-memory Dictionary.
+## loads and validates weights, normalization, and physics bounds from an in-memory dictionary
 func load_from_dict(data: Dictionary) -> bool:
 	_clear()
 
@@ -168,8 +166,8 @@ func load_from_dict(data: Dictionary) -> bool:
 	return true
 
 
-## Evaluates physics-informed residual Vector3(delta_Fx_N, delta_Fy_N, delta_Mz_Nm).
-## Hot path: zero heap allocations, exact odd symmetry in (alpha, kappa), smooth Fz -> 0 gate.
+## evaluates physics-informed residual vector3(delta_fx_n, delta_fy_n, delta_mz_nm)
+## hot path: zero heap allocations, exact odd symmetry in (alpha, kappa), smooth fz -> 0 gate
 func predict_residual(
 	kappa: float,
 	alpha: float,
@@ -199,11 +197,11 @@ func predict_residual(
 	var xs3: float = _x_std[3]
 	var xs4: float = _x_std[4]
 
-	# Shared load/temp normalized channels
+	# shared load/temp normalized channels
 	var x2_c: float = (f_z - xm2) / xs2
 	var x4_c: float = (t_surf_c - xm4) / xs4
 
-	# Pass 1: (+alpha, +kappa, +gamma)
+	# pass 1: (+alpha, +kappa, +gamma)
 	var x0_p: float = (a_in - xm0) / xs0
 	var x1_p: float = (k_in - xm1) / xs1
 	var x3_p: float = (g_in - xm3) / xs3
@@ -226,7 +224,7 @@ func predict_residual(
 		y1_p += _w3[N_H + j] * h2j
 		y2_p += _w3[2 * N_H + j] * h2j
 
-	# Pass 2: (-alpha, -kappa, -gamma) for exact algebraic antisymmetry
+	# pass 2: (-alpha, -kappa, -gamma) for exact algebraic antisymmetry
 	var x0_n: float = (-a_in - xm0) / xs0
 	var x1_n: float = (-k_in - xm1) / xs1
 	var x3_n: float = (-g_in - xm3) / xs3
@@ -253,11 +251,11 @@ func predict_residual(
 	var raw_fy: float = 0.5 * (y1_p - y1_n) * _y_std[1] * side
 	var raw_mz: float = 0.5 * (y2_p - y2_n) * _y_std[2] * side
 
-	# Smooth Fz -> 0 cubic smoothstep attenuation (O(Fz^2) near zero)
+	# smooth fz -> 0 cubic smoothstep attenuation (o(fz^2) near zero)
 	var u: float = clampf(f_z / _fz_gate_scale, 0.0, 1.0)
 	var fz_gate: float = u * u * (3.0 - 2.0 * u)
 
-	# Smooth load-proportional physical bounding
+	# smooth load-proportional physical bounding
 	var max_fx: float = maxf(_max_fx_frac * f_z * _mu_nom, 1e-6)
 	var max_fy: float = maxf(_max_fy_frac * f_z * _mu_nom, 1e-6)
 	var max_mz: float = maxf(_max_mz_frac * f_z * _mu_nom * _r0_m, 1e-6)

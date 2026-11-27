@@ -1,0 +1,40 @@
+{
+  "vehicle_id": "ter27_4wd",
+  "display_name": "TeR27",
+  "legend_label": "sim_TeR27",
+  "validation_source": "synthetic_pre_track",
+  "is_synthetic": true,
+  "ecu_mode": 2,
+  "tv_map_id": 2,
+  "wheel_radius_m": 0.2032,
+  "steer_ratio": 1.255,
+  "imu": {
+    "yaw_offset_deg": 0.0,
+    "accel_advance_samples": 0,
+    "x_lever_m": 0.0,
+    "scale_ax": 1.0,
+    "scale_ay": 1.0,
+    "scale_wz": 1.0
+  },
+  "brakes": {
+    "bpps_full_bar": 17.5,
+    "bpps_emi_apps_thresh": 0.25,
+    "brake_over_throttle_thresh": 0.05
+  },
+  "steering": {
+    "can_shift_samples": 0,
+    "auto_zero_vx_min_ms": 4.0
+  },
+  "powertrain": {
+    "apps_deadzone": 0.05,
+    "default_trq_limit_nm": 120.0
+  },
+  "filtering": {
+    "fs_hz": 100.0,
+    "butter_cutoff_hz": 15.0,
+    "butter_order": 4,
+    "min_active_vx_ms": 3.0,
+    "paddock_vx_p95_thresh_ms": 8.5,
+    "paddock_ay_p95_thresh_ms2": 4.5
+  }
+}

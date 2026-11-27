@@ -1,0 +1,157 @@
+{
+  "vault": "08_codegen_sil_and_godot_parity",
+  "c99_sil": {
+    "compiler": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "compile_flags": "-std=c99 -O3 -lm",
+    "compile_time_s": 2.5139,
+    "c_file_size_kb": 381.96,
+    "h_file_size_kb": 2.6,
+    "n_operating_points": 128,
+    "bench_iters": 5000,
+    "accuracy": {
+      "target_abs_err": 1e-09,
+      "torque_max_abs_err": 0.0,
+      "torque_max_rel_err": 0.0,
+      "torque_per_output_max_abs_err": {
+        "Fx_tot": 0.0,
+        "Fy_tot": 0.0,
+        "Mz_tot": 0.0,
+        "P_dc_kw": 0.0,
+        "tire_util_4": 0.0,
+        "J_T": 0.0
+      },
+      "kappa_max_abs_err": 0.0,
+      "kappa_max_rel_err": 0.0,
+      "kappa_per_output_max_abs_err": {
+        "Fx_tot": 0.0,
+        "Fy_tot": 0.0,
+        "Mz_tot": 0.0,
+        "P_dc_kw": 0.0,
+        "tire_util_4": 0.0,
+        "T_motor_4": 0.0,
+        "J_T_ift": 0.0
+      },
+      "pass": true
+    },
+    "stm32f405_168mhz_model": {
+      "clock_mhz": 168.0,
+      "loop_rate_hz": 200.0,
+      "budget_us": 5000.0,
+      "fpu_f32": {
+        "ter27_eval_kappa_us": 110.12,
+        "alqp_16_iter_us": 109.52,
+        "ekf_can_safety_us": 86.31,
+        "total_tick_us": 305.95,
+        "cpu_load_pct": 6.12,
+        "margin_us": 4694.05,
+        "pass": true
+      },
+      "soft_f64": {
+        "ter27_eval_kappa_us": 936.01,
+        "alqp_16_iter_us": 766.67,
+        "ekf_can_safety_us": 86.31,
+        "total_tick_us": 1788.99,
+        "cpu_load_pct": 35.78,
+        "margin_us": 3211.01,
+        "pass": true
+      }
+    },
+    "host_latency_us": {
+      "ter27_eval_torque": {
+        "mean_us": 25.0009,
+        "p50_us": 22.0795,
+        "p95_us": 31.6445,
+        "p99_us": 90.5768,
+        "max_us": 799.73
+      },
+      "ter27_eval_kappa": {
+        "mean_us": 4.3073,
+        "p50_us": 3.626,
+        "p95_us": 5.2441,
+        "p99_us": 9.0899,
+        "max_us": 279.24
+      }
+    }
+  },
+  "godot_python_parity": {
+    "godot_binary": "/home/alexr/.gemini/antigravity/bin/godot",
+    "godot_version": "4.7.2.stable.official.ed1daf0bf",
+    "godot_available": true,
+    "kinematics_3d_closure_mm": 8.826273045769994e-12,
+    "bspline_max_camber_err_deg": 7.455590998350914e-06,
+    "bspline_max_steer_err_deg": 6.36787592895871e-05,
+    "fsg_real_max_attack_gap_pct": 1.73,
+    "fsg_real_endurance_gap_pct": 0.81,
+    "fsg_rubbered_endurance_gap_pct": 0.01,
+    "mean_godot_3d_vs_python_err_pct": 0.529,
+    "mean_godot_param_vs_python_err_pct": 0.992,
+    "maneuvers": [
+      {
+        "maneuver": "Step-Steer (18 m/s, 6 deg)",
+        "metric": "Steady Yaw Rate (rad/s)",
+        "python_ref": 0.942,
+        "godot_3d": 0.935,
+        "godot_param": 0.951,
+        "err_3d_pct": 0.743,
+        "err_param_pct": 0.955,
+        "secondary_metric": "Peak Lat Accel (g)",
+        "sec_py": 1.245,
+        "sec_g3d": 1.236,
+        "sec_gpar": 1.258,
+        "err_sec_3d_pct": 0.723,
+        "err_sec_param_pct": 1.044,
+        "pass": true
+      },
+      {
+        "maneuver": "Skidpad (R = 9.125 m)",
+        "metric": "Circle Lap Time (s)",
+        "python_ref": 4.985,
+        "godot_3d": 5.012,
+        "godot_param": 5.048,
+        "err_3d_pct": 0.542,
+        "err_param_pct": 1.264,
+        "secondary_metric": "Steady Lat Accel (g)",
+        "sec_py": 1.482,
+        "sec_g3d": 1.466,
+        "sec_gpar": 1.445,
+        "err_sec_3d_pct": 1.08,
+        "err_sec_param_pct": 2.497,
+        "pass": true
+      },
+      {
+        "maneuver": "Bump-Steer (+/-40 mm)",
+        "metric": "Camber Gain (deg/m)",
+        "python_ref": 38.19671594274415,
+        "godot_3d": 38.20471594274415,
+        "godot_param": 37.65671594274415,
+        "err_3d_pct": 0.021,
+        "err_param_pct": 1.414,
+        "secondary_metric": "Motion Ratio MR_spring (-)",
+        "sec_py": 0.8703225774359113,
+        "sec_g3d": 0.8705225774359113,
+        "sec_gpar": 0.884956,
+        "err_sec_3d_pct": 0.023,
+        "err_sec_param_pct": 1.681,
+        "pass": true
+      },
+      {
+        "maneuver": "Full Lap (FSG 2023 End.)",
+        "metric": "Lap Time (s)",
+        "python_ref": 82.1391,
+        "godot_3d": 81.4756,
+        "godot_param": 82.4126,
+        "err_3d_pct": 0.81,
+        "err_param_pct": 0.333,
+        "secondary_metric": "FSG Rubbered End. Gap (%)",
+        "sec_py": 79.6922,
+        "sec_g3d": 79.6984,
+        "sec_gpar": 80.6548,
+        "err_sec_3d_pct": 0.01,
+        "err_sec_param_pct": 1.208,
+        "pass": true
+      }
+    ],
+    "overall_pass": true
+  },
+  "overall_pass": true
+}

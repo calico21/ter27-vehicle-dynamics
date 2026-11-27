@@ -1,0 +1,824 @@
+{
+  "compound": "R20",
+  "calibration_id": "7be95539984a0af7",
+  "identifiability_stages": {
+    "stage1_zero_camber_fy": {
+      "stage": "Stage 1: Pure Fy0",
+      "jacobian_rank": 8,
+      "num_params": 8,
+      "scaled_condition_number": 478.0656331046778,
+      "singular_values": [
+        84911.43160763067,
+        23678.026995992554,
+        4321.133159077091,
+        2341.81014745337,
+        1316.3454460982307,
+        1270.0080978746444,
+        547.3603238241726,
+        177.6145903988007
+      ],
+      "optimizer_status": 2,
+      "nfev": 11,
+      "residual_lag1_autocorr": 0.9875712603852044,
+      "se_inflation_factor": 12.64584369110806,
+      "boundary_saturated_parameters": [],
+      "high_correlations": [
+        {
+          "param_i": "PKY1",
+          "param_j": "PKY2",
+          "correlation": 0.9344289339752493
+        }
+      ],
+      "parameters": {
+        "PDY1": {
+          "optimal_value": 2.4743689543289427,
+          "std_error": 0.0249364439438502,
+          "relative_uncertainty_pct": 1.0077900427995408
+        },
+        "PDY2": {
+          "optimal_value": -0.2683480487888857,
+          "std_error": 0.06465893245713851,
+          "relative_uncertainty_pct": 24.095175183482283
+        },
+        "PKY1": {
+          "optimal_value": 50.4519749603258,
+          "std_error": 4.099425734034834,
+          "relative_uncertainty_pct": 8.125401904005784
+        },
+        "PKY2": {
+          "optimal_value": 1.998897017116712,
+          "std_error": 0.2895304198761667,
+          "relative_uncertainty_pct": 14.484509076600494
+        },
+        "PEY1": {
+          "optimal_value": 0.6707429989992892,
+          "std_error": 0.15044234928673603,
+          "relative_uncertainty_pct": 22.42920902807596
+        },
+        "PEY2": {
+          "optimal_value": -1.007520400065577,
+          "std_error": 0.5602850446772282,
+          "relative_uncertainty_pct": 55.61029281796781
+        },
+        "PHY1": {
+          "optimal_value": 0.0008691748142916204,
+          "std_error": 0.0008222770831903921,
+          "relative_uncertainty_pct": 94.60433846792374
+        },
+        "PVY1": {
+          "optimal_value": -0.0057721053936508355,
+          "std_error": 0.013852090994315556,
+          "relative_uncertainty_pct": 239.9833344961527
+        }
+      }
+    },
+    "stage2_pressure_fy": {
+      "stage": "Stage 2: Pressure",
+      "jacobian_rank": 2,
+      "num_params": 2,
+      "scaled_condition_number": 2.275826887016819,
+      "singular_values": [
+        3727.4001005722303,
+        1637.82233254927
+      ],
+      "optimizer_status": 2,
+      "nfev": 5,
+      "residual_lag1_autocorr": 0.9902174688534624,
+      "se_inflation_factor": 14.26345207648019,
+      "boundary_saturated_parameters": [],
+      "high_correlations": [],
+      "parameters": {
+        "PPY1": {
+          "optimal_value": -0.4582737329844023,
+          "std_error": 0.16426324450443155,
+          "relative_uncertainty_pct": 35.84391438599479
+        },
+        "PPY3": {
+          "optimal_value": -0.18196030545563222,
+          "std_error": 0.05642402371701184,
+          "relative_uncertainty_pct": 31.008973949414386
+        }
+      }
+    },
+    "stage3_camber_coupled": {
+      "stage": "Stage 3: Camber",
+      "jacobian_rank": 5,
+      "num_params": 5,
+      "scaled_condition_number": 6.3828049344860425,
+      "singular_values": [
+        4180.847391392821,
+        3786.9827950664207,
+        1951.639404094626,
+        751.2560105143331,
+        655.0172587609356
+      ],
+      "optimizer_status": 2,
+      "nfev": 7,
+      "residual_lag1_autocorr": 0.9862912100499677,
+      "se_inflation_factor": 12.037100853739954,
+      "boundary_saturated_parameters": [],
+      "high_correlations": [],
+      "parameters": {
+        "PVY3": {
+          "optimal_value": -0.4575762869934981,
+          "std_error": 0.3240406879300171,
+          "relative_uncertainty_pct": 70.81675714865476
+        },
+        "PVY4": {
+          "optimal_value": 1.4882106550874805,
+          "std_error": 0.6470694257223703,
+          "relative_uncertainty_pct": 43.47969311403257
+        },
+        "PDY3": {
+          "optimal_value": 12.777026336540136,
+          "std_error": 2.686499181412936,
+          "relative_uncertainty_pct": 21.02601270946748
+        },
+        "PHY3": {
+          "optimal_value": 0.11823391089886169,
+          "std_error": 0.013999830507523922,
+          "relative_uncertainty_pct": 11.840791191876836
+        },
+        "PKY3": {
+          "optimal_value": 1.2690504084399832,
+          "std_error": 0.39648197520385436,
+          "relative_uncertainty_pct": 31.24241342715781
+        }
+      }
+    },
+    "stage4_trail_mz0": {
+      "stage": "Stage 4: Mz0",
+      "jacobian_rank": 8,
+      "num_params": 8,
+      "scaled_condition_number": 351.4156279127667,
+      "singular_values": [
+        3995.764825241025,
+        3078.110867169708,
+        1195.4240767707358,
+        283.0771254227166,
+        122.21416388031216,
+        42.663311738837464,
+        40.09228664196793,
+        11.370481298665833
+      ],
+      "optimizer_status": 2,
+      "nfev": 10,
+      "residual_lag1_autocorr": 0.9691593741779624,
+      "se_inflation_factor": 7.9905899093320025,
+      "boundary_saturated_parameters": [],
+      "high_correlations": [],
+      "parameters": {
+        "QDZ1": {
+          "optimal_value": 0.12898941502307826,
+          "std_error": 0.006141068688087211,
+          "relative_uncertainty_pct": 4.760909014889691
+        },
+        "QDZ2": {
+          "optimal_value": 0.0031282760755126757,
+          "std_error": 0.01944305725453445,
+          "relative_uncertainty_pct": 621.5262587189667
+        },
+        "QBZ1": {
+          "optimal_value": 6.746953641536997,
+          "std_error": 0.2491531233950214,
+          "relative_uncertainty_pct": 3.692824000762851
+        },
+        "QBZ2": {
+          "optimal_value": 3.2842701584856795,
+          "std_error": 1.213786335756293,
+          "relative_uncertainty_pct": 36.95756674036673
+        },
+        "QEZ2": {
+          "optimal_value": 1.6691104510982822,
+          "std_error": 0.32640331319174193,
+          "relative_uncertainty_pct": 19.55552509883136
+        },
+        "QHZ1": {
+          "optimal_value": 0.001559722733454311,
+          "std_error": 0.0040964643333725225,
+          "relative_uncertainty_pct": 262.6405479325227
+        },
+        "QDZ6": {
+          "optimal_value": 0.010723401701447515,
+          "std_error": 0.007439996442922987,
+          "relative_uncertainty_pct": 69.38093573346868
+        },
+        "QDZ7": {
+          "optimal_value": -0.003451704273868839,
+          "std_error": 0.0142332327698649,
+          "relative_uncertainty_pct": 412.35377195021397
+        }
+      }
+    },
+    "stage5_camber_mz": {
+      "stage": "Stage 5: Camber Mz",
+      "jacobian_rank": 2,
+      "num_params": 2,
+      "scaled_condition_number": 16.03228417610617,
+      "singular_values": [
+        697.1168489102911,
+        43.48206663834242
+      ],
+      "optimizer_status": 2,
+      "nfev": 6,
+      "residual_lag1_autocorr": 0.9826876129510261,
+      "se_inflation_factor": 10.70159891850338,
+      "boundary_saturated_parameters": [],
+      "high_correlations": [],
+      "parameters": {
+        "QDZ8": {
+          "optimal_value": 3.7595459727415297,
+          "std_error": 0.15108486762226325,
+          "relative_uncertainty_pct": 4.018699830184266
+        },
+        "QDZ3": {
+          "optimal_value": 0.15961204100558363,
+          "std_error": 0.9929591029987254,
+          "relative_uncertainty_pct": 622.107891574414
+        }
+      }
+    },
+    "stage6_overturning_mx": {
+      "stage": "Stage 6: Mx",
+      "jacobian_rank": 3,
+      "num_params": 3,
+      "scaled_condition_number": 18.298349232306713,
+      "singular_values": [
+        21775.271712505244,
+        2442.1239572544164,
+        1190.0129042274393
+      ],
+      "optimizer_status": 2,
+      "nfev": 5,
+      "residual_lag1_autocorr": 0.9757013101470916,
+      "se_inflation_factor": 9.017148356295431,
+      "boundary_saturated_parameters": [],
+      "high_correlations": [],
+      "parameters": {
+        "QSX1": {
+          "optimal_value": -0.02375441328517238,
+          "std_error": 0.0024816711411667315,
+          "relative_uncertainty_pct": 10.44720032178527
+        },
+        "QSX2": {
+          "optimal_value": 2.033981273617179,
+          "std_error": 0.0684773508437859,
+          "relative_uncertainty_pct": 3.3666657472223216
+        },
+        "QSX3": {
+          "optimal_value": 0.05522407880377083,
+          "std_error": 0.0008351107141828597,
+          "relative_uncertainty_pct": 1.5122220818753365
+        }
+      }
+    },
+    "stage8_longitudinal_fx0": {
+      "stage": "Stage 8: Pure Fx0 & Pressure",
+      "jacobian_rank": 8,
+      "num_params": 8,
+      "scaled_condition_number": 341.593240724638,
+      "singular_values": [
+        81567.72176839669,
+        26968.458372665376,
+        4396.796060001021,
+        2806.883820550793,
+        1370.323629235491,
+        1170.41383842489,
+        437.31489321287114,
+        238.78611179589853
+      ],
+      "optimizer_status": 2,
+      "nfev": 7,
+      "residual_lag1_autocorr": 0.9504398548926944,
+      "se_inflation_factor": 6.273356911972205,
+      "boundary_saturated_parameters": [],
+      "high_correlations": [],
+      "parameters": {
+        "PDX1": {
+          "optimal_value": 2.1334665795566132,
+          "std_error": 0.03320955076017214,
+          "relative_uncertainty_pct": 1.5566004679142385
+        },
+        "PDX2": {
+          "optimal_value": 0.07743197350503558,
+          "std_error": 0.08641110389536256,
+          "relative_uncertainty_pct": 111.59615335097077
+        },
+        "PKX1": {
+          "optimal_value": 40.64478166642314,
+          "std_error": 2.058693163108776,
+          "relative_uncertainty_pct": 5.065086042298692
+        },
+        "PKX2": {
+          "optimal_value": -8.276246904058835,
+          "std_error": 4.381862651373213,
+          "relative_uncertainty_pct": 52.94504504480479
+        },
+        "PEX1": {
+          "optimal_value": 0.1523503762995979,
+          "std_error": 0.30952873497828304,
+          "relative_uncertainty_pct": 203.16899931352515
+        },
+        "PPX1": {
+          "optimal_value": -0.7301956328396197,
+          "std_error": 0.166833457254454,
+          "relative_uncertainty_pct": 22.847775274369152
+        },
+        "PPX3": {
+          "optimal_value": -0.20679527247248256,
+          "std_error": 0.08177435551951262,
+          "relative_uncertainty_pct": 39.54362908871334
+        },
+        "PPX4": {
+          "optimal_value": 0.5119608792563485,
+          "std_error": 0.36557115938850454,
+          "relative_uncertainty_pct": 71.40607304204902
+        }
+      }
+    },
+    "stage9_longitudinal_camber_pdx3": {
+      "stage": "Stage 9: Camber Fx (PDX3)",
+      "jacobian_rank": 1,
+      "num_params": 1,
+      "scaled_condition_number": 1.0,
+      "singular_values": [
+        2703.5244975605187
+      ],
+      "optimizer_status": 2,
+      "nfev": 4,
+      "residual_lag1_autocorr": 0.9542959303211793,
+      "se_inflation_factor": 6.539096210533744,
+      "boundary_saturated_parameters": [],
+      "high_correlations": [],
+      "parameters": {
+        "PDX3": {
+          "optimal_value": 4.14153806711242,
+          "std_error": 1.9307979876845829,
+          "relative_uncertainty_pct": 46.62031246354767
+        }
+      }
+    },
+    "stage10_combined_gxa": {
+      "stage": "Stage 10: Combined Gxa",
+      "jacobian_rank": 2,
+      "num_params": 2,
+      "scaled_condition_number": 5.321065238321627,
+      "singular_values": [
+        53088.63603048741,
+        9977.06918685189
+      ],
+      "optimizer_status": 2,
+      "nfev": 8,
+      "residual_lag1_autocorr": 0.9658102437875945,
+      "se_inflation_factor": 7.582681158367272,
+      "boundary_saturated_parameters": [],
+      "high_correlations": [
+        {
+          "param_i": "RBX1",
+          "param_j": "RBX2",
+          "correlation": 0.8989433968710614
+        }
+      ],
+      "parameters": {
+        "RBX1": {
+          "optimal_value": 13.489591778016884,
+          "std_error": 0.5843605410568568,
+          "relative_uncertainty_pct": 4.33193643420071
+        },
+        "RBX2": {
+          "optimal_value": 10.709278674444034,
+          "std_error": 0.9164370176939425,
+          "relative_uncertainty_pct": 8.557411246388344
+        }
+      }
+    },
+    "stage11_combined_gyk": {
+      "stage": "Stage 11: Combined Gyk",
+      "jacobian_rank": 3,
+      "num_params": 3,
+      "scaled_condition_number": 11.143737465322253,
+      "singular_values": [
+        57475.339199432,
+        7263.441402825188,
+        5157.635791249317
+      ],
+      "optimizer_status": 2,
+      "nfev": 5,
+      "residual_lag1_autocorr": 0.974697583047252,
+      "se_inflation_factor": 8.834242027771175,
+      "boundary_saturated_parameters": [],
+      "high_correlations": [
+        {
+          "param_i": "RBY1",
+          "param_j": "RBY2",
+          "correlation": 0.9386144934075514
+        }
+      ],
+      "parameters": {
+        "RBY1": {
+          "optimal_value": 14.945193743966643,
+          "std_error": 0.954384310694485,
+          "relative_uncertainty_pct": 6.3858945360261306
+        },
+        "RBY2": {
+          "optimal_value": 13.32988021339077,
+          "std_error": 1.5585920680704126,
+          "relative_uncertainty_pct": 11.69246867278448
+        },
+        "RHY1": {
+          "optimal_value": 0.010739652133050824,
+          "std_error": 0.0020406240540195163,
+          "relative_uncertainty_pct": 19.000839400929777
+        }
+      }
+    },
+    "stage7_joint_cv": {
+      "cv_cost_staged": [
+        3.8996448064582006,
+        5.911491685070467,
+        6.4197538504022065,
+        6.182880313338327
+      ],
+      "cv_cost_joint": [
+        4.0893699657193805,
+        6.088354026460394,
+        6.480722405778605,
+        6.35560964488332
+      ],
+      "adopted_joint": false,
+      "note": "staged params were fit on all train rows, so the comparison is biased toward staged"
+    }
+  },
+  "evaluation": {
+    "Train": {
+      "num_samples": 60824,
+      "fy": {
+        "rmse": 59.160715644322025,
+        "nrmse_pct": 1.0661739962717167,
+        "mae": 43.234394097338914,
+        "max_err": 304.50010472065196,
+        "bias": -2.4942136820258782,
+        "r2": 0.9984994739139749
+      },
+      "mz": {
+        "rmse": 8.047135870796332,
+        "nrmse_pct": 4.977199326321333,
+        "mae": 5.878257069087154,
+        "max_err": 55.574282762175,
+        "bias": 1.733307315828934,
+        "r2": 0.8982682696846489
+      },
+      "mx": {
+        "rmse": 4.523511215481884,
+        "nrmse_pct": 3.6313006466098448,
+        "mae": 3.6849994658487946,
+        "max_err": 18.159821214220827,
+        "bias": 0.8389671405375309,
+        "r2": 0.9611404459757276
+      },
+      "sliced_by_slip_region": {
+        "Linear (|alpha| <= 3 deg)": {
+          "count": 14619,
+          "rmse_fy_n": 45.28332969936712,
+          "mae_fy_n": 36.39285864138175,
+          "rmse_mz_nm": 6.349253050621014,
+          "mae_mz_nm": 4.980129051813837
+        },
+        "Transitional (3-8 deg)": {
+          "count": 24489,
+          "rmse_fy_n": 58.730570064199426,
+          "mae_fy_n": 44.84521857470957,
+          "rmse_mz_nm": 6.819666478314957,
+          "mae_mz_nm": 5.169232510310299
+        },
+        "Saturation (>8 deg)": {
+          "count": 21716,
+          "rmse_fy_n": 67.32685226411971,
+          "mae_fy_n": 46.02353234583347,
+          "rmse_mz_nm": 10.089113660985891,
+          "mae_mz_nm": 7.282430761498509
+        }
+      },
+      "sliced_by_load": {
+        "Load 1 (~220 N)": {
+          "count": 11168,
+          "rmse_fy_n": 22.50673153719657,
+          "mae_fy_n": 17.608426196731838,
+          "rmse_mz_nm": 10.266325691318439,
+          "mae_mz_nm": 8.20885591217609
+        },
+        "Load 2 (~440 N)": {
+          "count": 11171,
+          "rmse_fy_n": 38.10450465077624,
+          "mae_fy_n": 29.281144820635106,
+          "rmse_mz_nm": 8.030806574907903,
+          "mae_mz_nm": 5.868546615720181
+        },
+        "Load 3 (~665 N)": {
+          "count": 11168,
+          "rmse_fy_n": 61.068125653970085,
+          "mae_fy_n": 43.837490097186524,
+          "rmse_mz_nm": 6.5530319133606625,
+          "mae_mz_nm": 4.556937798252323
+        },
+        "Load 4 (~885 N)": {
+          "count": 11173,
+          "rmse_fy_n": 67.9561302451864,
+          "mae_fy_n": 52.86393061913949,
+          "rmse_mz_nm": 6.757192024820233,
+          "mae_mz_nm": 4.787188999061794
+        },
+        "Load 5 (~1110 N)": {
+          "count": 16144,
+          "rmse_fy_n": 77.81715295231386,
+          "mae_fy_n": 63.53520984930015,
+          "rmse_mz_nm": 8.070357444721784,
+          "mae_mz_nm": 5.941893389579101
+        }
+      },
+      "sliced_by_camber": {
+        "Camber 0.0 deg": {
+          "count": 23589,
+          "rmse_fy_n": 51.790324939356054,
+          "mae_fy_n": 38.22756282701439,
+          "rmse_mz_nm": 5.949727462605072,
+          "mae_mz_nm": 3.9564168621024915
+        },
+        "Camber 2.0 deg": {
+          "count": 18616,
+          "rmse_fy_n": 57.32545466341731,
+          "mae_fy_n": 42.20893210710406,
+          "rmse_mz_nm": 7.721080014580188,
+          "mae_mz_nm": 5.879759401529184
+        },
+        "Camber 4.0 deg": {
+          "count": 18619,
+          "rmse_fy_n": 68.91861056986662,
+          "mae_fy_n": 50.603003756606185,
+          "rmse_mz_nm": 10.34844791228777,
+          "mae_mz_nm": 8.311595122786082
+        }
+      },
+      "sliced_by_speed": {
+        "Nominal (~40 km/h)": {
+          "count": 60824,
+          "rmse_fy_n": 59.160715644322025,
+          "mae_fy_n": 43.234394097338914,
+          "rmse_mz_nm": 8.047135870796332,
+          "mae_mz_nm": 5.878257069087154
+        }
+      }
+    },
+    "Independent_Validation": {
+      "num_samples": 52154,
+      "fy": {
+        "rmse": 93.10808306230503,
+        "nrmse_pct": 1.658019649874903,
+        "mae": 62.82840434050779,
+        "max_err": 573.6826231138207,
+        "bias": -24.127670552280147,
+        "r2": 0.99622652122569
+      },
+      "mz": {
+        "rmse": 9.52253609902407,
+        "nrmse_pct": 4.785434493705246,
+        "mae": 6.936026603697462,
+        "max_err": 58.081588614841976,
+        "bias": 2.158757286313103,
+        "r2": 0.8914367515661386
+      },
+      "mx": {
+        "rmse": 5.766748308197714,
+        "nrmse_pct": 4.250256712999494,
+        "mae": 4.28246219098018,
+        "max_err": 28.800324475006164,
+        "bias": -0.2656017050731161,
+        "r2": 0.9429943936626114
+      },
+      "sliced_by_slip_region": {
+        "Linear (|alpha| <= 3 deg)": {
+          "count": 12535,
+          "rmse_fy_n": 72.92393721500676,
+          "mae_fy_n": 49.417179619897496,
+          "rmse_mz_nm": 7.483084312479603,
+          "mae_mz_nm": 5.807118300790397
+        },
+        "Transitional (3-8 deg)": {
+          "count": 20993,
+          "rmse_fy_n": 101.15496386777284,
+          "mae_fy_n": 65.24480549710489,
+          "rmse_mz_nm": 9.302079901288248,
+          "mae_mz_nm": 6.6299536873061795
+        },
+        "Saturation (>8 deg)": {
+          "count": 18626,
+          "rmse_fy_n": 95.72128136247932,
+          "mae_fy_n": 69.13046556634302,
+          "rmse_mz_nm": 10.894797313920195,
+          "mae_mz_nm": 8.040732622743004
+        }
+      },
+      "sliced_by_load": {
+        "Load 1 (~220 N)": {
+          "count": 9932,
+          "rmse_fy_n": 27.303882195449212,
+          "mae_fy_n": 21.410658870964916,
+          "rmse_mz_nm": 10.449280316844266,
+          "mae_mz_nm": 7.842329269259821
+        },
+        "Load 2 (~440 N)": {
+          "count": 9931,
+          "rmse_fy_n": 47.800580203810554,
+          "mae_fy_n": 37.190670089604,
+          "rmse_mz_nm": 8.188627825490954,
+          "mae_mz_nm": 6.055964953750629
+        },
+        "Load 3 (~665 N)": {
+          "count": 9936,
+          "rmse_fy_n": 76.16742216064969,
+          "mae_fy_n": 59.47933765357737,
+          "rmse_mz_nm": 7.255707388378178,
+          "mae_mz_nm": 5.263257256446164
+        },
+        "Load 4 (~885 N)": {
+          "count": 9936,
+          "rmse_fy_n": 96.61682963668596,
+          "mae_fy_n": 76.13909905933438,
+          "rmse_mz_nm": 8.337249813589187,
+          "mae_mz_nm": 6.370663778810139
+        },
+        "Load 5 (~1110 N)": {
+          "count": 12419,
+          "rmse_fy_n": 147.89481497828365,
+          "mae_fy_n": 108.48350142757639,
+          "rmse_mz_nm": 11.92200568796537,
+          "mae_mz_nm": 8.705619601010127
+        }
+      },
+      "sliced_by_camber": {
+        "Camber 0.0 deg": {
+          "count": 27322,
+          "rmse_fy_n": 89.3770575366377,
+          "mae_fy_n": 60.42748427391424,
+          "rmse_mz_nm": 7.7280104172149064,
+          "mae_mz_nm": 5.247157290195403
+        },
+        "Camber 2.0 deg": {
+          "count": 12416,
+          "rmse_fy_n": 92.88895543737154,
+          "mae_fy_n": 62.206250710334885,
+          "rmse_mz_nm": 9.913265975768075,
+          "mae_mz_nm": 7.854155619582704
+        },
+        "Camber 4.0 deg": {
+          "count": 12416,
+          "rmse_fy_n": 101.03529032719848,
+          "mae_fy_n": 68.73389705407864,
+          "rmse_mz_nm": 12.296581100065666,
+          "mae_mz_nm": 9.734335038158811
+        }
+      },
+      "sliced_by_speed": {
+        "Low speed (~24 km/h) [extrapolated]": {
+          "count": 6210,
+          "rmse_fy_n": 62.19028696494837,
+          "mae_fy_n": 47.30790520065388,
+          "rmse_mz_nm": 5.750449541840564,
+          "mae_mz_nm": 3.814072207968865
+        },
+        "Nominal (~40 km/h)": {
+          "count": 39735,
+          "rmse_fy_n": 95.42799512413501,
+          "mae_fy_n": 64.50832797815819,
+          "rmse_mz_nm": 10.40868743725606,
+          "mae_mz_nm": 7.904443659455622
+        },
+        "High speed (~72 km/h) [extrapolated]": {
+          "count": 6209,
+          "rmse_fy_n": 103.30671495637856,
+          "mae_fy_n": 67.60059534009773,
+          "rmse_mz_nm": 5.938777444582826,
+          "mae_mz_nm": 3.861020175435921
+        }
+      }
+    }
+  },
+  "longitudinal_evaluation": {
+    "Train": {
+      "pure_fx_samples": 49981,
+      "pure_fx_calibrated": {
+        "rmse": 121.70643043665316,
+        "nrmse_pct": 1.9625827714115522,
+        "mae": 92.38254724795048,
+        "max_err": 705.9064932336939,
+        "bias": -1.7798729846188297,
+        "r2": 0.993903690840734,
+        "n": 49981
+      },
+      "pure_fx_baseline_lit": {
+        "rmse": 188.34183663595314,
+        "nrmse_pct": 3.037115149886204,
+        "mae": 143.8631396212399,
+        "max_err": 859.262845841241,
+        "bias": -21.710896973431822,
+        "r2": 0.9854006494970209,
+        "n": 49981
+      },
+      "combined_samples": 99399,
+      "combined_fx_calibrated": {
+        "rmse": 134.99568608328252,
+        "nrmse_pct": 2.5693789913872145,
+        "mae": 101.90504954908822,
+        "max_err": 613.2863678542826,
+        "bias": -59.70024920630709,
+        "r2": 0.9885421028792021,
+        "n": 99399
+      },
+      "combined_fx_baseline_lit": {
+        "rmse": 136.664637210887,
+        "nrmse_pct": 2.6011442135904885,
+        "mae": 104.87828046347232,
+        "max_err": 634.2160342557838,
+        "bias": -62.95055409848616,
+        "r2": 0.9882570437395162,
+        "n": 99399
+      },
+      "combined_fy_gyk_sweep_ref_calibrated": {
+        "rmse": 120.29295775810344,
+        "nrmse_pct": 5.996089989388016,
+        "mae": 75.73509293642137,
+        "max_err": 1186.3964174341663,
+        "bias": -11.623166356271856,
+        "r2": 0.9280142128244075,
+        "n": 99399
+      },
+      "combined_fy_gyk_sweep_ref_baseline_lit": {
+        "rmse": 161.23528657679373,
+        "nrmse_pct": 8.036890153813633,
+        "mae": 102.89450983434307,
+        "max_err": 1279.173273448528,
+        "bias": -74.40368198397006,
+        "r2": 0.8706737934276777,
+        "n": 99399
+      }
+    },
+    "Validation": {
+      "pure_fx_samples": 26491,
+      "pure_fx_calibrated": {
+        "rmse": 119.86707175129868,
+        "nrmse_pct": 2.1696772058193496,
+        "mae": 92.72080477693088,
+        "max_err": 532.4675829580674,
+        "bias": -15.022636681371294,
+        "r2": 0.9939689518587538,
+        "n": 26491
+      },
+      "pure_fx_baseline_lit": {
+        "rmse": 172.02158986938304,
+        "nrmse_pct": 3.1137101874215207,
+        "mae": 138.8337632221372,
+        "max_err": 593.2634889180049,
+        "bias": -32.70574978851302,
+        "r2": 0.9875789326249409,
+        "n": 26491
+      },
+      "combined_samples": 53365,
+      "combined_fx_calibrated": {
+        "rmse": 134.96790736949453,
+        "nrmse_pct": 2.634892858708723,
+        "mae": 102.89769169052721,
+        "max_err": 665.6602104394885,
+        "bias": -62.28125583632859,
+        "r2": 0.9886022609776312,
+        "n": 53365
+      },
+      "combined_fx_baseline_lit": {
+        "rmse": 134.59325405755638,
+        "nrmse_pct": 2.627578739705493,
+        "mae": 104.88733600835342,
+        "max_err": 591.5565148072515,
+        "bias": -65.36129177010322,
+        "r2": 0.9886654504275725,
+        "n": 53365
+      },
+      "combined_fy_gyk_sweep_ref_calibrated": {
+        "rmse": 97.59607208019405,
+        "nrmse_pct": 4.926457153250989,
+        "mae": 66.66424854683282,
+        "max_err": 772.9805124565323,
+        "bias": -14.629026084603447,
+        "r2": 0.954064390233602,
+        "n": 53365
+      },
+      "combined_fy_gyk_sweep_ref_baseline_lit": {
+        "rmse": 146.8900644579754,
+        "nrmse_pct": 7.4147206272387205,
+        "mae": 102.23658100559781,
+        "max_err": 924.7095079807777,
+        "bias": -78.4484524458325,
+        "r2": 0.8959433954654867,
+        "n": 53365
+      }
+    }
+  }
+}

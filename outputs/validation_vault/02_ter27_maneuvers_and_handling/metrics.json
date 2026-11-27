@@ -1,0 +1,588 @@
+{
+  "metadata": {
+    "vehicle": "TeR27 4WD (vs TeR26 RWD)",
+    "coordinate_frame": "ISO 8855 (+x fwd, +y left, +z up)",
+    "tire_model": "Hoosier 16.0x7.5-10 R20 Pacejka MF 6.2",
+    "default_profile": "FSG_RUBBERED (45 C)",
+    "runtime_s": 62.76
+  },
+  "family_1_ymd": {
+    "velocity_sweep": {
+      "35kmh": {
+        "v_kmh": 35.0,
+        "trim_max_ay_g": 1.0775110620154067,
+        "trim_delta_deg": 5.292054399449015,
+        "trim_beta_deg": -5.0,
+        "stability_index_0g_per_deg": 0.2926127331030663,
+        "stability_index_1g_per_deg": 0.02002962744307879,
+        "control_index_per_deg": -0.140457847853366
+      },
+      "60kmh": {
+        "v_kmh": 60.0,
+        "trim_max_ay_g": 1.2819687398197879,
+        "trim_delta_deg": -0.8622028064156632,
+        "trim_beta_deg": -7.5,
+        "stability_index_0g_per_deg": 0.19543685273188513,
+        "stability_index_1g_per_deg": 0.06889093052638047,
+        "control_index_per_deg": 0.01780485668875158
+      },
+      "90kmh": {
+        "v_kmh": 90.0,
+        "trim_max_ay_g": 1.6850270445455269,
+        "trim_delta_deg": -0.2112600091235446,
+        "trim_beta_deg": -7.5,
+        "stability_index_0g_per_deg": 0.1346323321691683,
+        "stability_index_1g_per_deg": 0.16555577655641807,
+        "control_index_per_deg": 0.09443555134653388
+      }
+    },
+    "grip_comparison_60kmh": {
+      "COLD 18 C": {
+        "v_kmh": 60.0,
+        "trim_max_ay_g": 0.7369476959931274,
+        "trim_delta_deg": -1.434851174662983,
+        "trim_beta_deg": -5.0,
+        "stability_index_0g_per_deg": 0.10904210694079479,
+        "stability_index_1g_per_deg": 0.017527247906172917,
+        "control_index_per_deg": 0.025905187160487862
+      },
+      "FSG_RUBBERED 45 C": {
+        "v_kmh": 60.0,
+        "trim_max_ay_g": 1.2819687398197879,
+        "trim_delta_deg": -0.8622028064156632,
+        "trim_beta_deg": -7.5,
+        "stability_index_0g_per_deg": 0.19543685273188513,
+        "stability_index_1g_per_deg": 0.06889093052638047,
+        "control_index_per_deg": 0.01780485668875158
+      },
+      "TTC_PEAK 77.5 C": {
+        "v_kmh": 60.0,
+        "trim_max_ay_g": 1.5097328659874516,
+        "trim_delta_deg": 1.1408084678994126,
+        "trim_beta_deg": -7.5,
+        "stability_index_0g_per_deg": 0.21830629000857932,
+        "stability_index_1g_per_deg": 0.2226608814769909,
+        "control_index_per_deg": 0.015840881500840474
+      }
+    },
+    "cross_vehicle_60kmh": {
+      "ter27_3d": {
+        "v_kmh": 60.0,
+        "trim_max_ay_g": 1.2819687398197879,
+        "trim_delta_deg": -0.8622028064156632,
+        "trim_beta_deg": -7.5,
+        "stability_index_0g_per_deg": 0.19543685273188513,
+        "stability_index_1g_per_deg": 0.06889093052638047,
+        "control_index_per_deg": 0.01780485668875158
+      },
+      "ter27_parametric": {
+        "v_kmh": 60.0,
+        "trim_max_ay_g": 1.2866826975010215,
+        "trim_delta_deg": -0.9415694374004141,
+        "trim_beta_deg": -7.5,
+        "stability_index_0g_per_deg": 0.18618993759204377,
+        "stability_index_1g_per_deg": 0.07074834213806293,
+        "control_index_per_deg": 0.022401911307017696
+      },
+      "ter26_3d": {
+        "v_kmh": 60.0,
+        "trim_max_ay_g": 1.4260493592160668,
+        "trim_delta_deg": -1.9640822244033116,
+        "trim_beta_deg": -10.0,
+        "stability_index_0g_per_deg": 0.19858078465289877,
+        "stability_index_1g_per_deg": 0.20934642807864784,
+        "control_index_per_deg": 0.017801027240888893
+      },
+      "ter26_parametric": {
+        "v_kmh": 60.0,
+        "trim_max_ay_g": 1.4149686069050877,
+        "trim_delta_deg": -2.912840054536064,
+        "trim_beta_deg": -10.0,
+        "stability_index_0g_per_deg": 0.19750272761521287,
+        "stability_index_1g_per_deg": 0.21882207015231483,
+        "control_index_per_deg": 0.020486456643755653
+      }
+    }
+  },
+  "family_2_ramp_steer": {
+    "understeer_gradient": {
+      "ter27_3d_40kmh": {
+        "k_us_linear_deg_per_g": 0.15610148447921138,
+        "max_ay_g": 1.1402771626887964,
+        "beta_at_1g_deg": 0.6618155033218528
+      },
+      "ter27_par_40kmh": {
+        "k_us_linear_deg_per_g": -0.08783397633367548,
+        "max_ay_g": 1.1399051336713106
+      },
+      "ter27_3d_65kmh": {
+        "k_us_linear_deg_per_g": 0.1291232662657602,
+        "max_ay_g": 1.5055879012947124,
+        "beta_at_1g_deg": -0.712125258138189
+      },
+      "ter27_par_65kmh": {
+        "k_us_linear_deg_per_g": -0.10997322971882281,
+        "max_ay_g": 1.506580903307788
+      },
+      "ter27_3d_85kmh": {
+        "k_us_linear_deg_per_g": 0.16143578435042472,
+        "max_ay_g": 1.7754628969261173,
+        "beta_at_1g_deg": -0.9431161602670366
+      },
+      "ter27_par_85kmh": {
+        "k_us_linear_deg_per_g": -0.07968572813163737,
+        "max_ay_g": 1.7751309739894576
+      },
+      "ter26_3d_65kmh": {
+        "k_us_linear_deg_per_g": -0.05411469604847157,
+        "max_ay_g": 1.5178331340553497
+      },
+      "ter26_par_65kmh": {
+        "k_us_linear_deg_per_g": 0.004801926040332966,
+        "max_ay_g": 1.5047876669463829
+      }
+    },
+    "roll_gradient_ter27_deg_per_g": 0.8036328467338407,
+    "roll_gradient_ter26_deg_per_g": 0.7274197628936194,
+    "fz_at_peak_ay_65kmh_n": {
+      "FL": 691.7484088653098,
+      "FR": 1587.2643848419887,
+      "RL": 625.0631840060735,
+      "RR": 1763.2667306199617
+    }
+  },
+  "family_3_step_steer": {
+    "50kmh_small": {
+      "ter27_3d_wz": {
+        "t_rise_ms": 77.49999999999996,
+        "t_peak_ms": 157.50000000000003,
+        "overshoot_pct": 3.6185341741338473,
+        "zeta": 0.7262605745650206,
+        "y_ss": 0.30337616016872965
+      },
+      "ter27_3d_ay": {
+        "t_rise_ms": 127.5,
+        "t_peak_ms": 227.50000000000003,
+        "overshoot_pct": 1.4842998981598576,
+        "zeta": 0.8014666696698423,
+        "y_ss": 4.2135577801212225
+      },
+      "ter27_par_wz": {
+        "t_rise_ms": 74.99999999999996,
+        "t_peak_ms": 160.00000000000003,
+        "overshoot_pct": 2.6808900445427053,
+        "zeta": 0.7551613714320453,
+        "y_ss": 0.32121112827605314
+      },
+      "ter26_3d_wz": {
+        "t_rise_ms": 60.0,
+        "t_peak_ms": 114.99999999999999,
+        "overshoot_pct": 6.865695860592891,
+        "zeta": 0.6488118597504992,
+        "y_ss": 0.31440466860890937
+      }
+    },
+    "50kmh_large": {
+      "ter27_3d_wz": {
+        "t_rise_ms": 102.49999999999999,
+        "t_peak_ms": 2247.5,
+        "overshoot_pct": 4.568998490661613e-06,
+        "zeta": 1.0,
+        "y_ss": 0.7008277709536637
+      },
+      "ter27_3d_ay": {
+        "t_rise_ms": 195.0,
+        "t_peak_ms": 2247.5,
+        "overshoot_pct": 2.3970565643516295e-05,
+        "zeta": 1.0,
+        "y_ss": 9.733717057106048
+      },
+      "ter27_par_wz": {
+        "t_rise_ms": 112.49999999999999,
+        "t_peak_ms": 2247.5,
+        "overshoot_pct": 0.0003439711879993368,
+        "zeta": 1.0,
+        "y_ss": 0.7446081464387347
+      },
+      "ter26_3d_wz": {
+        "t_rise_ms": 67.5,
+        "t_peak_ms": 135.0,
+        "overshoot_pct": 3.404117825619024,
+        "zeta": 0.732485461877539,
+        "y_ss": 0.7205024775810988
+      }
+    },
+    "80kmh_small": {
+      "ter27_3d_wz": {
+        "t_rise_ms": 87.49999999999997,
+        "t_peak_ms": 205.00000000000003,
+        "overshoot_pct": 2.1358309769268002,
+        "zeta": 0.7744891250688356,
+        "y_ss": 0.23098448323292775
+      },
+      "ter27_3d_ay": {
+        "t_rise_ms": 180.0,
+        "t_peak_ms": 415.00000000000006,
+        "overshoot_pct": 0.06436834653817947,
+        "zeta": 0.9194926307052965,
+        "y_ss": 5.1329885162873055
+      },
+      "ter27_par_wz": {
+        "t_rise_ms": 104.99999999999999,
+        "t_peak_ms": 535.0,
+        "overshoot_pct": 0.001816127287268543,
+        "zeta": 1.0,
+        "y_ss": 0.2664692971479935
+      },
+      "ter26_3d_wz": {
+        "t_rise_ms": 65.0,
+        "t_peak_ms": 127.5,
+        "overshoot_pct": 1.4634747691739225,
+        "zeta": 0.8024255559855937,
+        "y_ss": 0.254423446310864
+      }
+    },
+    "80kmh_large": {
+      "ter27_3d_wz": {
+        "t_rise_ms": 107.49999999999999,
+        "t_peak_ms": 2247.5,
+        "overshoot_pct": 0.0003463662777702936,
+        "zeta": 1.0,
+        "y_ss": 0.4869966153822284
+      },
+      "ter27_3d_ay": {
+        "t_rise_ms": 255.0,
+        "t_peak_ms": 2247.5,
+        "overshoot_pct": 0.001014068081128805,
+        "zeta": 1.0,
+        "y_ss": 10.822063849104357
+      },
+      "ter27_par_wz": {
+        "t_rise_ms": 1087.5000000000002,
+        "t_peak_ms": 2247.5,
+        "overshoot_pct": 7.422310702583101,
+        "zeta": 0.6376755442103569,
+        "y_ss": 0.6758970362386728
+      },
+      "ter26_3d_wz": {
+        "t_rise_ms": 74.99999999999996,
+        "t_peak_ms": 2247.5,
+        "overshoot_pct": 0.0003885263783587334,
+        "zeta": 1.0,
+        "y_ss": 0.5354462282026037
+      }
+    }
+  },
+  "family_4_bode_sine_sweep": {
+    "45kmh": {
+      "wz_dc_gain_db": 17.876590309861033,
+      "wz_peak_freq_hz": 3.90625,
+      "wz_bandwidth_3db_hz": 5.859375,
+      "wz_mean_coherence_0p1_4hz": 0.9991638719870461,
+      "ay_dc_gain_db": 39.81257349395603
+    },
+    "80kmh": {
+      "wz_dc_gain_db": 22.424039038000263,
+      "wz_peak_freq_hz": 1.5625,
+      "wz_bandwidth_3db_hz": 5.078125,
+      "wz_mean_coherence_0p1_4hz": 0.9983396868725526,
+      "ay_dc_gain_db": 49.22047745503503
+    }
+  },
+  "family_5_combined_and_emergency": {
+    "trail_braking": {
+      "optimal_progressive": {
+        "max_abs_beta_deg": 2.7524558066413336,
+        "max_ay_g": 0.8245221059498914,
+        "min_ax_g": -1.6182497208631943,
+        "min_inner_rear_fz_n": 328.4297492457201,
+        "max_rear_alpha_deg": 2.7769953272764636
+      },
+      "late_aggressive": {
+        "max_abs_beta_deg": 3.151348432333435,
+        "max_ay_g": 0.714660322591923,
+        "min_ax_g": -1.6182497208631943,
+        "min_inner_rear_fz_n": 303.4964988442357,
+        "max_rear_alpha_deg": 1.74075335713077
+      },
+      "rear_biased_overbrake": {
+        "max_abs_beta_deg": 2.92140287974572,
+        "max_ay_g": 0.7695634796526609,
+        "min_ax_g": -1.6184824406892258,
+        "min_inner_rear_fz_n": 323.17952985934494,
+        "max_rear_alpha_deg": 1.9206409385567083
+      }
+    },
+    "slalom_15m": {
+      "max_passing_speed_kmh": 45.0,
+      "max_abs_ay_g": 1.124205364627007,
+      "max_abs_beta_deg": 1.2112189549374603,
+      "pilot_workload_rms_deg_s": 13.586987348864236
+    },
+    "iso_3888_2_dlc": {
+      "max_passing_speed_kmh": 85.0,
+      "max_abs_ay_g": 1.653104468396513,
+      "max_abs_beta_deg": 11.75172748564181,
+      "pilot_workload_rms_deg_s": 205.58718863615667
+    },
+    "split_mu_0p90_0p50": {
+      "braking_open_max_drift_m": 0.28337511053357484,
+      "braking_tv_max_drift_m": 0.029825086666390103,
+      "braking_open_max_psi_deg": 2.6761294128198885,
+      "braking_tv_max_psi_deg": 0.41415516046134754,
+      "braking_tv_peak_mz_nm": 16.11915136316944,
+      "accel_open_max_drift_m": 0.448666906492341,
+      "accel_tv_max_drift_m": 0.018153882727400893,
+      "accel_tv_peak_mz_nm": 10.389967654517068
+    }
+  },
+  "family_6_fs_events": {
+    "fs_acceleration_75m": {
+      "time_75m_s": 3.855472139588645,
+      "v_exit_kmh": 109.5831557220906,
+      "time_0_100_kmh_s": 2.7920000000000003,
+      "peak_ax_g": 1.334967817826891,
+      "max_hv_power_kw": 80.00000000000003,
+      "power_limited_onset_s": 1.232
+    },
+    "fs_skidpad_9p125m": {
+      "ter27_open_4wd": {
+        "v_max_ms": 9.7,
+        "v_max_kmh": 34.92,
+        "t_circle_s": 5.910728446186982,
+        "sustained_ay_g": 1.0510940750980966,
+        "eq_beta_deg": 1.3810229730229748,
+        "eq_delta_deg": 11.39514520093297,
+        "eq_tv_mz_nm": 0.0,
+        "r_eff_m": 9.125
+      },
+      "ter27_tv4": {
+        "v_max_ms": 9.7,
+        "v_max_kmh": 34.92,
+        "t_circle_s": 5.910728446186982,
+        "sustained_ay_g": 1.0510940750980966,
+        "eq_beta_deg": 1.3785242329474208,
+        "eq_delta_deg": 11.392566729458817,
+        "eq_tv_mz_nm": 0.3611681269732141,
+        "r_eff_m": 9.125
+      },
+      "ter26_rwd_3d": {
+        "v_max_ms": 10.5,
+        "v_max_kmh": 37.800000000000004,
+        "t_circle_s": 5.460387231239402,
+        "sustained_ay_g": 1.231619957270328,
+        "eq_beta_deg": 0.9585301248846209,
+        "eq_delta_deg": 11.519987710275862,
+        "eq_tv_mz_nm": 0.0,
+        "r_eff_m": 9.125
+      },
+      "ter27_dynamic_r_eff_m": 9.192029708927272
+    }
+  },
+  "skidpad_max_attack_update": {
+    "FSG_RUBBERED_R20_LEGACY": {
+      "profile": "FSG_RUBBERED",
+      "compound": "R20",
+      "mode": "legacy_open",
+      "r_target_m": 9.125,
+      "t_right_s": 5.51,
+      "t_left_s": 5.51,
+      "t_mean_s": 5.51,
+      "t_crossover_s": 10.907,
+      "v_mean_ms": 10.346,
+      "v_mean_kmh": 37.25,
+      "ay_sustained_g": 1.204,
+      "ay_peak_g": 1.302,
+      "beta_mean_abs_deg": 1.11,
+      "beta_max_abs_deg": 2.04,
+      "p_dc_min_kw": 3.76,
+      "p_dc_max_kw": 5.74,
+      "hv_violations": 0,
+      "min_cone_clear_m": 0.7,
+      "torque_fight_mean_kw": 0.0,
+      "torque_fight_energy_kj": 0.0,
+      "mu_util_mean_4": [
+        0.729,
+        0.729,
+        0.705,
+        0.706
+      ],
+      "mu_util_peak_4": [
+        0.748,
+        0.752,
+        0.803,
+        0.804
+      ]
+    },
+    "FSG_RUBBERED_R20_MAX_ATTACK": {
+      "profile": "FSG_RUBBERED",
+      "compound": "R20",
+      "mode": "max_attack_v2",
+      "r_target_m": 8.31,
+      "t_right_s": 4.991,
+      "t_left_s": 4.992,
+      "t_mean_s": 4.992,
+      "t_crossover_s": 9.889,
+      "v_mean_ms": 10.54,
+      "v_mean_kmh": 37.94,
+      "ay_sustained_g": 1.361,
+      "ay_peak_g": 1.361,
+      "beta_mean_abs_deg": 1.38,
+      "beta_max_abs_deg": 3.61,
+      "p_dc_min_kw": -13.67,
+      "p_dc_max_kw": 12.07,
+      "hv_violations": 0,
+      "min_cone_clear_m": 0.157,
+      "torque_fight_mean_kw": 0.036,
+      "torque_fight_energy_kj": 0.718,
+      "mu_util_mean_4": [
+        0.786,
+        0.797,
+        0.781,
+        0.786
+      ],
+      "mu_util_peak_4": [
+        0.855,
+        0.855,
+        0.845,
+        0.845
+      ]
+    },
+    "FSG_RUBBERED_R25B_MAX_ATTACK": {
+      "profile": "FSG_RUBBERED",
+      "compound": "R25B",
+      "mode": "max_attack_v2",
+      "r_target_m": 8.31,
+      "t_right_s": 4.958,
+      "t_left_s": 4.959,
+      "t_mean_s": 4.958,
+      "t_crossover_s": 9.823,
+      "v_mean_ms": 10.636,
+      "v_mean_kmh": 38.29,
+      "ay_sustained_g": 1.383,
+      "ay_peak_g": 1.384,
+      "beta_mean_abs_deg": 1.7,
+      "beta_max_abs_deg": 3.95,
+      "p_dc_min_kw": -13.46,
+      "p_dc_max_kw": 12.12,
+      "hv_violations": 0,
+      "min_cone_clear_m": 0.168,
+      "torque_fight_mean_kw": 0.036,
+      "torque_fight_energy_kj": 0.726,
+      "mu_util_mean_4": [
+        0.82,
+        0.832,
+        0.819,
+        0.826
+      ],
+      "mu_util_peak_4": [
+        0.93,
+        0.93,
+        0.932,
+        0.932
+      ]
+    },
+    "TTC_PEAK_R20_MAX_ATTACK": {
+      "profile": "TTC_PEAK",
+      "compound": "R20",
+      "mode": "max_attack_v2",
+      "r_target_m": 8.35,
+      "t_right_s": 5.145,
+      "t_left_s": 5.147,
+      "t_mean_s": 5.146,
+      "t_crossover_s": 10.187,
+      "v_mean_ms": 10.286,
+      "v_mean_kmh": 37.03,
+      "ay_sustained_g": 1.288,
+      "ay_peak_g": 1.289,
+      "beta_mean_abs_deg": 1.51,
+      "beta_max_abs_deg": 3.78,
+      "p_dc_min_kw": -13.1,
+      "p_dc_max_kw": 11.89,
+      "hv_violations": 0,
+      "min_cone_clear_m": 0.183,
+      "torque_fight_mean_kw": 0.035,
+      "torque_fight_energy_kj": 0.732,
+      "mu_util_mean_4": [
+        0.785,
+        0.792,
+        0.786,
+        0.783
+      ],
+      "mu_util_peak_4": [
+        0.85,
+        0.851,
+        0.844,
+        0.847
+      ]
+    },
+    "TTC_PEAK_R25B_MAX_ATTACK": {
+      "profile": "TTC_PEAK",
+      "compound": "R25B",
+      "mode": "max_attack_v2",
+      "r_target_m": 8.35,
+      "t_right_s": 5.106,
+      "t_left_s": 5.107,
+      "t_mean_s": 5.107,
+      "t_crossover_s": 10.11,
+      "v_mean_ms": 10.395,
+      "v_mean_kmh": 37.42,
+      "ay_sustained_g": 1.312,
+      "ay_peak_g": 1.312,
+      "beta_mean_abs_deg": 1.87,
+      "beta_max_abs_deg": 4.16,
+      "p_dc_min_kw": -12.99,
+      "p_dc_max_kw": 11.95,
+      "hv_violations": 0,
+      "min_cone_clear_m": 0.2,
+      "torque_fight_mean_kw": 0.035,
+      "torque_fight_energy_kj": 0.724,
+      "mu_util_mean_4": [
+        0.822,
+        0.83,
+        0.824,
+        0.824
+      ],
+      "mu_util_peak_4": [
+        0.933,
+        0.933,
+        0.931,
+        0.931
+      ]
+    },
+    "COLD_18C_R20_MAX_ATTACK": {
+      "profile": "COLD_18C",
+      "compound": "R20",
+      "mode": "max_attack_v2",
+      "r_target_m": 8.85,
+      "t_right_s": 7.883,
+      "t_left_s": 7.883,
+      "t_mean_s": 7.883,
+      "t_crossover_s": 15.566,
+      "v_mean_ms": 6.887,
+      "v_mean_kmh": 24.79,
+      "ay_sustained_g": 0.562,
+      "ay_peak_g": 0.64,
+      "beta_mean_abs_deg": 3.06,
+      "beta_max_abs_deg": 3.12,
+      "p_dc_min_kw": -5.69,
+      "p_dc_max_kw": 2.86,
+      "hv_violations": 0,
+      "min_cone_clear_m": 0.394,
+      "torque_fight_mean_kw": 0.004,
+      "torque_fight_energy_kj": 0.114,
+      "mu_util_mean_4": [
+        0.652,
+        0.667,
+        0.692,
+        0.694
+      ],
+      "mu_util_peak_4": [
+        0.752,
+        0.751,
+        0.742,
+        0.758
+      ]
+    }
+  }
+}

@@ -1,16 +1,16 @@
 class_name AeroModel
 extends RefCounted
 
-## Aerodynamics Model for Mirena Dynamics (Block D)
-## Computes separate drag and front/rear axle downforce components in ISO 8855 (+X fwd, +Y left, +Z up),
-## generating true aerodynamic pitching moment M_y = a_cog * F_down_front - b_cog * F_down_rear
-## around CoG so front/rear suspensions load directly without double counting,
-## with front/rear ground-effect and front-wing stall ride-height sensitivity.
+## aerodynamics model for mirena dynamics (block d)
+## computes separate drag and front/rear axle downforce components in iso 8855 (+x fwd, +y left, +z up),
+## generating true aerodynamic pitching moment m_y = a_cog * f_down_front - b_cog * f_down_rear
+## around cog so front/rear suspensions load directly without double counting,
+## with front/rear ground-effect and front-wing stall ride-height sensitivity
 
-const VehicleConfig = preload("../Core/VehicleConfig.gd")
+const VehicleConfig = preload("../../Config/VehicleConfig.gd")
 
-## Computes ride-height aerodynamic modulation factors for front/rear downforce and drag.
-## Negative ride height assumes static design ride height (1.0 nominal factors).
+## computes ride-height aerodynamic modulation factors for front/rear downforce and drag
+## negative ride height assumes static design ride height (1.0 nominal factors)
 static func compute_ride_height_modulation(z_front: float, z_rear: float, config: VehicleConfig) -> Dictionary:
 	if z_front < 0.0 or z_rear < 0.0:
 		return {
@@ -24,7 +24,7 @@ static func compute_ride_height_modulation(z_front: float, z_rear: float, config
 	var z_r0: float = maxf(config.static_ride_height_rear, 0.005)
 	var z_stall: float = clampf(config.aero_stall_ride_height_front, 0.002, z_f0 - 0.002)
 
-	# 1. Front wing ground effect & stall below aero_stall_ride_height_front (18 mm nominal)
+	# 1. front wing ground effect & stall below aero_stall_ride_height_front (18 mm nominal)
 	var scale_front: float = 1.0
 	var front_stalled: bool = false
 	var stall_factor: float = 0.0
@@ -41,7 +41,7 @@ static func compute_ride_height_modulation(z_front: float, z_rear: float, config
 		var t_up_f: float = clampf((z_front - z_f0) / maxf(z_f0, 0.01), 0.0, 1.0)
 		scale_front = 1.0 - 0.20 * t_up_f
 
-	# 2. Rear diffuser ground effect + rake modulation (exact 1.0 at static ride height)
+	# 2. rear diffuser ground effect + rake modulation (exact 1.0 at static ride height)
 	var scale_rear_base: float = 1.0
 	if z_rear <= z_r0:
 		var z_r_peak: float = maxf(0.015, 0.4 * z_r0)
@@ -55,7 +55,7 @@ static func compute_ride_height_modulation(z_front: float, z_rear: float, config
 	var rake_mod: float = clampf(1.5 * delta_rake, -0.05, 0.06)
 	var scale_rear: float = clampf(scale_rear_base + rake_mod, 0.70, 1.30)
 
-	# 3. Drag scaling (induced drag from ground-effect suction + separation drag during front stall)
+	# 3. drag scaling (induced drag from ground-effect suction + separation drag during front stall)
 	var avg_lift_scale: float = 0.5 * (scale_front + scale_rear)
 	var drag_scale: float = clampf(1.0 + 0.08 * (avg_lift_scale - 1.0) + 0.18 * stall_factor, 0.94, 1.30)
 
@@ -66,8 +66,8 @@ static func compute_ride_height_modulation(z_front: float, z_rear: float, config
 		"front_stalled": front_stalled
 	}
 
-## Computes aerodynamic forces and pitching moment in ISO/ROS frame (+X fwd, +Y left, +Z up).
-## Optional z_front/z_rear ride heights (m) modulate downforce & drag; negative values assume static height.
+## computes aerodynamic forces and pitching moment in iso/ros frame (+x fwd, +y left, +z up)
+## optional z_front/z_rear ride heights (m) modulate downforce & drag; negative values assume static height
 static func compute_forces_ros(
 	v_ros: Vector3,
 	config: VehicleConfig,
@@ -98,16 +98,16 @@ static func compute_forces_ros(
 	
 	var q: float = 0.5 * config.air_density * speed * speed
 	
-	# Drag opposes velocity vector
+	# drag opposes velocity vector
 	var f_drag: Vector3 = -q * cd_a_eff * (v_ros / speed)
 	
-	# Separate front and rear axle downforce magnitudes (N, positive downward)
+	# separate front and rear axle downforce magnitudes (n, positive downward)
 	var f_down_front: float = q * cl_a_front_eff
 	var f_down_rear: float = q * cl_a_rear_eff
 	var f_downforce_vec: Vector3 = Vector3(0.0, 0.0, -(f_down_front + f_down_rear))
 	
-	# Pitching moment around CoG from front (+a_cog), rear (-b_cog) downforce and drag at cp_height:
-	# (r x F)_y = r_z * F_x - r_x * F_z = (cp_height - h_cog) * F_drag_x + a_cog * F_down_front - b_cog * F_down_rear
+	# pitching moment around cog from front (+a_cog), rear (-b_cog) downforce and drag at cp_height:
+	# (r x f)_y = r_z * f_x - r_x * f_z = (cp_height - h_cog) * f_drag_x + a_cog * f_down_front - b_cog * f_down_rear
 	var pitch_moment_y: float = config.a_cog * f_down_front - config.b_cog * f_down_rear + (config.cp_height - config.h_cog) * f_drag.x
 	var torque_ros: Vector3 = Vector3(0.0, pitch_moment_y, 0.0)
 	
@@ -123,8 +123,8 @@ static func compute_forces_ros(
 		"cd_a_eff": cd_a_eff
 	}
 
-## Computes aerodynamic forces in Godot frame (+X right, +Y up, -Z fwd).
-## Returns Dictionary {"drag": Vector3, "downforce": Vector3}
+## computes aerodynamic forces in godot frame (+x right, +y up, -z fwd)
+## returns dictionary {"drag": vector3, "downforce": vector3}
 static func compute_forces_godot(
 	linear_velocity: Vector3,
 	chassis_up: Vector3,

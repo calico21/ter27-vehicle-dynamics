@@ -1,0 +1,130 @@
+{
+  "track": "fsg_2023",
+  "profiles": {
+    "fsg_real_max_attack": {
+      "file": "src/mirena_sim/Assets/RacingLines/fsg_2023_racing_line_casadi_fsg_real.json",
+      "meta": {
+        "lap_id": "fsg_2023_casadi_fsg_real",
+        "label": "CasADi Human Achievable (fsg_real, Max Attack)",
+        "track_name": "fsg_2023",
+        "solver_mode": "human_achievable",
+        "grip_profile": "fsg_real",
+        "energy_budget_kwh": null,
+        "ocp_lap_time_s": 80.9601,
+        "sim14dof_lap_time_s": 83.0121,
+        "v_max_kmh": 106.88,
+        "ay_max_g": 1.15,
+        "e_22km_kwh": 5.491,
+        "cones_hit": 0,
+        "min_cone_clearance_m": 0.155,
+        "max_beta_deg": 6.324,
+        "hv_violations": 0
+      },
+      "ocp_vs_14dof_gap_pct": 2.472,
+      "n_waypoints": 380,
+      "n_corners": 19,
+      "n_markers": 77,
+      "lift_and_coast_waypoints": 26,
+      "lift_coast_start_markers": 1,
+      "p_dc_range_kw": [
+        -24.42,
+        78.41
+      ],
+      "checks_pass": true
+    },
+    "fsg_real_endurance_3p5kwh": {
+      "file": "src/mirena_sim/Assets/RacingLines/fsg_2023_racing_line_casadi_fsg_real_endurance.json",
+      "meta": {
+        "lap_id": "fsg_2023_casadi_fsg_real_endurance",
+        "label": "CasADi Human Achievable (fsg_real, Endurance 3.5 kWh)",
+        "track_name": "fsg_2023",
+        "solver_mode": "human_achievable",
+        "grip_profile": "fsg_real",
+        "energy_budget_kwh": 3.5,
+        "ocp_lap_time_s": 82.3713,
+        "sim14dof_lap_time_s": 82.214,
+        "v_max_kmh": 94.66,
+        "ay_max_g": 1.156,
+        "e_22km_kwh": 3.855,
+        "cones_hit": 0,
+        "min_cone_clearance_m": 0.1527,
+        "max_beta_deg": 7.289,
+        "hv_violations": 0
+      },
+      "ocp_vs_14dof_gap_pct": 0.191,
+      "n_waypoints": 380,
+      "n_corners": 18,
+      "n_markers": 79,
+      "lift_and_coast_waypoints": 58,
+      "lift_coast_start_markers": 7,
+      "p_dc_range_kw": [
+        -24.46,
+        75.89
+      ],
+      "checks_pass": true
+    },
+    "ttc_lab_max_attack": {
+      "file": "src/mirena_sim/Assets/RacingLines/fsg_2023_racing_line_casadi_ttc_lab.json",
+      "meta": {
+        "lap_id": "fsg_2023_casadi_ttc_lab",
+        "label": "CasADi Human Achievable (ttc_lab, Max Attack)",
+        "track_name": "fsg_2023",
+        "solver_mode": "human_achievable",
+        "grip_profile": "ttc_lab",
+        "energy_budget_kwh": null,
+        "ocp_lap_time_s": 80.5128,
+        "sim14dof_lap_time_s": 81.7949,
+        "v_max_kmh": 107.54,
+        "ay_max_g": 1.315,
+        "e_22km_kwh": 6.072,
+        "cones_hit": 0,
+        "min_cone_clearance_m": 0.1563,
+        "max_beta_deg": 7.357,
+        "hv_violations": 0
+      },
+      "ocp_vs_14dof_gap_pct": 1.567,
+      "n_waypoints": 380,
+      "n_corners": 18,
+      "n_markers": 73,
+      "lift_and_coast_waypoints": 28,
+      "lift_coast_start_markers": 1,
+      "p_dc_range_kw": [
+        -24.43,
+        78.98
+      ],
+      "checks_pass": true
+    },
+    "ttc_lab_endurance_3p5kwh": {
+      "file": "src/mirena_sim/Assets/RacingLines/fsg_2023_racing_line_casadi_ttc_lab_endurance.json",
+      "meta": {
+        "lap_id": "fsg_2023_casadi_ttc_lab_endurance",
+        "label": "CasADi Human Achievable (ttc_lab, Endurance 3.5 kWh)",
+        "track_name": "fsg_2023",
+        "solver_mode": "human_achievable",
+        "grip_profile": "ttc_lab",
+        "energy_budget_kwh": 3.5,
+        "ocp_lap_time_s": 82.2613,
+        "sim14dof_lap_time_s": 81.6871,
+        "v_max_kmh": 95.43,
+        "ay_max_g": 1.426,
+        "e_22km_kwh": 3.844,
+        "cones_hit": 0,
+        "min_cone_clearance_m": 0.1593,
+        "max_beta_deg": 7.801,
+        "hv_violations": 0
+      },
+      "ocp_vs_14dof_gap_pct": 0.703,
+      "n_waypoints": 380,
+      "n_corners": 18,
+      "n_markers": 79,
+      "lift_and_coast_waypoints": 64,
+      "lift_coast_start_markers": 7,
+      "p_dc_range_kw": [
+        -24.46,
+        76.25
+      ],
+      "checks_pass": true
+    }
+  },
+  "all_checks_pass": true
+}

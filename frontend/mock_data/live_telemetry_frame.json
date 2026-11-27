@@ -1,0 +1,92 @@
+{
+  "timestamp_s": 0.1374,
+  "source": "synthetic_fallback",
+  "vehicle_id": "ter27_4wd",
+  "grip_profile": "FSG_RUBBERED",
+  "sensor_profile": "SENSOR_TRACK_REALISM",
+  "state": {
+    "vx": 11.4827,
+    "vy": -0.4367,
+    "vz": 0.0,
+    "ax_g": 0.0242,
+    "ay_g": 1.6001,
+    "yaw_rate_rad_s": 1.367,
+    "beta_deg": -2.1779,
+    "steer_deg": 11.2745,
+    "throttle": 0.4996,
+    "brake": 0.0,
+    "x_m": 1.5644,
+    "y_m": 0.872,
+    "z_m": 0.29,
+    "heading_rad": 0.1873
+  },
+  "wheels": {
+    "fl": {
+      "fx_n": -105.91,
+      "fy_n": 288.32,
+      "fz_n": 187.7,
+      "slip_angle_deg": 6.048,
+      "slip_ratio": 0.0086,
+      "tire_util": 0.9918,
+      "camber_deg": -2.1,
+      "wheel_travel_m": -0.01906,
+      "motor_torque_nm": -21.52,
+      "temp_c": 77.49
+    },
+    "fr": {
+      "fx_n": 137.47,
+      "fy_n": 1936.93,
+      "fz_n": 1260.95,
+      "slip_angle_deg": 6.048,
+      "slip_ratio": 0.0086,
+      "tire_util": 0.9333,
+      "camber_deg": -0.46,
+      "wheel_travel_m": 0.02011,
+      "motor_torque_nm": 27.93,
+      "temp_c": 77.95
+    },
+    "rl": {
+      "fx_n": -102.36,
+      "fy_n": 538.36,
+      "fz_n": 350.47,
+      "slip_angle_deg": 5.472,
+      "slip_ratio": 0.0126,
+      "tire_util": 0.9476,
+      "camber_deg": -2.6,
+      "wheel_travel_m": -0.01312,
+      "motor_torque_nm": -20.8,
+      "temp_c": 78.03
+    },
+    "rr": {
+      "fx_n": 141.02,
+      "fy_n": 2186.96,
+      "fz_n": 1423.73,
+      "slip_angle_deg": 5.472,
+      "slip_ratio": 0.0126,
+      "tire_util": 0.9329,
+      "camber_deg": 0.04,
+      "wheel_travel_m": 0.02605,
+      "motor_torque_nm": 28.65,
+      "temp_c": 77.36
+    }
+  },
+  "hv": {
+    "p_dc_kw": 18.824,
+    "p_regen_kw": 0.0,
+    "soc_pct": 94.998,
+    "bspd_active": false,
+    "tv_mz_nm": 266.62
+  },
+  "ekf": {
+    "ekf_vx": 11.4974,
+    "ekf_vy": -0.4239,
+    "ekf_yaw_rate": 1.3706,
+    "ekf_beta_deg": -2.1183,
+    "sensor_latency_ms": 125.0
+  },
+  "dil_delta": {
+    "delta_time_s": -0.0155,
+    "delta_vx_mps": 0.1179,
+    "delta_ay_g": 0.0056
+  }
+}

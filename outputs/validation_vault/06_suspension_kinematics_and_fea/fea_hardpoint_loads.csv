@@ -1,0 +1,19 @@
+axle,member,label,lap_max_tension_N,lap_max_compression_N,extreme_max_tension_N,extreme_max_compression_N,design_peak_abs_N,ansys_design_load_SF1p5_N,governing_case,miner_damage_22km
+front_left,lca_front,LCA Front Leg,3448.83,-2245.91,4165.12,-1047.14,4165.12,6247.68,2G_BRAKE,8.7705e-08
+front_left,lca_rear,LCA Rear Leg,2094.55,-4118.16,1419.26,-3821.86,4118.16,6177.24,2G_BRAKE,1.6244e-07
+front_left,uca_front,UCA Front Leg,1667.03,-1025.09,1024.87,-1390.83,1667.03,2500.55,2G_BRAKE,0.0
+front_left,uca_rear,UCA Rear Leg,2129.02,-482.53,1883.95,-451.5,2129.02,3193.52,2G_BRAKE,0.0
+front_left,tie_rod,Tie-Rod / Toe-Link,332.15,-175.45,278.69,-239.72,332.15,498.22,COMBINED_1.5G_BRK_CORN,0.0
+front_left,pushrod,Pushrod,-503.97,-2249.64,-515.02,-3866.7,3866.7,5800.05,CURB_STRIKE_4G,0.0
+front_left,rocker_pivot,Rocker Pivot Bearing,2388.37,605.02,4361.16,662.68,4361.16,6541.73,CURB_STRIKE_4G,0.0
+front_left,damper_mount,Damper / Coilover Mount,857.44,-347.93,2169.95,-397.82,2169.95,3254.92,CURB_STRIKE_4G,0.0
+front_left,arb_link,ARB Drop-Link,78.76,-73.22,759.48,-139.24,759.48,1139.22,CURB_STRIKE_4G,0.0
+rear_left,lca_front,LCA Front Leg,1578.21,-2734.75,2586.17,-969.28,2734.75,4102.13,2G_BRAKE,0.0
+rear_left,lca_rear,LCA Rear Leg,3203.18,-1893.0,1546.08,-2951.46,3203.18,4804.78,COMBINED_1.5G_BRK_CORN,8.8875e-09
+rear_left,uca_front,UCA Front Leg,2637.46,72.12,2992.44,-155.88,2992.44,4488.66,CURB_STRIKE_4G,0.0
+rear_left,uca_rear,UCA Rear Leg,1273.08,-682.48,1992.64,-392.47,1992.64,2988.97,COMBINED_1.5G_BRK_CORN,0.0
+rear_left,tie_rod,Tie-Rod / Toe-Link,-10.05,-56.67,-13.92,-96.96,96.96,145.44,CURB_STRIKE_4G,0.0
+rear_left,pushrod,Pushrod,-654.62,-3690.76,-906.73,-6314.37,6314.37,9471.55,CURB_STRIKE_4G,0.0
+rear_left,rocker_pivot,Rocker Pivot Bearing,3442.66,925.85,5890.14,1174.76,5890.14,8835.22,CURB_STRIKE_4G,0.0
+rear_left,damper_mount,Damper / Coilover Mount,1150.11,-377.98,2652.16,-486.23,2652.16,3978.24,CURB_STRIKE_4G,0.0
+rear_left,arb_link,ARB Drop-Link,81.81,-87.12,928.26,-170.18,928.26,1392.38,CURB_STRIKE_4G,0.0

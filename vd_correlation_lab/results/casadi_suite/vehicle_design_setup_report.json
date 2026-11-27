@@ -1,0 +1,395 @@
+{
+  "track": "fsg_2023",
+  "grip_profile": "FSG_RUBBERED",
+  "ocp_mode": "human_achievable",
+  "track_setup_optimization": {
+    "setup_bounds": {
+      "lltd": [
+        0.42,
+        0.62
+      ],
+      "h_rc_f": [
+        0.005,
+        0.06
+      ],
+      "h_rc_r": [
+        0.015,
+        0.08
+      ],
+      "camber_f_deg": [
+        -3.8,
+        -0.5
+      ],
+      "camber_r_deg": [
+        -3.2,
+        -0.5
+      ],
+      "anti_dive": [
+        0.2,
+        0.85
+      ],
+      "anti_squat": [
+        0.15,
+        0.75
+      ],
+      "brake_bias_front": [
+        0.5,
+        0.72
+      ]
+    },
+    "nominal_ocp": {
+      "label": "nominal_setup",
+      "status": "Solve_Succeeded",
+      "iterations": 154,
+      "solve_time_s": 62.95,
+      "design_params": {
+        "lltd": 0.44739,
+        "k_roll_scale": 1.0,
+        "h_rc_f": 0.01959,
+        "h_rc_r": 0.04003,
+        "camber_f_deg": -2.0,
+        "camber_r_deg": -1.5,
+        "anti_dive": 0.569,
+        "anti_squat": 0.412,
+        "brake_bias_front": 0.58,
+        "gear_ratio": 12.5,
+        "cl_scale": 1.0,
+        "cd_scale": 1.0,
+        "cop_front_frac": 0.48,
+        "h_cg": 0.29,
+        "i_zz": 137.14092,
+        "mass_kg": 290.0
+      },
+      "metrics": {
+        "ocp_lap_time_s": 64.2374,
+        "drivability_score": 93.33,
+        "v_max_kmh": 109.69,
+        "ay_max_g": 1.712,
+        "beta_max_deg": 4.8,
+        "P_dc_min_kw": -24.39,
+        "P_dc_max_kw": 79.95,
+        "hv_violations": 0,
+        "min_cone_clearance_m": 0.2,
+        "cones_hit": 0,
+        "e_22km_kwh": 8.377
+      }
+    },
+    "optimal_ocp": {
+      "label": "optimal_track_setup",
+      "status": "Solve_Succeeded",
+      "iterations": 398,
+      "solve_time_s": 178.31,
+      "design_params": {
+        "lltd": 0.58563,
+        "k_roll_scale": 1.0,
+        "h_rc_f": 0.05998,
+        "h_rc_r": 0.07998,
+        "camber_f_deg": -0.88914,
+        "camber_r_deg": -1.0016,
+        "anti_dive": 0.84993,
+        "anti_squat": 0.74992,
+        "brake_bias_front": 0.71999,
+        "gear_ratio": 12.5,
+        "cl_scale": 1.0,
+        "cd_scale": 1.0,
+        "cop_front_frac": 0.48,
+        "h_cg": 0.29,
+        "i_zz": 137.14092,
+        "mass_kg": 290.0
+      },
+      "metrics": {
+        "ocp_lap_time_s": 64.0382,
+        "drivability_score": 93.45,
+        "v_max_kmh": 109.68,
+        "ay_max_g": 1.826,
+        "beta_max_deg": 4.799,
+        "P_dc_min_kw": -24.39,
+        "P_dc_max_kw": 79.95,
+        "hv_violations": 0,
+        "min_cone_clearance_m": 0.2,
+        "cones_hit": 0,
+        "e_22km_kwh": 8.968
+      }
+    },
+    "ocp_lap_time_gain_s": -0.1992,
+    "ocp_lap_time_gain_pct": -0.31,
+    "optimal_vs_nominal_setup": {
+      "lltd": {
+        "nominal": 0.44739,
+        "optimal": 0.58563,
+        "delta": 0.13824
+      },
+      "h_rc_f": {
+        "nominal": 0.01959,
+        "optimal": 0.05998,
+        "delta": 0.04039
+      },
+      "h_rc_r": {
+        "nominal": 0.04003,
+        "optimal": 0.07998,
+        "delta": 0.03995
+      },
+      "camber_f_deg": {
+        "nominal": -2.0,
+        "optimal": -0.88914,
+        "delta": 1.11086
+      },
+      "camber_r_deg": {
+        "nominal": -1.5,
+        "optimal": -1.0016,
+        "delta": 0.4984
+      },
+      "anti_dive": {
+        "nominal": 0.569,
+        "optimal": 0.84993,
+        "delta": 0.28093
+      },
+      "anti_squat": {
+        "nominal": 0.412,
+        "optimal": 0.74992,
+        "delta": 0.33792
+      },
+      "brake_bias_front": {
+        "nominal": 0.58,
+        "optimal": 0.71999,
+        "delta": 0.13999
+      }
+    }
+  },
+  "vehicle_engineering_tradeoffs": {
+    "mass_vs_aero": {
+      "dt_dm_s_per_kg": 0.03882,
+      "dt_dm_s_per_10kg": 0.3882,
+      "mass_minus_15kg_s": 63.6367,
+      "mass_nominal_s": 64.2374,
+      "mass_plus_15kg_s": 64.8012,
+      "plus_10pct_cl_a": {
+        "delta_lap_time_s": -0.5711,
+        "equivalent_mass_kg": 14.71,
+        "interpretation": "positive kg = mass saving equivalent of +10% CL*A"
+      },
+      "plus_10pct_cd_a": {
+        "delta_lap_time_s": 0.0406,
+        "equivalent_mass_kg": 1.05,
+        "interpretation": "positive kg = added mass penalty equivalent of +10% CD*A"
+      },
+      "cop_shift_minus_3pct": {
+        "cop_front_frac": 0.45,
+        "delta_lap_time_s": -0.0261,
+        "equivalent_mass_kg": -0.67
+      },
+      "cop_shift_plus_3pct": {
+        "cop_front_frac": 0.51,
+        "delta_lap_time_s": 0.0367,
+        "equivalent_mass_kg": 0.95
+      }
+    },
+    "cg_height_and_yaw_inertia": {
+      "h_cg_minus_15mm": {
+        "h_cg_m": 0.275,
+        "lap_time_s": 64.147,
+        "delta_lap_time_s": -0.0904,
+        "drivability_score": 93.37,
+        "delta_drivability": 0.04
+      },
+      "h_cg_plus_15mm": {
+        "h_cg_m": 0.305,
+        "lap_time_s": 64.3361,
+        "delta_lap_time_s": 0.0987,
+        "drivability_score": 93.29,
+        "delta_drivability": -0.04
+      },
+      "i_zz_minus_10pct": {
+        "i_zz_kgm2": 123.43,
+        "lap_time_s": 64.2149,
+        "delta_lap_time_s": -0.0225,
+        "drivability_score": 93.32,
+        "delta_drivability": -0.01
+      },
+      "i_zz_plus_10pct": {
+        "i_zz_kgm2": 150.86,
+        "lap_time_s": 64.2599,
+        "delta_lap_time_s": 0.0225,
+        "drivability_score": 93.33,
+        "delta_drivability": 0.0
+      }
+    },
+    "stiffness_vs_22km_thermal_degradation": {
+      "lltd_sweep": [
+        {
+          "lltd": 0.42,
+          "k_roll_scale": 1.0,
+          "ocp_lap_time_s": 64.2591,
+          "drivability_score": 93.27,
+          "n_laps_22km": 19,
+          "single_lap_base_s": 64.2591,
+          "total_22km_time_s": 1221.77,
+          "cumulative_thermal_deg_s": 0.847,
+          "final_lap_mu_thermal": 0.9991,
+          "peak_tire_temp_c": 73.27,
+          "peak_front_temp_c": 71.34,
+          "peak_rear_temp_c": 73.27,
+          "front_minus_rear_temp_c": -1.93
+        },
+        {
+          "lltd": 0.46,
+          "k_roll_scale": 1.0,
+          "ocp_lap_time_s": 64.2287,
+          "drivability_score": 93.35,
+          "n_laps_22km": 19,
+          "single_lap_base_s": 64.2287,
+          "total_22km_time_s": 1221.18,
+          "cumulative_thermal_deg_s": 0.838,
+          "final_lap_mu_thermal": 0.9991,
+          "peak_tire_temp_c": 73.15,
+          "peak_front_temp_c": 71.6,
+          "peak_rear_temp_c": 73.15,
+          "front_minus_rear_temp_c": -1.55
+        },
+        {
+          "lltd": 0.5,
+          "k_roll_scale": 1.0,
+          "ocp_lap_time_s": 64.2066,
+          "drivability_score": 93.46,
+          "n_laps_22km": 19,
+          "single_lap_base_s": 64.2066,
+          "total_22km_time_s": 1220.76,
+          "cumulative_thermal_deg_s": 0.835,
+          "final_lap_mu_thermal": 0.9991,
+          "peak_tire_temp_c": 72.91,
+          "peak_front_temp_c": 71.89,
+          "peak_rear_temp_c": 72.91,
+          "front_minus_rear_temp_c": -1.02
+        },
+        {
+          "lltd": 0.54,
+          "k_roll_scale": 1.0,
+          "ocp_lap_time_s": 64.1908,
+          "drivability_score": 93.52,
+          "n_laps_22km": 19,
+          "single_lap_base_s": 64.1908,
+          "total_22km_time_s": 1220.44,
+          "cumulative_thermal_deg_s": 0.815,
+          "final_lap_mu_thermal": 0.9992,
+          "peak_tire_temp_c": 72.73,
+          "peak_front_temp_c": 72.34,
+          "peak_rear_temp_c": 72.73,
+          "front_minus_rear_temp_c": -0.39
+        },
+        {
+          "lltd": 0.58,
+          "k_roll_scale": 1.0,
+          "ocp_lap_time_s": 64.1823,
+          "drivability_score": 93.61,
+          "n_laps_22km": 19,
+          "single_lap_base_s": 64.1823,
+          "total_22km_time_s": 1220.27,
+          "cumulative_thermal_deg_s": 0.802,
+          "final_lap_mu_thermal": 0.9992,
+          "peak_tire_temp_c": 72.78,
+          "peak_front_temp_c": 72.78,
+          "peak_rear_temp_c": 72.57,
+          "front_minus_rear_temp_c": 0.21
+        },
+        {
+          "lltd": 0.62,
+          "k_roll_scale": 1.0,
+          "ocp_lap_time_s": 64.1825,
+          "drivability_score": 93.71,
+          "n_laps_22km": 19,
+          "single_lap_base_s": 64.1825,
+          "total_22km_time_s": 1220.26,
+          "cumulative_thermal_deg_s": 0.789,
+          "final_lap_mu_thermal": 0.9992,
+          "peak_tire_temp_c": 73.22,
+          "peak_front_temp_c": 73.22,
+          "peak_rear_temp_c": 72.36,
+          "front_minus_rear_temp_c": 0.85
+        }
+      ],
+      "k_roll_scale_sweep": [
+        {
+          "lltd": 0.4474,
+          "k_roll_scale": 0.8,
+          "ocp_lap_time_s": 64.2434,
+          "drivability_score": 93.32,
+          "n_laps_22km": 19,
+          "single_lap_base_s": 64.2434,
+          "total_22km_time_s": 1221.46,
+          "cumulative_thermal_deg_s": 0.835,
+          "final_lap_mu_thermal": 0.9991,
+          "peak_tire_temp_c": 73.19,
+          "peak_front_temp_c": 71.63,
+          "peak_rear_temp_c": 73.19,
+          "front_minus_rear_temp_c": -1.56
+        },
+        {
+          "lltd": 0.4474,
+          "k_roll_scale": 1.0,
+          "ocp_lap_time_s": 64.2374,
+          "drivability_score": 93.33,
+          "n_laps_22km": 19,
+          "single_lap_base_s": 64.2374,
+          "total_22km_time_s": 1221.35,
+          "cumulative_thermal_deg_s": 0.842,
+          "final_lap_mu_thermal": 0.9991,
+          "peak_tire_temp_c": 73.2,
+          "peak_front_temp_c": 71.52,
+          "peak_rear_temp_c": 73.2,
+          "front_minus_rear_temp_c": -1.67
+        },
+        {
+          "lltd": 0.4474,
+          "k_roll_scale": 1.25,
+          "ocp_lap_time_s": 64.2432,
+          "drivability_score": 93.34,
+          "n_laps_22km": 19,
+          "single_lap_base_s": 64.2432,
+          "total_22km_time_s": 1221.47,
+          "cumulative_thermal_deg_s": 0.852,
+          "final_lap_mu_thermal": 0.9991,
+          "peak_tire_temp_c": 73.16,
+          "peak_front_temp_c": 71.42,
+          "peak_rear_temp_c": 73.16,
+          "front_minus_rear_temp_c": -1.74
+        }
+      ]
+    }
+  },
+  "validation_14dof": {
+    "nominal_setup": {
+      "label": "nominal_setup",
+      "alpha_drv": 0.54,
+      "sim14dof_lap_time_s": 118.8332,
+      "drivability_score": 67.65,
+      "max_beta_deg": 10.517,
+      "cones_hit": 0,
+      "corners_cones_hit": 0,
+      "p_dc_min_kw": -20.1,
+      "p_dc_max_kw": 19.67,
+      "hv_violations": 0,
+      "applied_arb_front_nm_rad": 4500.0,
+      "applied_arb_rear_nm_rad": 5500.0
+    },
+    "optimal_setup": {
+      "label": "optimal_setup",
+      "alpha_drv": 0.6875,
+      "sim14dof_lap_time_s": 92.7886,
+      "drivability_score": 71.1,
+      "max_beta_deg": 9.183,
+      "cones_hit": 0,
+      "corners_cones_hit": 0,
+      "p_dc_min_kw": -24.36,
+      "p_dc_max_kw": 39.8,
+      "hv_violations": 0,
+      "applied_arb_front_nm_rad": 10963.8,
+      "applied_arb_rear_nm_rad": 500.0
+    },
+    "delta_lap_time_s": -26.0446,
+    "delta_lap_time_pct": -21.917,
+    "delta_drivability_score": 3.45,
+    "zero_cones_hit": true,
+    "zero_hv_violations": true
+  },
+  "total_runtime_s": 2342.48
+}

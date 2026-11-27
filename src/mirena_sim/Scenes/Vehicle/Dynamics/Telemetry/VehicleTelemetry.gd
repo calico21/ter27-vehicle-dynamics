@@ -1,14 +1,14 @@
 class_name VehicleTelemetry
 extends RefCounted
 
-## Vehicle Telemetry & Logging Interface for Mirena Dynamics
-## Formats physical vehicle states for ROS bags and validation logs.
+## vehicle telemetry & logging interface for mirena dynamics
+## formats physical vehicle states for ros bags and validation logs
 
-const VehicleDynamicsModel = preload("../Core/VehicleDynamicsModel.gd")
+const VehicleDynamicsModel = preload("../Models/full_14dof/Full14DofModel.gd")
 
 var timestamp: float = 0.0
 
-# Kinematics (ROS Frame: +X Fwd, +Y Left, +Z Up)
+# kinematics (ros frame: +x fwd, +y left, +z up)
 var vx: float = 0.0
 var vy: float = 0.0
 var vz: float = 0.0
@@ -20,45 +20,45 @@ var pitch_rate: float = 0.0
 var roll_rate: float = 0.0
 var steer_angle: float = 0.0
 
-# Wheel speeds (rad/s)
+# wheel speeds (rad/s)
 var wheel_omega: Array[float] = [0.0, 0.0, 0.0, 0.0]
 
-# Powertrain & Brakes (Nm)
+# powertrain & brakes (nm)
 var drive_torques: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var brake_torques: Array[float] = [0.0, 0.0, 0.0, 0.0]
 
-# Tire forces (N)
+# tire forces (n)
 var tire_fx: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var tire_fy: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var tire_fz: Array[float] = [0.0, 0.0, 0.0, 0.0]
 
-# Slip quantities
+# slip quantities
 var tire_kappa: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var tire_alpha: Array[float] = [0.0, 0.0, 0.0, 0.0]
 
-# Torque Vectoring & Sideslip
+# torque vectoring & sideslip
 var wz_ref: float = 0.0
 var beta_deg: float = 0.0
 var map_id: int = 0
 var mz_req: float = 0.0
 
-# Tire surface temperatures (deg C) [FL, FR, RL, RR]
+# tire surface temperatures (deg c) [fl, fr, rl, rr]
 var tire_temp: Array[float] = [25.0, 25.0, 25.0, 25.0]
 
-# HV Powertrain Telemetry
+# hv powertrain telemetry
 var v_dc: float = 588.0
 var i_dc: float = 0.0
 var power_kw: float = 0.0
 var energy_kwh: float = 0.0
 
-# Brake Blending, Disc Thermal & Surface Grip Telemetry
+# brake blending, disc thermal & surface grip telemetry
 var brake_bias_front: float = 0.58
 var regen_blending_enabled: bool = true
 var disc_temp: Array[float] = [40.0, 40.0, 40.0, 40.0]
 var surface_mu: Array[float] = [1.0, 1.0, 1.0, 1.0]
 var regen_power_kw: float = 0.0
 
-## Resets all telemetry fields to nominal resting defaults.
+## resets all telemetry fields to nominal resting defaults
 func reset() -> void:
 	timestamp = 0.0
 	vx = 0.0
@@ -95,14 +95,14 @@ func reset() -> void:
 		disc_temp[i] = 40.0
 		surface_mu[i] = 1.0
 
-## Computes chassis sideslip angle in degrees from body velocities (ISO +X fwd, +Y left).
+## computes chassis sideslip angle in degrees from body velocities (iso +x fwd, +y left)
 static func compute_beta_deg(vx_mps: float, vy_mps: float) -> float:
 	if sqrt(vx_mps * vx_mps + vy_mps * vy_mps) < 0.2:
 		return 0.0
 	return rad_to_deg(atan2(vy_mps, maxf(absf(vx_mps), 0.5)))
 
-## Safely reads tire surface temperatures (deg C) whether WheelDynamics.t_surf_c is present or not.
-static func extract_tire_temps(model: VehicleDynamicsModel, extra: Dictionary = {}) -> Array[float]:
+## safely reads tire surface temperatures (deg c) whether wheeldynamics.t_surf_c is present or not
+static func extract_tire_temps(model, extra: Dictionary = {}) -> Array[float]:
 	var out: Array[float] = [25.0, 25.0, 25.0, 25.0]
 	var ext_arr = extra.get("tire_temp", extra.get("tire_temps", null))
 	if ext_arr is Array and ext_arr.size() >= 4:
@@ -125,8 +125,8 @@ static func extract_tire_temps(model: VehicleDynamicsModel, extra: Dictionary = 
 				out[i] = float(th.get("t_surf_c"))
 	return out
 
-## Safely extracts Torque Vectoring state (map_id, wz_ref, mz_req) from ECU, inputs, or extra.
-static func extract_tv_state(model: VehicleDynamicsModel, steer_rad: float, extra: Dictionary = {}) -> Dictionary:
+## safely extracts torque vectoring state (map_id, wz_ref, mz_req) from ecu, inputs, or extra
+static func extract_tv_state(model, steer_rad: float, extra: Dictionary = {}) -> Dictionary:
 	var forces_data: Dictionary = extra.get("forces", {}) if extra.get("forces") is Dictionary else {}
 	var map_val: int = 0
 	var wz_ref_val: float = 0.0
@@ -135,7 +135,7 @@ static func extract_tv_state(model: VehicleDynamicsModel, steer_rad: float, extr
 	var ecu = model.ecu_tv_v3 if model != null else null
 	var inp = model.inputs if model != null else null
 
-	# Resolve map_id
+	# resolve map_id
 	if extra.has("map_id"):
 		map_val = int(extra["map_id"])
 	elif forces_data.has("map_id"):
@@ -161,7 +161,7 @@ static func extract_tv_state(model: VehicleDynamicsModel, steer_rad: float, extr
 
 	var ecu_active: bool = (inp != null and inp.ecu_driving_mode == 1)
 
-	# Resolve mz_req
+	# resolve mz_req
 	if extra.has("mz_req"):
 		mz_req_val = float(extra["mz_req"])
 	elif forces_data.has("mz_req"):
@@ -171,7 +171,7 @@ static func extract_tv_state(model: VehicleDynamicsModel, steer_rad: float, extr
 	elif inp != null:
 		mz_req_val = float(inp.tv_yaw_moment_req)
 
-	# Resolve wz_ref
+	# resolve wz_ref
 	if extra.has("wz_ref"):
 		wz_ref_val = float(extra["wz_ref"])
 	elif forces_data.has("wz_ref"):
@@ -190,9 +190,9 @@ static func extract_tv_state(model: VehicleDynamicsModel, steer_rad: float, extr
 		"mz_req": mz_req_val,
 	}
 
-## Safely extracts HV powertrain state (v_dc, i_dc, power_kw, energy_kwh) with analytical fallback.
+## safely extracts hv powertrain state (v_dc, i_dc, power_kw, energy_kwh) with analytical fallback
 static func extract_hv_state(
-	model: VehicleDynamicsModel,
+	model,
 	drive_torques: Array,
 	dt: float = 0.0,
 	extra: Dictionary = {},
@@ -243,7 +243,7 @@ static func extract_hv_state(
 		var e_kwh_direct: float = float(src.get("energy_kwh", prev_energy_kwh + (p_kw_direct * maxf(dt, 0.0) / 3600.0)))
 		return {"v_dc": v_dc_direct, "i_dc": i_dc_direct, "power_kw": p_kw_direct, "energy_kwh": e_kwh_direct, "authoritative": true}
 
-	# Analytical fallback when HVPowertrainState is not attached
+	# analytical fallback when hvpowertrainstate is not attached
 	var eff: float = 0.90
 	if model != null and model.config != null:
 		eff = maxf(model.config.drivetrain_efficiency, 1e-3)
@@ -263,8 +263,8 @@ static func extract_hv_state(
 	var e_kwh_fb: float = prev_energy_kwh + (p_kw_fb * maxf(dt, 0.0) / 3600.0)
 	return {"v_dc": v_dc_fb, "i_dc": i_dc_fb, "power_kw": p_kw_fb, "energy_kwh": e_kwh_fb, "authoritative": false}
 
-## Safely extracts brake blending, disc temperatures, and per-wheel surface grip from model or step_result.
-static func extract_brake_and_surface_state(model: VehicleDynamicsModel, extra: Dictionary = {}) -> Dictionary:
+## safely extracts brake blending, disc temperatures, and per-wheel surface grip from model or step_result
+static func extract_brake_and_surface_state(model, extra: Dictionary = {}) -> Dictionary:
 	var forces_data: Dictionary = extra.get("forces", {}) if extra.get("forces") is Dictionary else {}
 	var bias_val: float = 0.58
 	if extra.has("brake_bias_front"):
@@ -332,8 +332,8 @@ static func extract_brake_and_surface_state(model: VehicleDynamicsModel, extra: 
 		"regen_power_kw": regen_kw,
 	}
 
-## Updates telemetry fields directly from the simulated vehicle model.
-func update_from_model(model: VehicleDynamicsModel, linear_accel_ros: Vector3, steer_rad: float, last_step_data: Dictionary = {}) -> void:
+## updates telemetry fields directly from the simulated vehicle model
+func update_from_model(model, linear_accel_ros: Vector3, steer_rad: float, last_step_data: Dictionary = {}) -> void:
 	vx = model.linear_velocity_ros.x
 	vy = model.linear_velocity_ros.y
 	vz = model.linear_velocity_ros.z
@@ -385,7 +385,7 @@ func update_from_model(model: VehicleDynamicsModel, linear_accel_ros: Vector3, s
 	surface_mu = bs_info["surface_mu"]
 	regen_power_kw = float(bs_info["regen_power_kw"])
 
-## Formats telemetry as a Dictionary matching CSV columns for validation scripts.
+## formats telemetry as a dictionary matching csv columns for validation scripts
 func to_dict() -> Dictionary:
 	return {
 		"timestamp": timestamp,

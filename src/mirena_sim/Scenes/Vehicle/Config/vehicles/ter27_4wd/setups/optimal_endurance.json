@@ -1,0 +1,32 @@
+{
+  "name": "optimal_endurance",
+  "vehicle_id": "ter27_4wd",
+  "event": "endurance",
+  "description": "CasADi-IPOPT co-optimized 22 km Endurance setup on FSG_RUBBERED (lambda_muy=0.57, 3.5 kWh)",
+  "spring_rate_front_n_m": 35000.0,
+  "spring_rate_rear_n_m": 48000.0,
+  "arb_front_nm_rad": 6609.6,
+  "arb_rear_nm_rad": 3172.3,
+  "lltd": 0.4857,
+  "camber_front_deg": -1.148,
+  "camber_rear_deg": -1.355,
+  "toe_front_deg": -0.015,
+  "toe_rear_deg": 0.177,
+  "ride_height_front_m": 0.03555,
+  "ride_height_rear_m": 0.03445,
+  "rake_mm": -1.096,
+  "brake_bias": 0.6332,
+  "tire_pressure_front_bar": 0.72,
+  "tire_pressure_rear_bar": 0.72,
+  "tv_map": "01_endurance_safe.json",
+  "power_limit_kw": 62.0,
+  "control_law_mode": "v3",
+  "casadi_metrics": {
+    "grip_profile": "FSG_RUBBERED",
+    "compound": "R25B",
+    "lambda_muy": 0.57,
+    "base_time_s": 1359.9555,
+    "optimal_time_s": 1358.9964,
+    "delta_time_s": -0.9591
+  }
+}

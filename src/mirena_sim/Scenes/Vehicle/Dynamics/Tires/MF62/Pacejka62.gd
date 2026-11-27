@@ -1,17 +1,16 @@
 class_name Pacejka62
 extends RefCounted
 
-## Pacejka Magic Formula 6.2 evaluation engine — Mirena Dynamics (schema v2, paired with calibrate_mf62.py).
-##
-## Frame: ISO 8855 (+X fwd, +Y left, +Z up). alpha, gamma, kappa in rad / unitless; forces N, moments Nm.
-## Implemented: Fy0/Fx0, combined slip (Gxa, Gyk, SVyk), Mz = -t(alpha_t,eq)(Fy - SVyk) + Mzr(alpha_r,eq) + s*Fx
-## with SHf = SHy + SVy/Kya, Mx, My.
-## Canonical Pacejka 2012 / Besselink 2010 structure:
-##   - Model constant R0 = 0.2032 m shared with fitter.
-##   - SVyk and alpha_r = alpha + SHf implemented.
-##   - Pneumatic trail / residual torque coupled with longitudinal slip (alpha_t,eq, alpha_r,eq).
-##   - Strict loading schema v2: rejects missing/non-finite parameters, push_error once, zero output if unloaded.
-## Right wheel: conicity/ply-steer terms (PHY1, PHY2, PVY1, PVY2, QDZ6, QDZ7, QSX1) flip sign; data are left-as-tested.
+## pacejka magic formula 6.2 evaluation engine - mirena dynamics (schema v2, paired with calibrate_mf62.py)
+## frame: iso 8855 (+x fwd, +y left, +z up). alpha, gamma, kappa in rad / unitless; forces n, moments nm
+## implemented: fy0/fx0, combined slip (gxa, gyk, svyk), mz = -t(alpha_t,eq)(fy - svyk) + mzr(alpha_r,eq) + s*fx
+## with shf = shy + svy/kya, mx, my
+## canonical pacejka 2012 / besselink 2010 structure:
+## model constant r0 = 0.2032 m shared with fitter
+## svyk and alpha_r = alpha + shf implemented
+## pneumatic trail / residual torque coupled with longitudinal slip (alpha_t,eq, alpha_r,eq)
+## strict loading schema v2: rejects missing/non-finite parameters, push_error once, zero output if unloaded
+## right wheel: conicity/ply-steer terms (phy1, phy2, pvy1, pvy2, qdz6, qdz7, qsx1) flip sign; data are left-as-tested
 
 const SCHEMA_VERSION: int = 2
 const PARAM_DIR: String = "res://Scenes/Vehicle/Dynamics/Tires/MF62/"
@@ -27,7 +26,7 @@ const KNOWN_EXTRA: PackedStringArray = [
 	"SCHEMA_VERSION", "COMPOUND", "CALIBRATION_ID", "CALIBRATION_DATE", "MODEL_IDENTIFIER", "FZ_VALID_MAX",
 	"R0_SPRING_FIT_M", "VERTICAL_STIFFNESS_ANALYSIS", "PARAMETER_CATEGORIZATION"]
 
-# Must equal ALL_DEFAULTS keys in calibrate_mf62.py (checked by the parity test).
+# must equal all_defaults keys in calibrate_mf62.py (checked by the parity test)
 const REQUIRED_KEYS: PackedStringArray = [
 	"PCY1", "PDY1", "PDY2", "PDY3", "PEY1", "PEY2", "PEY3", "PEY4", "PEY5", "PKY1", "PKY2", "PKY3", "PHY1", "PHY2",
 	"PHY3", "PVY1", "PVY2", "PVY3", "PVY4", "PPY1", "PPY2", "PPY3", "PPY4",
@@ -45,15 +44,15 @@ var is_loaded: bool = false
 var active_compound: String = "UNKNOWN"
 var calibration_id: String = ""
 
-# Reference quantities (from file)
+# reference quantities (from file)
 var fnomin: float = 800.0
 var pinom: float = 83.0
 var r0: float = 0.2032
 var vertical_stiffness: float = 0.0
 var v0: float = 11.11
-var dfz_max: float = INF  # upper clamp of dfz inside shape/mu functions (soft extrapolation guard), from FZ_VALID_MAX
+var dfz_max: float = INF  # upper clamp of dfz inside shape/mu functions (soft extrapolation guard), from fz_valid_max
 
-# Fy
+# fy
 var PCY1: float
 var PDY1: float
 var PDY2: float
@@ -77,7 +76,7 @@ var PPY1: float
 var PPY2: float
 var PPY3: float
 var PPY4: float
-# Fx
+# fx
 var PCX1: float
 var PDX1: float
 var PDX2: float
@@ -97,7 +96,7 @@ var PPX1: float
 var PPX2: float
 var PPX3: float
 var PPX4: float
-# Combined slip
+# combined slip
 var RBX1: float
 var RBX2: float
 var RBX3: float
@@ -120,7 +119,7 @@ var RVY3: float
 var RVY4: float
 var RVY5: float
 var RVY6: float
-# Mz
+# mz
 var QDZ1: float
 var QDZ2: float
 var QDZ3: float
@@ -152,20 +151,22 @@ var SSZ1: float
 var SSZ2: float
 var SSZ3: float
 var SSZ4: float
-# Mx
+# mx
 var QSX1: float
 var QSX2: float
 var QSX3: float
 var PPMX1: float
-# My
+# my
 var QSY1: float
 var QSY2: float
 var QSY3: float
 var QSY4: float
 
-# Canonical MF 6.2 friction scaling factors (1.0 = raw TTC belt calibration)
+# canonical mf 6.2 friction scaling factors (1.0 = raw ttc belt calibration)
 var LMUX: float = 1.0
 var LMUY: float = 1.0
+var LKYA: float = 1.0
+var LCAMBER: float = 1.0
 
 var _unloaded_warned: bool = false
 
@@ -178,7 +179,7 @@ func get_compound() -> String:
 	return active_compound
 
 
-## Loads "hoosier_16x7.5_10_<compound>_mf62.json" and verifies the file's COMPOUND matches.
+## loads "hoosier_16x7.5_10_<compound>_mf62.json" and verifies the file's compound matches
 func load_compound(compound_name: String) -> bool:
 	var filename: String = "hoosier_16x7.5_10_%s_mf62.json" % compound_name.to_lower().strip_edges()
 	var path: String = _first_existing([PARAM_DIR + filename, EDITOR_FALLBACK_DIR + filename])
@@ -292,25 +293,24 @@ static func _shape_cos(b: float, c: float, e: float, x: float) -> float:
 	return cos(c * atan(bx - e * (bx - atan(bx))))
 
 
-# ----------------------------------------------------------------------
-# Pure slip
-# ----------------------------------------------------------------------
+# pure slip
 func _pure_lateral(alpha: float, fz: float, gamma: float, p_kpa: float, right: bool) -> Dictionary:
 	var dfz: float = _dfz(fz)
 	var dpi: float = (p_kpa - pinom) / pinom
+	var g: float = gamma * LCAMBER
 	var cy: float = PCY1
-	# Runtime-only safety: keep the camber factor positive far outside the +-4 deg training range.
-	var camber_f: float = maxf(1.0 - PDY3 * gamma * gamma, 0.2)
+	# runtime-only safety: keep the camber factor positive far outside the +-4 deg training range
+	var camber_f: float = maxf(1.0 - PDY3 * g * g, 0.2)
 	var mu_y: float = (PDY1 + PDY2 * dfz) * (1.0 + PPY3 * dpi + PPY4 * dpi * dpi) * camber_f * LMUY
 	var dy: float = mu_y * fz
 	var side: float = -1.0 if right else 1.0
-	var shy: float = side * (PHY1 + PHY2 * dfz) + PHY3 * gamma
-	var svy: float = side * fz * (PVY1 + PVY2 * dfz) + fz * (PVY3 + PVY4 * dfz) * gamma
+	var shy: float = side * (PHY1 + PHY2 * dfz) + PHY3 * g
+	var svy: float = side * fz * (PVY1 + PVY2 * dfz) + fz * (PVY3 + PVY4 * dfz) * g
 	var alpha_y: float = alpha + shy
-	var kya: float = PKY1 * fnomin * (1.0 + PPY1 * dpi) * (1.0 - PKY3 * absf(gamma)) \
+	var kya: float = LKYA * PKY1 * fnomin * (1.0 + PPY1 * dpi) * (1.0 - PKY3 * absf(g)) \
 		* sin(2.0 * atan(fz / (PKY2 * fnomin * (1.0 + PPY2 * dpi) + 1e-4)))
 	var by: float = kya / (cy * dy + 1e-4)
-	var ey: float = clampf((PEY1 + PEY2 * dfz) * (1.0 + PEY5 * gamma * gamma - (PEY3 + PEY4 * gamma) * signf(alpha_y)), -10.0, 1.0)
+	var ey: float = clampf((PEY1 + PEY2 * dfz) * (1.0 + PEY5 * g * g - (PEY3 + PEY4 * g) * signf(alpha_y)), -10.0, 1.0)
 	var y: float = by * alpha_y
 	var fy0: float = dy * sin(cy * atan(y - ey * (y - atan(y)))) + svy
 	return {"Fy0": fy0, "Svy": svy, "Shy": shy, "Kya": kya, "By": by, "Cy": cy, "mu_y": mu_y}
@@ -319,8 +319,9 @@ func _pure_lateral(alpha: float, fz: float, gamma: float, p_kpa: float, right: b
 func _pure_longitudinal(kappa: float, fz: float, gamma: float, p_kpa: float) -> Dictionary:
 	var dfz: float = _dfz(fz)
 	var dpi: float = (p_kpa - pinom) / pinom
+	var g: float = gamma * LCAMBER
 	var cx: float = PCX1
-	var mu_x: float = (PDX1 + PDX2 * dfz) * (1.0 + PPX3 * dpi + PPX4 * dpi * dpi) * maxf(1.0 - PDX3 * gamma * gamma, 0.2) * LMUX
+	var mu_x: float = (PDX1 + PDX2 * dfz) * (1.0 + PPX3 * dpi + PPX4 * dpi * dpi) * maxf(1.0 - PDX3 * g * g, 0.2) * LMUX
 	var dx: float = mu_x * fz
 	var kx: float = kappa + PHX1 + PHX2 * dfz
 	var svx: float = fz * (PVX1 + PVX2 * dfz)
@@ -331,7 +332,7 @@ func _pure_longitudinal(kappa: float, fz: float, gamma: float, p_kpa: float) -> 
 	return {"Fx0": dx * sin(cx * atan(x - ex * (x - atan(x)))) + svx, "Kxk": kxk}
 
 
-## Pure lateral force and vertical shift. Kept for API compatibility.
+## pure lateral force and vertical shift. kept for api compatibility
 func compute_fy0_with_shift(alpha: float, f_z: float, gamma: float = 0.0, p_kpa: float = 83.0, is_right_side: bool = false) -> Dictionary:
 	var fz: float = maxf(0.0, f_z)
 	if not _check_loaded() or fz <= 1e-3:
@@ -351,10 +352,8 @@ func compute_fx0(kappa: float, f_z: float, gamma: float = 0.0, p_kpa: float = 83
 	return _pure_longitudinal(kappa, fz, gamma, p_kpa)["Fx0"]
 
 
-# ----------------------------------------------------------------------
-# Combined slip
-# ----------------------------------------------------------------------
-## Returns {Fx, Fy, Fy0, Svy, Svyk, Shf, Kya, Kxk, By, Cy, Gyk}. Fy is the MF-only value (no NN residual).
+# combined slip
+## returns {fx, fy, fy0, svy, svyk, shf, kya, kxk, by, cy, gyk}. fy is the mf-only value (no nn residual)
 func compute_combined_forces(kappa: float, alpha: float, f_z: float, gamma: float = 0.0, p_kpa: float = 83.0, is_right_side: bool = false) -> Dictionary:
 	var fz: float = maxf(0.0, f_z)
 	if not _check_loaded() or fz <= 1e-3:
@@ -363,17 +362,18 @@ func compute_combined_forces(kappa: float, alpha: float, f_z: float, gamma: floa
 	var fy: Dictionary = _pure_lateral(alpha, fz, gamma, p_kpa, is_right_side)
 	var fx: Dictionary = _pure_longitudinal(kappa, fz, gamma, p_kpa)
 	var dfz: float = _dfz(fz)
+	var g: float = gamma * LCAMBER
 
-	var bxa: float = (RBX1 + RBX3 * gamma * gamma) * cos(atan(RBX2 * kappa))
+	var bxa: float = (RBX1 + RBX3 * g * g) * cos(atan(RBX2 * kappa))
 	var exa: float = clampf(REX1 + REX2 * dfz, -10.0, 1.0)
 	var gxa: float = maxf(_shape_cos(bxa, RCX1, exa, alpha + RHX1) / maxf(_shape_cos(bxa, RCX1, exa, RHX1), 1e-4), 0.0)
 
-	var byk: float = (RBY1 + RBY4 * gamma * gamma) * cos(atan(RBY2 * (alpha - RBY3)))
+	var byk: float = (RBY1 + RBY4 * g * g) * cos(atan(RBY2 * (alpha - RBY3)))
 	var eyk: float = clampf(REY1 + REY2 * dfz, -10.0, 1.0)
 	var shyk: float = RHY1 + RHY2 * dfz
 	var gyk: float = maxf(_shape_cos(byk, RCY1, eyk, kappa + shyk) / maxf(_shape_cos(byk, RCY1, eyk, shyk), 1e-4), 0.0)
 
-	var dvyk: float = float(fy["mu_y"]) * fz * (RVY1 + RVY2 * dfz + RVY3 * gamma) * cos(atan(RVY4 * alpha))
+	var dvyk: float = float(fy["mu_y"]) * fz * (RVY1 + RVY2 * dfz + RVY3 * g) * cos(atan(RVY4 * alpha))
 	var svyk: float = dvyk * sin(RVY5 * atan(RVY6 * kappa))
 
 	var shf: float = float(fy["Shy"]) + float(fy["Svy"]) / (float(fy["Kya"]) + 1e-3)
@@ -384,11 +384,9 @@ func compute_combined_forces(kappa: float, alpha: float, f_z: float, gamma: floa
 		"Kya": fy["Kya"], "Kxk": fx["Kxk"], "By": fy["By"], "Cy": fy["Cy"], "Gyk": gyk}
 
 
-# ----------------------------------------------------------------------
-# Moments
-# ----------------------------------------------------------------------
-## Mz = -t*(Fy - SVyk) + Mzr + s*Fx.
-## If `comb` is empty, it is automatically computed with compute_combined_forces.
+# moments
+## mz = -t*(fy - svyk) + mzr + s*fx
+## if `comb` is empty, it is automatically computed with compute_combined_forces
 func compute_mz(alpha: float, f_z: float, Fy: float = 0.0, gamma: float = 0.0, p_kpa: float = 83.0, Fx: float = 0.0,
 		comb: Dictionary = {}, kappa: float = 0.0, is_right_side: bool = false) -> float:
 	var fz: float = maxf(0.0, f_z)
@@ -402,28 +400,29 @@ func compute_mz(alpha: float, f_z: float, Fy: float = 0.0, gamma: float = 0.0, p
 	
 	var dfz: float = _dfz(fz)
 	var dpi: float = (p_kpa - pinom) / pinom
+	var g: float = gamma * LCAMBER
 
-	var sht: float = QHZ1 + QHZ2 * dfz + (QHZ3 + QHZ4 * dfz) * gamma
+	var sht: float = QHZ1 + QHZ2 * dfz + (QHZ3 + QHZ4 * dfz) * g
 	var alpha_t: float = alpha + sht
 	var alpha_r: float = alpha + float(c["Shf"])
 	var kx: float = float(c["Kxk"]) / (float(c["Kya"]) + 1e-3) * kappa
 	var alpha_t_eq: float = _sgn(alpha_t) * sqrt(alpha_t * alpha_t + kx * kx)
 	var alpha_r_eq: float = _sgn(alpha_r) * sqrt(alpha_r * alpha_r + kx * kx)
 
-	var dt: float = (fz / fnomin) * r0 * (QDZ1 + QDZ2 * dfz) * (1.0 + PPZ1 * dpi) * (1.0 + QDZ3 * absf(gamma) + QDZ4 * gamma * gamma)
+	var dt: float = (fz / fnomin) * r0 * (QDZ1 + QDZ2 * dfz) * (1.0 + PPZ1 * dpi) * (1.0 + QDZ3 * absf(g) + QDZ4 * g * g)
 	var ct: float = QCZ1
-	var bt: float = (QBZ1 + QBZ2 * dfz + QBZ3 * dfz * dfz) * (1.0 + QBZ4 * gamma + QBZ5 * absf(gamma))
+	var bt: float = (QBZ1 + QBZ2 * dfz + QBZ3 * dfz * dfz) * (1.0 + QBZ4 * g + QBZ5 * absf(g))
 	var t_arg: float = bt * alpha_t_eq
-	var et: float = clampf((QEZ1 + QEZ2 * dfz + QEZ3 * dfz * dfz) * (1.0 + (QEZ4 + QEZ5 * gamma) * (2.0 / PI) * atan(bt * ct * alpha_t_eq)), -10.0, 1.0)
+	var et: float = clampf((QEZ1 + QEZ2 * dfz + QEZ3 * dfz * dfz) * (1.0 + (QEZ4 + QEZ5 * g) * (2.0 / PI) * atan(bt * ct * alpha_t_eq)), -10.0, 1.0)
 	var trail: float = dt * cos(ct * atan(t_arg - et * (t_arg - atan(t_arg)))) * cos(alpha)
 	var mz_prime: float = -trail * (fy_val - float(c["Svyk"]))
 
 	var side: float = -1.0 if is_right_side else 1.0
-	var dr: float = fz * r0 * (side * (QDZ6 + QDZ7 * dfz) + (QDZ8 + QDZ9 * dfz) * (1.0 + PPZ2 * dpi) * gamma) * cos(alpha)
+	var dr: float = fz * r0 * (side * (QDZ6 + QDZ7 * dfz) + (QDZ8 + QDZ9 * dfz) * (1.0 + PPZ2 * dpi) * g) * cos(alpha)
 	var br: float = QBZ9 + QBZ10 * float(c["By"]) * float(c["Cy"])
 	var mzr: float = dr * cos(atan(br * alpha_r_eq))
 
-	var s: float = r0 * (SSZ1 + SSZ2 * (fy_val / fnomin) + (SSZ3 + SSZ4 * dfz) * gamma)
+	var s: float = r0 * (SSZ1 + SSZ2 * (fy_val / fnomin) + (SSZ3 + SSZ4 * dfz) * g)
 	return mz_prime + mzr + s * fx_val
 
 
@@ -433,10 +432,10 @@ func compute_mx(f_z: float, gamma: float, Fy: float, p_kpa: float = 83.0, is_rig
 	var fz: float = maxf(0.0, f_z)
 	var dpi: float = (p_kpa - pinom) / pinom
 	var qsx1: float = -QSX1 if is_right_side else QSX1
-	return fz * r0 * (qsx1 + QSX2 * gamma + QSX3 * (Fy / fnomin) + PPMX1 * dpi)
+	return fz * r0 * (qsx1 + QSX2 * (gamma * LCAMBER) + QSX3 * (Fy / fnomin) + PPMX1 * dpi)
 
 
-## Rolling-resistance moment; sign is smoothed (tanh) so there is no torque jitter at v_x ~ 0.
+## rolling-resistance moment; sign is smoothed (tanh) so there is no torque jitter at v_x ~ 0
 func compute_my(f_z: float, Fx: float, v_x: float) -> float:
 	if not _check_loaded():
 		return 0.0
@@ -446,12 +445,10 @@ func compute_my(f_z: float, Fx: float, v_x: float) -> float:
 	return -r0 * fz * rr * tanh(v_x / V_EPS_MPS)
 
 
-# ----------------------------------------------------------------------
-# One-call entry point
-# ----------------------------------------------------------------------
-## Full wheel output. `residual` = NeuralTireCorrection.predict_residual(...) (dFy, dMz) or ZERO.
-## Residual enters through the lateral-slip weighting: Fy = Gyk*(Fy0 + dFy) + SVyk ; Mz += Gyk*dMz.
-## Returns {Fx, Fy, Mz, Mx, My}.
+# one-call entry point
+## full wheel output. `residual` = neuraltirecorrection.predict_residual(...) (dfy, dmz) or zero
+## residual enters through the lateral-slip weighting: fy = gyk*(fy0 + dfy) + svyk ; mz += gyk*dmz
+## returns {fx, fy, mz, mx, my}
 func compute_all(kappa: float, alpha: float, f_z: float, gamma: float = 0.0, p_kpa: float = 83.0, v_x: float = 0.0,
 		is_right_side: bool = false, residual: Vector2 = Vector2.ZERO) -> Dictionary:
 	var comb: Dictionary = compute_combined_forces(kappa, alpha, f_z, gamma, p_kpa, is_right_side)
@@ -463,25 +460,23 @@ func compute_all(kappa: float, alpha: float, f_z: float, gamma: float = 0.0, p_k
 	return {"Fx": fx, "Fy": fy, "Mz": mz, "Mx": compute_mx(f_z, gamma, fy, p_kpa, is_right_side), "My": compute_my(f_z, fx, v_x)}
 
 
-# ----------------------------------------------------------------------
-# Transient Carcass Relaxation (Sub-Stepped Exponential ODE Integrator)
-# ----------------------------------------------------------------------
-## Vertical-load-dependent lateral relaxation length sigma_alpha (m).
-## Equals SIGMA_ALPHA_NOMINAL_M (0.28 m) at nominal F_z = f_z0 (800 N).
+# transient carcass relaxation (sub-stepped exponential ode integrator)
+## vertical-load-dependent lateral relaxation length sigma_alpha (m)
+## equals sigma_alpha_nominal_m (0.28 m) at nominal f_z = f_z0 (800 n)
 static func get_sigma_alpha(f_z: float, f_z0: float = 800.0) -> float:
 	var load_ratio: float = clampf(maxf(f_z, 0.0) / maxf(f_z0, 1.0), 0.0, 2.5)
 	return clampf(SIGMA_ALPHA_NOMINAL_M * (0.45 + 0.55 * load_ratio), 0.12, 0.45)
 
 
-## Vertical-load-dependent longitudinal relaxation length sigma_kappa (m).
-## Equals SIGMA_KAPPA_NOMINAL_M (0.15 m) at nominal F_z = f_z0 (800 N).
+## vertical-load-dependent longitudinal relaxation length sigma_kappa (m)
+## equals sigma_kappa_nominal_m (0.15 m) at nominal f_z = f_z0 (800 n)
 static func get_sigma_kappa(f_z: float, f_z0: float = 800.0) -> float:
 	var load_ratio: float = clampf(maxf(f_z, 0.0) / maxf(f_z0, 1.0), 0.0, 2.5)
 	return clampf(SIGMA_KAPPA_NOMINAL_M * (0.45 + 0.55 * load_ratio), 0.06, 0.30)
 
 
-## Integrates effective transient slip (alpha_eff, kappa_eff) via unconditionally stable
-## sub-stepped exponential relaxation. Returns Vector2(alpha_eff, kappa_eff).
+## integrates effective transient slip (alpha_eff, kappa_eff) via unconditionally stable
+## sub-stepped exponential relaxation. returns vector2(alpha_eff, kappa_eff)
 static func integrate_transient_slip_substep(
 	alpha_eff: float,
 	alpha_geom: float,
@@ -491,7 +486,8 @@ static func integrate_transient_slip_substep(
 	dt: float,
 	f_z: float,
 	v_kappa_rel: float = NAN,
-	substeps: int = 4
+	substeps: int = 4,
+	sigma_alpha_override: float = -1.0
 ) -> Vector2:
 	if dt <= 0.0:
 		return Vector2(alpha_eff, kappa_eff)
@@ -508,7 +504,8 @@ static func integrate_transient_slip_substep(
 	var alpha_target: float = alpha_geom * clampf(abs_vx / V_EPS_MPS, 0.0, 1.0)
 	var kappa_target: float = kappa_geom * clampf(abs_vk / V_EPS_MPS, 0.0, 1.0)
 
-	var tau_a: float = get_sigma_alpha(f_z) / v_alpha
+	var sigma_a: float = clampf(sigma_alpha_override, 0.02, 1.0) if sigma_alpha_override > 0.0 else get_sigma_alpha(f_z)
+	var tau_a: float = sigma_a / v_alpha
 	var tau_k: float = get_sigma_kappa(f_z) / v_kappa
 	var decay_a: float = exp(-h / maxf(tau_a, 1e-6))
 	var decay_k: float = exp(-h / maxf(tau_k, 1e-6))

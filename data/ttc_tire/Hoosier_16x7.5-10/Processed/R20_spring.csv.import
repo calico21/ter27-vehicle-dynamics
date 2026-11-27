@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://do8jn6jtx8x5i"
+
+[deps]
+
+files=["res://Scenes/Vehicle/Dynamics/Tires/Data/Hoosier_16x7.5-10/Processed/R20_spring.compound.translation", "res://Scenes/Vehicle/Dynamics/Tires/Data/Hoosier_16x7.5-10/Processed/R20_spring.round.translation", "res://Scenes/Vehicle/Dynamics/Tires/Data/Hoosier_16x7.5-10/Processed/R20_spring.run.translation", "res://Scenes/Vehicle/Dynamics/Tires/Data/Hoosier_16x7.5-10/Processed/R20_spring.raw.translation", "res://Scenes/Vehicle/Dynamics/Tires/Data/Hoosier_16x7.5-10/Processed/R20_spring.t.translation", "res://Scenes/Vehicle/Dynamics/Tires/Data/Hoosier_16x7.5-10/Processed/R20_spring.f.translation", "res://Scenes/Vehicle/Dynamics/Tires/Data/Hoosier_16x7.5-10/Processed/R20_spring.r.translation", "res://Scenes/Vehicle/Dynamics/Tires/Data/Hoosier_16x7.5-10/Processed/R20_spring.p.translation", "res://Scenes/Vehicle/Dynamics/Tires/Data/Hoosier_16x7.5-10/Processed/R20_spring.v.translation"]
+
+source_file="res://Scenes/Vehicle/Dynamics/Tires/Data/Hoosier_16x7.5-10/Processed/R20_spring.csv"
+dest_files=["res://Scenes/Vehicle/Dynamics/Tires/Data/Hoosier_16x7.5-10/Processed/R20_spring.compound.translation", "res://Scenes/Vehicle/Dynamics/Tires/Data/Hoosier_16x7.5-10/Processed/R20_spring.round.translation", "res://Scenes/Vehicle/Dynamics/Tires/Data/Hoosier_16x7.5-10/Processed/R20_spring.run.translation", "res://Scenes/Vehicle/Dynamics/Tires/Data/Hoosier_16x7.5-10/Processed/R20_spring.raw.translation", "res://Scenes/Vehicle/Dynamics/Tires/Data/Hoosier_16x7.5-10/Processed/R20_spring.t.translation", "res://Scenes/Vehicle/Dynamics/Tires/Data/Hoosier_16x7.5-10/Processed/R20_spring.f.translation", "res://Scenes/Vehicle/Dynamics/Tires/Data/Hoosier_16x7.5-10/Processed/R20_spring.r.translation", "res://Scenes/Vehicle/Dynamics/Tires/Data/Hoosier_16x7.5-10/Processed/R20_spring.p.translation", "res://Scenes/Vehicle/Dynamics/Tires/Data/Hoosier_16x7.5-10/Processed/R20_spring.v.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

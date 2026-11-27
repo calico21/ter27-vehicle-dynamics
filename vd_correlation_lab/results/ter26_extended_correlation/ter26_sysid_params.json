@@ -1,0 +1,241 @@
+{
+  "metadata": {
+    "vehicle": "TeR26 RWD",
+    "method": "CasADi 3.7.2 + IPOPT Multiple-Shooting RK4 NLS",
+    "data_source": "ter26_clean_ground_truth.parquet",
+    "split_used": "calib_70 (valid_for_sysid == True ONLY; 0 val_30 samples)",
+    "n_windows": 12,
+    "total_nodes": 576,
+    "sample_rate_hz": 20.0,
+    "solve_time_s": 539.4009788119997,
+    "total_wall_s": 540.1823273339996,
+    "ipopt_status": "Solve_Succeeded",
+    "ipopt_iterations": 218,
+    "final_data_cost": 6.763949714060693,
+    "final_total_obj": 6.86135946912733
+  },
+  "nominal_params": {
+    "mu_x_scale": 1.0,
+    "mu_y_scale": 1.0,
+    "kya_scale": 1.0,
+    "camber_scale": 1.0,
+    "h_cg": 0.27,
+    "i_zz": 73.0,
+    "cl_a": 4.554,
+    "cd_a": 1.35,
+    "c_damp_scale": 1.0,
+    "k_steer_comp": 9500.0,
+    "sigma_y": 0.22
+  },
+  "identified_params": {
+    "mu_x_scale": 0.9878090383969532,
+    "mu_y_scale": 0.7738784006522639,
+    "kya_scale": 0.5499999935035623,
+    "camber_scale": 1.10558581472405,
+    "h_cg": 0.20999999926086999,
+    "i_zz": 94.04995993763035,
+    "cl_a": 4.08830043591245,
+    "cd_a": 1.031748806030809,
+    "c_damp_scale": 0.9972424423607245,
+    "k_steer_comp": 2499.999862893357,
+    "sigma_y": 0.059999997309081565
+  },
+  "parameter_summary": {
+    "mu_x_scale": {
+      "nominal": 1.0,
+      "identified": 0.9878090383969532,
+      "delta_pct": -1.219096160304678,
+      "bounds": [
+        0.65,
+        1.55
+      ],
+      "at_bound": false
+    },
+    "mu_y_scale": {
+      "nominal": 1.0,
+      "identified": 0.7738784006522639,
+      "delta_pct": -22.61215993477361,
+      "bounds": [
+        0.65,
+        1.55
+      ],
+      "at_bound": false
+    },
+    "kya_scale": {
+      "nominal": 1.0,
+      "identified": 0.5499999935035623,
+      "delta_pct": -45.000000649643766,
+      "bounds": [
+        0.55,
+        1.85
+      ],
+      "at_bound": true
+    },
+    "camber_scale": {
+      "nominal": 1.0,
+      "identified": 1.10558581472405,
+      "delta_pct": 10.558581472405004,
+      "bounds": [
+        0.4,
+        1.8
+      ],
+      "at_bound": false
+    },
+    "h_cg": {
+      "nominal": 0.27,
+      "identified": 0.20999999926086999,
+      "delta_pct": -22.222222495974087,
+      "bounds": [
+        0.21,
+        0.36
+      ],
+      "at_bound": true
+    },
+    "i_zz": {
+      "nominal": 73.0,
+      "identified": 94.04995993763035,
+      "delta_pct": 28.835561558397735,
+      "bounds": [
+        45.0,
+        125.0
+      ],
+      "at_bound": false
+    },
+    "cl_a": {
+      "nominal": 4.554,
+      "identified": 4.08830043591245,
+      "delta_pct": -10.226165219313787,
+      "bounds": [
+        1.0,
+        6.5
+      ],
+      "at_bound": false
+    },
+    "cd_a": {
+      "nominal": 1.35,
+      "identified": 1.031748806030809,
+      "delta_pct": -23.574162516236367,
+      "bounds": [
+        0.6,
+        2.6
+      ],
+      "at_bound": false
+    },
+    "c_damp_scale": {
+      "nominal": 1.0,
+      "identified": 0.9972424423607245,
+      "delta_pct": -0.2757557639275543,
+      "bounds": [
+        0.35,
+        2.5
+      ],
+      "at_bound": false
+    },
+    "k_steer_comp": {
+      "nominal": 9500.0,
+      "identified": 2499.999862893357,
+      "delta_pct": -73.6842119695436,
+      "bounds": [
+        2500.0,
+        30000.0
+      ],
+      "at_bound": true
+    },
+    "sigma_y": {
+      "nominal": 0.22,
+      "identified": 0.059999997309081565,
+      "delta_pct": -72.72727395041747,
+      "bounds": [
+        0.06,
+        0.6
+      ],
+      "at_bound": true
+    }
+  },
+  "calibration_windows": [
+    {
+      "run_id": "20261003T172622.377Z",
+      "t_start": 111.775,
+      "t_end": 114.17,
+      "score": 3.823466661100603,
+      "n_nodes": 48
+    },
+    {
+      "run_id": "20261003T172622.377Z",
+      "t_start": 283.83,
+      "t_end": 286.225,
+      "score": 3.654276387153658,
+      "n_nodes": 48
+    },
+    {
+      "run_id": "20261003T172622.377Z",
+      "t_start": 77.505,
+      "t_end": 79.9,
+      "score": 3.6133768987959454,
+      "n_nodes": 48
+    },
+    {
+      "run_id": "20261003T172622.377Z",
+      "t_start": 260.815,
+      "t_end": 263.21,
+      "score": 3.511421528029462,
+      "n_nodes": 48
+    },
+    {
+      "run_id": "20261004T093600.310Z",
+      "t_start": 382.085,
+      "t_end": 384.48,
+      "score": 5.344095987992781,
+      "n_nodes": 48
+    },
+    {
+      "run_id": "20261004T093600.310Z",
+      "t_start": 441.505,
+      "t_end": 443.90000000000003,
+      "score": 5.09291343195079,
+      "n_nodes": 48
+    },
+    {
+      "run_id": "20261004T093600.310Z",
+      "t_start": 84.73,
+      "t_end": 87.125,
+      "score": 5.086080633617687,
+      "n_nodes": 48
+    },
+    {
+      "run_id": "20261004T093600.310Z",
+      "t_start": 512.2,
+      "t_end": 514.595,
+      "score": 5.084438825625003,
+      "n_nodes": 48
+    },
+    {
+      "run_id": "20261004T095356.855Z",
+      "t_start": 383.385,
+      "t_end": 385.78000000000003,
+      "score": 6.01679555561272,
+      "n_nodes": 48
+    },
+    {
+      "run_id": "20261004T095356.855Z",
+      "t_start": 21.725,
+      "t_end": 24.12,
+      "score": 5.332105504567044,
+      "n_nodes": 48
+    },
+    {
+      "run_id": "20261004T095356.855Z",
+      "t_start": 141.57,
+      "t_end": 143.965,
+      "score": 5.331061261093875,
+      "n_nodes": 48
+    },
+    {
+      "run_id": "20261004T095356.855Z",
+      "t_start": 165.45000000000002,
+      "t_end": 167.845,
+      "score": 4.983686599215127,
+      "n_nodes": 48
+    }
+  ]
+}

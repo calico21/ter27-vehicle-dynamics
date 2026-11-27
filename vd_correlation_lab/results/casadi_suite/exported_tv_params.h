@@ -1,0 +1,40 @@
+#ifndef TV_EXPORTED_PARAMS_H
+#define TV_EXPORTED_PARAMS_H
+
+/* Exported from MirenaSim CasADi Robust TV Synthesis | Active Map: Autocross | Preset: casadi_robust_3cond */
+#define TV_PARAM_HAIRPIN_PIVOT_GAIN (1.2340f)
+#define TV_PARAM_INNER_REGEN_MAX_NM (95.0000f)
+#define TV_PARAM_TRAIL_BRAKE_YAW_GAIN (0.4500f)
+#define TV_PARAM_EXIT_TRACTION_BLEND (0.7300f)
+#define TV_PARAM_LAUNCH_REAR_BIAS_PCT (70.0000f)
+#define TV_PARAM_TC_SLIP_TARGET (0.1300f)
+#define TV_PARAM_FRICTION_ELLIPSE_MARGIN (0.9400f)
+#define TV_PARAM_SKIDPAD_NEUTRAL_TRIM (0.0000f)
+#define TV_PARAM_YAW_AGILITY_GAIN (0.9000f)
+#define TV_PARAM_YAW_ACCEL_FF_GAIN (0.7500f)
+#define TV_PARAM_CENTRIPETAL_FX_GAIN (18.1500f)
+#define TV_PARAM_DELTA_ALPHA_EQ_GAIN (600.0000f)
+#define TV_PARAM_DELTA_DOT_LEAD_GAIN (15.0000f)
+#define TV_PARAM_SLALOM_BETA_DAMP (220.0000f)
+#define TV_PARAM_BETA_SOFT_DEG (4.5000f)
+#define TV_PARAM_POWER_LIMIT_KW (80.0000f)
+#define TV_PARAM_REGEN_LIMIT_KW (-25.0000f)
+#define TV_PARAM_LIFT_REGEN_NM (12.0000f)
+#define TV_PARAM_BRAKE_BIAS_FRONT_PCT (61.8100f)
+#define TV_PARAM_ARB_FRONT_BALANCE_PCT (45.0000f)
+#define TV_PARAM_THROTTLE_EXP (1.1500f)
+
+/* CasADi Robust Multi-Condition Extended Calibration (Cold 18C / FSG_RUBBERED 45C / Hot 65C) */
+#define TV_PARAM_K_US_DEG_G (1.0500f)
+#define TV_PARAM_K_US_LOW_DEG_G (0.2195f)
+#define TV_PARAM_TURNIN_PITCH_GAIN_NM (247.7000f)
+#define TV_PARAM_W_LOAD_FL (1.0055f)
+#define TV_PARAM_W_LOAD_FR (1.0055f)
+#define TV_PARAM_W_LOAD_RL (0.9945f)
+#define TV_PARAM_W_LOAD_RR (0.9945f)
+static const float TV_LQR_VX_BP_MS[5] = { 4.00f, 10.00f, 16.00f, 24.00f, 32.00f };
+static const float TV_LQR_K_R[5] = { 280.00f, 450.00f, 700.00f, 900.00f, 1050.00f };
+static const float TV_LQR_K_BETA[5] = { 154.89f, 280.00f, 450.00f, 600.00f, 740.00f };
+static const float TV_LQR_K_BETA_DOT[5] = { 41.09f, 70.00f, 100.00f, 130.00f, 186.73f };
+
+#endif /* TV_EXPORTED_PARAMS_H */

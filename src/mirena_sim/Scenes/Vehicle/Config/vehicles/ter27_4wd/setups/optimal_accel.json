@@ -1,0 +1,32 @@
+{
+  "name": "optimal_accel",
+  "vehicle_id": "ter27_4wd",
+  "event": "accel",
+  "description": "CasADi-IPOPT co-optimized 75 m Acceleration setup on FSG_RUBBERED (lambda_muy=0.57)",
+  "spring_rate_front_n_m": 35000.0,
+  "spring_rate_rear_n_m": 48000.0,
+  "arb_front_nm_rad": 4602.7,
+  "arb_rear_nm_rad": 5380.5,
+  "lltd": 0.4493,
+  "camber_front_deg": -0.2,
+  "camber_rear_deg": -0.201,
+  "toe_front_deg": 0.01,
+  "toe_rear_deg": 0.021,
+  "ride_height_front_m": 0.03464,
+  "ride_height_rear_m": 0.03536,
+  "rake_mm": 0.719,
+  "brake_bias": 0.5893,
+  "tire_pressure_front_bar": 0.72,
+  "tire_pressure_rear_bar": 0.72,
+  "tv_map": "04_launch_accel.json",
+  "power_limit_kw": 80.0,
+  "control_law_mode": "smc",
+  "casadi_metrics": {
+    "grip_profile": "FSG_RUBBERED",
+    "compound": "R25B",
+    "lambda_muy": 0.57,
+    "base_time_s": 3.5223,
+    "optimal_time_s": 3.5216,
+    "delta_time_s": -0.0007
+  }
+}

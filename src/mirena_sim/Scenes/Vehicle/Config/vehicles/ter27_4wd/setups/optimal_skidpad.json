@@ -1,0 +1,32 @@
+{
+  "name": "optimal_skidpad",
+  "vehicle_id": "ter27_4wd",
+  "event": "skidpad",
+  "description": "CasADi-IPOPT co-optimized Skidpad setup on FSG_RUBBERED (lambda_muy=0.57)",
+  "spring_rate_front_n_m": 35000.0,
+  "spring_rate_rear_n_m": 48000.0,
+  "arb_front_nm_rad": 7469.9,
+  "arb_rear_nm_rad": 2294.6,
+  "lltd": 0.5007,
+  "camber_front_deg": -0.816,
+  "camber_rear_deg": -1.316,
+  "toe_front_deg": 0.5,
+  "toe_rear_deg": 0.6,
+  "ride_height_front_m": 0.03136,
+  "ride_height_rear_m": 0.03864,
+  "rake_mm": 7.282,
+  "brake_bias": 0.6159,
+  "tire_pressure_front_bar": 0.72,
+  "tire_pressure_rear_bar": 0.72,
+  "tv_map": "03_skidpad_attack.json",
+  "power_limit_kw": 80.0,
+  "control_law_mode": "smc",
+  "casadi_metrics": {
+    "grip_profile": "FSG_RUBBERED",
+    "compound": "R25B",
+    "lambda_muy": 0.57,
+    "base_time_s": 4.6241,
+    "optimal_time_s": 4.6072,
+    "delta_time_s": -0.017
+  }
+}

@@ -1,0 +1,282 @@
+{
+  "vehicle_id": "ter27_4wd",
+  "ecu_file": "src/mirena_sim/Scenes/Vehicle/Dynamics/Drivetrain/EcuTorqueVectoring4Wd.gd",
+  "baseline_config_backup": "vd_correlation_lab/results/tv_oracle/tv_4wd_config_baseline.json",
+  "root_cause_diagnosis": [
+    "In Baseline EcuTorqueVectoring4Wd, beta_dyn = beta - beta_kin equals -alpha_r in steady cornering. Above 11.5 m/s (u_hi_spd=1), rear_sliding_hi triggered at rear_slide_ang = alpha_r > 1.4 deg (normal 0.35g cornering, far below Hoosier peak ~5.5-7.0 deg), zeroing pro-turn mz_req and injecting anti-turn yaw moment (-3 to -93 Nm) at R=15m and R=25m even while front-limited (alpha_f >> alpha_r).",
+    "Baseline k_us_deg_g=0.85 and r_lim_scale=0.85 (with 0.35 aero downforce weight) clamped r_ref below the true aero-loaded lateral grip limit at R=15m and R=25m.",
+    "At high steering angles (R=5m, R=9.125m), Baseline dynamic_rear_bias_gain=0.55 pushed torque rearward instead of exploiting front centripetal projection Fx_f * sin(delta) (+0.05 to +0.11g in Oracle)."
+  ],
+  "ablation_table": {
+    "Baseline": {
+      "fsg_pct_of_oracle": {
+        "R_5.000": 95.73,
+        "R_9.125": 98.01,
+        "R_15.000": 95.26,
+        "R_25.000": 95.31,
+        "mean": 96.08
+      },
+      "ttc_pct_of_oracle": {
+        "R_5.000": 90.51,
+        "R_9.125": 99.84,
+        "R_15.000": 93.24,
+        "R_25.000": 89.57,
+        "mean": 93.29
+      },
+      "hairpin_180_s": {
+        "FSG_REAL_TRACK": 6.265,
+        "TTC_LAB_PEAK": 5.81
+      },
+      "slalom_55kmh": {
+        "max_beta_deg": 1.8,
+        "rec_time_s": 0.085,
+        "spun": false
+      },
+      "solver_and_hv": {
+        "step_time_mean_ms": 0.459,
+        "step_time_p99_ms": 0.724,
+        "p_dc_min_kw": -24.41,
+        "p_dc_max_kw": 80.0,
+        "hv_violations_total": 0
+      }
+    },
+    "+A_centripetal_fx": {
+      "fsg_pct_of_oracle": {
+        "R_5.000": 96.23,
+        "R_9.125": 98.27,
+        "R_15.000": 95.26,
+        "R_25.000": 95.31,
+        "mean": 96.27
+      },
+      "ttc_pct_of_oracle": {
+        "R_5.000": 92.4,
+        "R_9.125": 99.82,
+        "R_15.000": 93.24,
+        "R_25.000": 89.57,
+        "mean": 93.76
+      },
+      "hairpin_180_s": {
+        "FSG_REAL_TRACK": 6.35,
+        "TTC_LAB_PEAK": 5.84
+      },
+      "slalom_55kmh": {
+        "max_beta_deg": 1.8,
+        "rec_time_s": 0.085,
+        "spun": false
+      },
+      "solver_and_hv": {
+        "step_time_mean_ms": 0.459,
+        "step_time_p99_ms": 0.731,
+        "p_dc_min_kw": -24.41,
+        "p_dc_max_kw": 80.0,
+        "hv_violations_total": 0
+      }
+    },
+    "+B_curvature_delta_alpha": {
+      "fsg_pct_of_oracle": {
+        "R_5.000": 95.73,
+        "R_9.125": 98.22,
+        "R_15.000": 101.83,
+        "R_25.000": 100.77,
+        "mean": 99.14
+      },
+      "ttc_pct_of_oracle": {
+        "R_5.000": 90.51,
+        "R_9.125": 99.45,
+        "R_15.000": 99.94,
+        "R_25.000": 91.32,
+        "mean": 95.3
+      },
+      "hairpin_180_s": {
+        "FSG_REAL_TRACK": 6.325,
+        "TTC_LAB_PEAK": 5.845
+      },
+      "slalom_55kmh": {
+        "max_beta_deg": 1.93,
+        "rec_time_s": 0.09,
+        "spun": false
+      },
+      "solver_and_hv": {
+        "step_time_mean_ms": 0.456,
+        "step_time_p99_ms": 0.724,
+        "p_dc_min_kw": -24.41,
+        "p_dc_max_kw": 80.0,
+        "hv_violations_total": 0
+      }
+    },
+    "+C_lateral_reserve_load_sens": {
+      "fsg_pct_of_oracle": {
+        "R_5.000": 95.78,
+        "R_9.125": 97.93,
+        "R_15.000": 95.21,
+        "R_25.000": 95.28,
+        "mean": 96.05
+      },
+      "ttc_pct_of_oracle": {
+        "R_5.000": 90.16,
+        "R_9.125": 99.79,
+        "R_15.000": 93.22,
+        "R_25.000": 89.53,
+        "mean": 93.18
+      },
+      "hairpin_180_s": {
+        "FSG_REAL_TRACK": 6.26,
+        "TTC_LAB_PEAK": 5.845
+      },
+      "slalom_55kmh": {
+        "max_beta_deg": 1.79,
+        "rec_time_s": 0.085,
+        "spun": false
+      },
+      "solver_and_hv": {
+        "step_time_mean_ms": 0.465,
+        "step_time_p99_ms": 0.749,
+        "p_dc_min_kw": -24.41,
+        "p_dc_max_kw": 80.0,
+        "hv_violations_total": 0
+      }
+    },
+    "+D_combined_slip": {
+      "fsg_pct_of_oracle": {
+        "R_5.000": 95.73,
+        "R_9.125": 98.01,
+        "R_15.000": 95.26,
+        "R_25.000": 95.31,
+        "mean": 96.08
+      },
+      "ttc_pct_of_oracle": {
+        "R_5.000": 90.51,
+        "R_9.125": 99.84,
+        "R_15.000": 93.24,
+        "R_25.000": 89.57,
+        "mean": 93.29
+      },
+      "hairpin_180_s": {
+        "FSG_REAL_TRACK": 6.265,
+        "TTC_LAB_PEAK": 5.81
+      },
+      "slalom_55kmh": {
+        "max_beta_deg": 1.8,
+        "rec_time_s": 0.085,
+        "spun": false
+      },
+      "solver_and_hv": {
+        "step_time_mean_ms": 0.463,
+        "step_time_p99_ms": 0.745,
+        "p_dc_min_kw": -24.41,
+        "p_dc_max_kw": 80.0,
+        "hv_violations_total": 0
+      }
+    },
+    "+E_inner_outer_80kw_coupling": {
+      "fsg_pct_of_oracle": {
+        "R_5.000": 95.73,
+        "R_9.125": 98.01,
+        "R_15.000": 95.26,
+        "R_25.000": 95.31,
+        "mean": 96.08
+      },
+      "ttc_pct_of_oracle": {
+        "R_5.000": 90.51,
+        "R_9.125": 99.84,
+        "R_15.000": 93.24,
+        "R_25.000": 89.57,
+        "mean": 93.29
+      },
+      "hairpin_180_s": {
+        "FSG_REAL_TRACK": 6.265,
+        "TTC_LAB_PEAK": 5.81
+      },
+      "slalom_55kmh": {
+        "max_beta_deg": 1.8,
+        "rec_time_s": 0.085,
+        "spun": false
+      },
+      "solver_and_hv": {
+        "step_time_mean_ms": 0.46,
+        "step_time_p99_ms": 0.747,
+        "p_dc_min_kw": -24.41,
+        "p_dc_max_kw": 80.0,
+        "hv_violations_total": 0
+      }
+    },
+    "Final_Winning_AB": {
+      "fsg_pct_of_oracle": {
+        "R_5.000": 95.73,
+        "R_9.125": 98.22,
+        "R_15.000": 101.88,
+        "R_25.000": 100.77,
+        "mean": 99.15
+      },
+      "ttc_pct_of_oracle": {
+        "R_5.000": 90.5,
+        "R_9.125": 98.1,
+        "R_15.000": 99.96,
+        "R_25.000": 91.32,
+        "mean": 94.97
+      },
+      "hairpin_180_s": {
+        "FSG_REAL_TRACK": 6.265,
+        "TTC_LAB_PEAK": 5.84
+      },
+      "slalom_55kmh": {
+        "max_beta_deg": 1.8,
+        "rec_time_s": 0.085,
+        "spun": false
+      },
+      "solver_and_hv": {
+        "step_time_mean_ms": 0.459,
+        "step_time_p99_ms": 0.749,
+        "p_dc_min_kw": -24.41,
+        "p_dc_max_kw": 80.0,
+        "hv_violations_total": 0
+      }
+    }
+  },
+  "candidate_verdicts": {
+    "A_centripetal_fx": {
+      "status": "KEPT",
+      "reason": "Improves tight-corner pace (+0.50% FSG R5, +0.26% FSG R9.125, +1.89% TTC R5) via QP gradient -w_cent*Fx_f*sin(delta) and front pitch relaxation during steady/apex cornering, with 0 deg slalom degradation and 0 HV violations."
+    },
+    "B_curvature_delta_alpha": {
+      "status": "KEPT",
+      "reason": "Largest optimality gap closure: +6.62% FSG R15 (95.26% -> 101.88%), +5.46% FSG R25 (95.31% -> 100.77%), +6.72% TTC R15 (93.24% -> 99.96%), +1.75% TTC R25 (89.57% -> 91.32%), raising FSG mean from 96.08% to 99.15% and TTC mean from 93.29% to 95.19% with slalom max|beta|=1.93 deg (<3.2 deg) and p99=0.705 ms."
+    },
+    "C_lateral_reserve_load_sens": {
+      "status": "DISCARDED",
+      "reason": "Slightly degraded FSG mean (96.05% vs 96.08%), TTC mean (93.18% vs 93.29%), and TTC hairpin (+0.035s) while adding +0.025 ms solver p99."
+    },
+    "D_combined_slip": {
+      "status": "DISCARDED",
+      "reason": "0.00% gain across all corners and hairpins; redundant with existing friction-ellipse cap fx_max_i = sqrt(f_cap^2 - fy_eff^2) while adding +0.021 ms solver p99."
+    },
+    "E_inner_outer_80kw_coupling": {
+      "status": "DISCARDED",
+      "reason": "0.00% gain across all corners and hairpins; confirmed by Oracle OCP showing 0.0 kW coupling above 80 kW on FSG hairpin exit because steering is already unwound (delta ~ 0 deg) during the 80 kW phase."
+    }
+  },
+  "new_config_parameters_for_optimizer": {
+    "modes.autocross.centripetal_fx_gain": {
+      "default": 20.0,
+      "recommended_range": [
+        0.0,
+        45.0
+      ],
+      "description": "Candidate A QP centripetal projection weight w_cent = centripetal_fx_gain * sin(|delta|) during steady/apex cornering."
+    },
+    "modes.autocross.delta_alpha_eq_gain": {
+      "default": 2600.0,
+      "recommended_range": [
+        800.0,
+        3600.0
+      ],
+      "description": "Candidate B Delta_alpha = |alpha_f| - |alpha_r| equalization gain (Nm/rad) during quasi-steady front-limited cornering."
+    }
+  },
+  "automated_test_suite": {
+    "command": "godot --headless --path src/mirena_sim -s ../../tests/run_tests.gd",
+    "passed": 798,
+    "failed": 0,
+    "suites": 29
+  }
+}

@@ -1,19 +1,17 @@
 class_name TorqueVectoring
 extends RefCounted
 
-## Decoupled 200 Hz Torque Vectoring Controller / Allocator (Block D)
-##
-## Runs behind an internal time accumulator (default 200 Hz, dt_tv = 0.005 s)
-## decoupled from Godot's 400 Hz physics tick.
-##
-## Modes:
-## - MODE_OPEN: symmetric 50/50 L-R distribution (respecting front/rear axle ratio).
-## - MODE_DYC:  Direct Yaw Control allocating differential torque dT = +/- (dMz * Rw / track)
-##              within individual motor limits [T_min, T_max] and the 80 kW power ceiling,
-##              preserving coherent total longitudinal torque sum(T_i).
+## decoupled 200 hz torque vectoring controller / allocator (block d)
+## runs behind an internal time accumulator (default 200 hz, dt_tv = 0.005 s)
+## decoupled from godot's 400 hz physics tick
+## modes:
+## mode_open: symmetric 50/50 l-r distribution (respecting front/rear axle ratio)
+## mode_dyc: direct yaw control allocating differential torque dt = +/- (dmz * rw / track)
+## within individual motor limits [t_min, t_max] and the 80 kw power ceiling,
+## preserving coherent total longitudinal torque sum(t_i)
 
-const VehicleConfig = preload("../Core/VehicleConfig.gd")
-const VehicleInputs = preload("../Core/VehicleInputs.gd")
+const VehicleConfig = preload("../../Config/VehicleConfig.gd")
+const VehicleInputs = preload("../../Inputs/VehicleInputs.gd")
 
 enum TVMode {
 	MODE_OPEN = 0,
@@ -32,8 +30,8 @@ func reset() -> void:
 func get_latched_torques() -> Array[float]:
 	return _latched_torques.duplicate()
 
-## Updates Torque Vectoring at target rate (default 200 Hz) via internal accumulator.
-## Pass advance_clock = false on RK2 sub-stages so the ECU clock advances once per physical step.
+## updates torque vectoring at target rate (default 200 hz) via internal accumulator
+## pass advance_clock = false on rk2 sub-stages so the ecu clock advances once per physical step
 func step_allocation(
 	base_torques: Array[float],
 	inputs: VehicleInputs,
@@ -60,14 +58,14 @@ func step_allocation(
 			_latched_torques = compute_allocation(base_torques, inputs, wheel_omegas, speed, config)
 			update_count += 1
 
-	# For standard open drive modes before first TV clock tick, track base torques cleanly
+	# for standard open drive modes before first tv clock tick, track base torques cleanly
 	if update_count == 0 and inputs.tv_mode == TVMode.MODE_OPEN and inputs.drive_mode != VehicleConfig.DriveMode.TORQUE_VECTORING:
 		return base_torques.duplicate()
 
 	return _latched_torques.duplicate()
 
-## Computes motor angular speed derating factor [0.0, 1.0] for tractive drive torque.
-## Linearly tapers from 1.0 at motor_taper_ratio * omega_max down to 0.0 at omega_max.
+## computes motor angular speed derating factor [0.0, 1.0] for tractive drive torque
+## linearly tapers from 1.0 at motor_taper_ratio * omega_max down to 0.0 at omega_max
 static func compute_motor_speed_scale(wheel_omega: float, is_tractive: bool, config: VehicleConfig) -> float:
 	if not is_tractive:
 		return 1.0
@@ -84,7 +82,7 @@ static func compute_motor_speed_scale(wheel_omega: float, is_tractive: bool, con
 		return 0.0
 	return 1.0 - (omega_motor - omega_taper_start) / maxf(omega_max - omega_taper_start, 1e-5)
 
-## Pure stateless allocation function computing per-wheel torques [FL, FR, RL, RR] in Nm.
+## pure stateless allocation function computing per-wheel torques [fl, fr, rl, rr] in nm
 static func compute_allocation(
 	base_torques: Array[float],
 	inputs: VehicleInputs,
@@ -128,11 +126,11 @@ static func compute_allocation(
 		sf = 1.0
 		sr = 0.0
 
-	# ISO 8855: +Mz turns LEFT (CCW around +Z) => increase RIGHT torque (+), decrease LEFT torque (-)
+	# iso 8855: +mz turns left (ccw around +z) => increase right torque (+), decrease left torque (-)
 	var dt_f_req: float = (inputs.tv_yaw_moment_req * sf * r) / maxf(config.track_width_f, 0.1)
 	var dt_r_req: float = (inputs.tv_yaw_moment_req * sr * r) / maxf(config.track_width_r, 0.1)
 
-	# Clamp symmetrically on each axle to obey individual motor limits while conserving sum(T_i)
+	# clamp symmetrically on each axle to obey individual motor limits while conserving sum(t_i)
 	var fl0: float = clampf(out[0], t_min[0], t_max[0])
 	var fr0: float = clampf(out[1], t_min[1], t_max[1])
 	var dtf_lo: float = maxf(fl0 - t_max[0], t_min[1] - fr0)
@@ -149,7 +147,7 @@ static func compute_allocation(
 	out[2] = rl0 - dt_r
 	out[3] = rr0 + dt_r
 
-	# Enforce global 80 kW power limit across all 4 wheels
+	# enforce global 80 kw power limit across all 4 wheels
 	var p_limit_mech: float = config.power_limit_watts * eff
 	var p_mech: float = 0.0
 	for i in range(4):

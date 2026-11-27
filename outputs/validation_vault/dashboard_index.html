@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tecnun eRacing | Vehicle Dynamics Validation Vault</title>
+<style>
+:root {
+  --bg-root: #0D1117;
+  --bg-panel: #131922;
+  --bg-card: #161E29;
+  --bg-hover: #1D2736;
+  --border: #263040;
+  --border-hi: #38BDF8;
+  --text: #E6EDF3;
+  --muted: #9BA7B4;
+  --cyan: #38BDF8;
+  --emerald: #10B981;
+  --amber: #F59E0B;
+  --crimson: #F43F5E;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg-root);
+  color: var(--text);
+  font-family: var(--sans);
+  display: flex;
+  min-height: 100vh;
+}
+.sidebar {
+  width: 290px;
+  flex-shrink: 0;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 18px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.brand {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+  margin-bottom: 4px;
+}
+.brand-kicker {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--cyan);
+}
+.brand h1 {
+  margin: 4px 0 2px 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+.brand-sub {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.search-box {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-root);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.search-box:focus {
+  outline: none;
+  border-color: var(--cyan);
+}
+.nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  border-radius: 6px;
+  text-decoration: none;
+  color: var(--text);
+  font-size: 12.5px;
+  border: 1px solid transparent;
+}
+.nav-item:hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+.nav-code {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--cyan);
+  background: rgba(56, 189, 248, 0.12);
+  padding: 2px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.nav-label {
+  flex: 1;
+  line-height: 1.25;
+}
+.nav-badge {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--bg-root);
+  border: 1px solid var(--border);
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sidebar-footer a {
+  color: var(--cyan);
+  text-decoration: none;
+}
+.main {
+  flex: 1;
+  padding: 24px 28px 60px 28px;
+  min-width: 0;
+}
+.hero {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--cyan);
+  border-radius: 8px;
+  padding: 18px 22px;
+  margin-bottom: 22px;
+}
+.hero-top {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.hero h2 {
+  margin: 0;
+  font-size: 20px;
+}
+.hero-meta {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+.hero-stats {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.stat-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 14px;
+  text-align: right;
+}
+.stat-num {
+  font-family: var(--mono);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--emerald);
+}
+.stat-lbl {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.summary-panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 18px;
+  margin-bottom: 26px;
+  overflow-x: auto;
+}
+.summary-panel h3 {
+  margin: 0 0 12px 0;
+  font-size: 15px;
+  font-family: var(--mono);
+  color: var(--cyan);
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+th, td {
+  text-align: left;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+th {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+td.num {
+  font-family: var(--mono);
+  text-align: right;
+  color: var(--cyan);
+  font-weight: 700;
+}
+.suite-jump {
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 600;
+}
+.suite-jump:hover { color: var(--cyan); }
+.tbl-kpi {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.tbl-kpi b { color: var(--text); font-weight: 600; }
+.json-link {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--cyan);
+  text-decoration: none;
+}
+.suite-section {
+  margin-bottom: 34px;
+  padding-top: 6px;
+}
+.suite-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+}
+.suite-tag {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--cyan);
+  letter-spacing: 0.06em;
+}
+.suite-header h2 {
+  margin: 3px 0 4px 0;
+  font-size: 18px;
+}
+.suite-sub {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.data-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.data-chip {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--cyan);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  text-decoration: none;
+}
+.data-chip:hover { border-color: var(--cyan); }
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.kpi-pill {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--emerald);
+  border-radius: 6px;
+  padding: 9px 12px;
+}
+.kpi-pill.status-warn { border-top-color: var(--amber); }
+.kpi-label {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.kpi-val {
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 700;
+  margin-top: 4px;
+  color: var(--text);
+}
+.fig-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 14px;
+}
+.fig-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.fig-card:hover {
+  border-color: var(--cyan);
+  transform: translateY(-2px);
+}
+.fig-thumb-wrap {
+  position: relative;
+  background: #090C10;
+  aspect-ratio: 16 / 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.fig-thumb-wrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.zoom-hint {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  background: rgba(13, 17, 23, 0.85);
+  color: var(--cyan);
+  border: 1px solid var(--border);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.fig-meta {
+  padding: 10px 12px;
+}
+.fig-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+.fig-sub {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--muted);
+  word-break: break-all;
+}
+.lightbox {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 9, 14, 0.94);
+  z-index: 1000;
+  flex-direction: column;
+  padding: 16px 22px;
+}
+.lightbox.open { display: flex; }
+.lb-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.lb-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+.lb-sub {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.lb-controls {
+  display: flex;
+  gap: 8px;
+}
+.lb-btn {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 6px 11px;
+  cursor: pointer;
+}
+.lb-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+.lb-stage {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 0;
+}
+.lb-stage img {
+  max-width: 96vw;
+  max-height: 82vh;
+  object-fit: contain;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #0D1117;
+  cursor: zoom-in;
+}
+.lb-stage img.zoomed {
+  max-width: none;
+  max-height: none;
+  width: 140%;
+  cursor: zoom-out;
+}
+@media (max-width: 900px) {
+  body { flex-direction: column; }
+  .sidebar { width: 100%; height: auto; position: static; }
+}
+</style>
+</head>
+<body>
+<aside class="sidebar">
+  <div class="brand">
+    <div class="brand-kicker">TECNUN eRACING | ISO 8855</div>
+    <h1>Validation Vault</h1>
+    <div class="brand-sub">MoTeC i2 Dark Engineering | 300 DPI</div>
+  </div>
+  <input id="filterInput" class="search-box" type="text" placeholder="Filter figures by keyword...">
+  <nav class="nav-list">
+    <a class="nav-item" href="#overview">
+      <span class="nav-code">00</span>
+      <span class="nav-label">Executive KPI Overview</span>
+      <span class="nav-badge">67</span>
+    </a>
+    <a class="nav-item" href="#suite-01" data-suite="01_ter26_sim_to_real"><span class="nav-code">01</span><span class="nav-label">TeR26 RWD Sim-to-Real Correlation &amp; CAN Audit</span><span class="nav-badge">5</span></a><a class="nav-item" href="#suite-02" data-suite="02_ter27_maneuvers_and_handling"><span class="nav-code">02</span><span class="nav-label">TeR27 4WD Maneuvers &amp; Handling Battery</span><span class="nav-badge">13</span></a><a class="nav-item" href="#suite-03" data-suite="03_ter27_torque_vectoring_and_maps"><span class="nav-code">03</span><span class="nav-label">TeR27 Torque Vectoring, 5-Mode Maps &amp; Fault Injection</span><span class="nav-badge">12</span></a><a class="nav-item" href="#suite-04" data-suite="04_ter27_full_lap_and_endurance"><span class="nav-code">04</span><span class="nav-label">TeR27 Full Lap OCP &amp; 22 km Endurance Simulation</span><span class="nav-badge">5</span></a><a class="nav-item" href="#suite-05" data-suite="05_tires_and_thermal_analysis"><span class="nav-code">05</span><span class="nav-label">Hoosier R20 / R25B Tire &amp; Thermal Envelope Analysis</span><span class="nav-badge">5</span></a><a class="nav-item" href="#suite-06" data-suite="06_suspension_kinematics_and_fea"><span class="nav-code">06</span><span class="nav-label">3D Double-Wishbone Kinematics &amp; FEA Load Envelopes</span><span class="nav-badge">5</span></a><a class="nav-item" href="#suite-07" data-suite="07_design_tradeoffs_and_fs_points"><span class="nav-code">07</span><span class="nav-label">Design Tradeoffs &amp; Formula Student Points Optimizer</span><span class="nav-badge">4</span></a><a class="nav-item" href="#suite-08" data-suite="08_codegen_sil_and_godot_parity"><span class="nav-code">08</span><span class="nav-label">C99 SIL Codegen &amp; Godot-Python Parity Verification</span><span class="nav-badge">2</span></a><a class="nav-item" href="#suite-09" data-suite="09_ter27_skidpad_deep_dive"><span class="nav-code">09</span><span class="nav-label">TeR27 4WD Skidpad Sub-5s Diagnostic Deep-Dive</span><span class="nav-badge">12</span></a><a class="nav-item" href="#suite-10" data-suite="10_ter27_dil_and_sensor_realism"><span class="nav-code">10</span><span class="nav-label">TeR27 DiL Telemetry, 3D Braking Line &amp; Sensor Realism</span><span class="nav-badge">4</span></a>
+  </nav>
+  <div class="sidebar-footer">
+    <div>Generated: 2026-11-27T14:32:53Z</div>
+    <a href="master_metrics_catalog.json" target="_blank">master_metrics_catalog.json</a>
+    <a href="INDEX.md" target="_blank">INDEX.md</a>
+  </div>
+</aside>
+
+<main class="main">
+  <section class="hero" id="overview">
+    <div class="hero-top">
+      <div>
+        <h2>Vehicle Dynamics Validation Vault Dashboard</h2>
+        <div class="hero-meta">ISO 8855 (+X fwd, +Y left, +Z up) | MoTeC i2 Dark Engineering | 300 DPI</div>
+      </div>
+      <div class="hero-stats">
+        <div class="stat-box"><div class="stat-num">10</div><div class="stat-lbl">Vault Suites</div></div>
+        <div class="stat-box"><div class="stat-num">67</div><div class="stat-lbl">300 DPI PNGs</div></div>
+        <div class="stat-box"><div class="stat-num">15</div><div class="stat-lbl">JSON Reports</div></div>
+        <div class="stat-box"><div class="stat-num">42.8 MB</div><div class="stat-lbl">Plot Payload</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="summary-panel">
+    <h3>EXECUTIVE KPI MATRIX (SUITES 01 - 08)</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Validation Suite</th>
+          <th style="text-align:right;">PNGs</th>
+          <th>Headline Engineering KPIs</th>
+          <th>Primary Metrics</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><a class="suite-jump" href="#suite-01">01 - TeR26 RWD Sim-to-Real Correlation &amp; CAN Audit</a></td><td class="num">5</td><td><span class="tbl-kpi"><b>OOS wz R^2 (C):</b> 0.9539</span> | <span class="tbl-kpi"><b>OOS ay RMSE (C):</b> 2.329 m/s^2</span> | <span class="tbl-kpi"><b>EKF res_ax RMS:</b> 0.273 m/s^2</span></td><td><a class="json-link" href="01_ter26_sim_to_real/metrics.json" target="_blank">metrics.json</a></td></tr><tr><td><a class="suite-jump" href="#suite-02">02 - TeR27 4WD Maneuvers &amp; Handling Battery</a></td><td class="num">13</td><td><span class="tbl-kpi"><b>YMD Trim ay (90 km/h):</b> 1.69 g</span> | <span class="tbl-kpi"><b>K_us (65 km/h, 3D):</b> 0.129 deg/g</span> | <span class="tbl-kpi"><b>Roll Gradient:</b> 0.80 deg/g</span></td><td><a class="json-link" href="02_ter27_maneuvers_and_handling/metrics.json" target="_blank">metrics.json</a></td></tr><tr><td><a class="suite-jump" href="#suite-03">03 - TeR27 Torque Vectoring, 5-Mode Maps &amp; Fault Injection</a></td><td class="num">12</td><td><span class="tbl-kpi"><b>TV vs Open Lap Gain:</b> -0.775 s</span> | <span class="tbl-kpi"><b>Drivability Gain:</b> +17.68 pts</span> | <span class="tbl-kpi"><b>Torque-Fight Reduction:</b> -29.9%</span></td><td><a class="json-link" href="03_ter27_torque_vectoring_and_maps/tv_metrics_catalog.json" target="_blank">tv_metrics_catalog.json</a></td></tr><tr><td><a class="suite-jump" href="#suite-04">04 - TeR27 Full Lap OCP &amp; 22 km Endurance Simulation</a></td><td class="num">5</td><td><span class="tbl-kpi"><b>FSG Rubbered End. Lap:</b> 79.70 s</span> | <span class="tbl-kpi"><b>OCP vs 14-DOF Gap:</b> 0.01%</span> | <span class="tbl-kpi"><b>22 km Min Voltage:</b> 547.8 V</span></td><td><a class="json-link" href="04_ter27_full_lap_and_endurance/metrics.json" target="_blank">metrics.json</a></td></tr><tr><td><a class="suite-jump" href="#suite-05">05 - Hoosier R20 / R25B Tire &amp; Thermal Envelope Analysis</a></td><td class="num">5</td><td><span class="tbl-kpi"><b>R20 Peak mu_y (800 N):</b> 2.122</span> | <span class="tbl-kpi"><b>R25B Peak mu_y (800 N):</b> 2.229 (+5.0%)</span> | <span class="tbl-kpi"><b>R25B 22 km Delta:</b> -28.37 s</span></td><td><a class="json-link" href="05_tires_and_thermal_analysis/metrics.json" target="_blank">metrics.json</a></td></tr><tr><td><a class="suite-jump" href="#suite-06">06 - 3D Double-Wishbone Kinematics &amp; FEA Load Envelopes</a></td><td class="num">5</td><td><span class="tbl-kpi"><b>3D Closure Residual:</b> 8.83e-12 mm</span> | <span class="tbl-kpi"><b>Front Camber Gain:</b> -38.2 deg/m</span> | <span class="tbl-kpi"><b>LLTD Mechanical:</b> 40.13%</span></td><td><a class="json-link" href="06_suspension_kinematics_and_fea/metrics.json" target="_blank">metrics.json</a></td></tr><tr><td><a class="suite-jump" href="#suite-07">07 - Design Tradeoffs &amp; Formula Student Points Optimizer</a></td><td class="num">4</td><td><span class="tbl-kpi"><b>Mass Sensitivity:</b> 0.388 s / 10 kg</span> | <span class="tbl-kpi"><b>+10% CL*A Equiv. Mass:</b> -14.71 kg</span> | <span class="tbl-kpi"><b>FSG Optimal Points:</b> 282.69 pts</span></td><td><a class="json-link" href="07_design_tradeoffs_and_fs_points/metrics.json" target="_blank">metrics.json</a></td></tr><tr><td><a class="suite-jump" href="#suite-08">08 - C99 SIL Codegen &amp; Godot-Python Parity Verification</a></td><td class="num">2</td><td><span class="tbl-kpi"><b>C99 SIL Max Error:</b> 0.0e+00</span> | <span class="tbl-kpi"><b>Host C99 Latency (p50):</b> 3.63 us</span> | <span class="tbl-kpi"><b>STM32F405 CPU Load:</b> 6.12% @ 200Hz</span></td><td><a class="json-link" href="08_codegen_sil_and_godot_parity/metrics.json" target="_blank">metrics.json</a></td></tr><tr><td><a class="suite-jump" href="#suite-09">09 - TeR27 4WD Skidpad Sub-5s Diagnostic Deep-Dive</a></td><td class="num">12</td><td><span class="tbl-kpi"><b>TeR26 RWD Anchor:</b> 5.500 s</span> | <span class="tbl-kpi"><b>FSG R20 MAX_ATK V2:</b> 4.703 s</span> | <span class="tbl-kpi"><b>FSG R25B MAX_ATK V2:</b> 4.683 s</span></td><td><a class="json-link" href="09_ter27_skidpad_deep_dive/skidpad_deep_dive_metrics.json" target="_blank">skidpad_deep_dive_metrics.json</a></td></tr><tr><td><a class="suite-jump" href="#suite-10">10 - TeR27 DiL Telemetry, 3D Braking Line &amp; Sensor Realism</a></td><td class="num">4</td><td><span class="tbl-kpi"><b>CAN Accel Latency:</b> 125.0 ms</span> | <span class="tbl-kpi"><b>Skidpad Real vs Ideal:</b> -0.068 s</span> | <span class="tbl-kpi"><b>Autocross Sector Delta:</b> +0.343 s</span></td><td><a class="json-link" href="10_ter27_dil_and_sensor_realism/dil_sensor_realism_metrics.json" target="_blank">dil_sensor_realism_metrics.json</a></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="suite-section" id="suite-01"><div class="suite-header"><div><span class="suite-tag">01 | SIM-TO-REAL</span><h2>TeR26 RWD Sim-to-Real Correlation &amp; CAN Audit</h2><p class="suite-sub">Strict 30% OOS val_30 validation, 6-dimension A/B/C ablation, and 200 Hz EKF+RTS CAN telemetry sanity gates.</p></div><div class="data-chips"><a class="data-chip" href="01_ter26_sim_to_real/metrics.json" target="_blank">JSON: metrics.json</a></div></div><div class="kpi-row"><div class="kpi-pill status-pass"><div class="kpi-label">OOS wz R^2 (C)</div><div class="kpi-val">0.9539</div></div><div class="kpi-pill status-pass"><div class="kpi-label">OOS ay RMSE (C)</div><div class="kpi-val">2.329 m/s^2</div></div><div class="kpi-pill status-pass"><div class="kpi-label">EKF res_ax RMS</div><div class="kpi-val">0.273 m/s^2</div></div><div class="kpi-pill status-pass"><div class="kpi-label">EKF res_ay RMS</div><div class="kpi-val">0.326 m/s^2</div></div><div class="kpi-pill status-pass"><div class="kpi-label">Sanity Gates</div><div class="kpi-val">6/6 PASS</div></div></div><div class="fig-grid"><article class="fig-card" data-search="01 ter26 rwd sim-to-real correlation &amp; can audit fig01 timeseries oos fig01_timeseries_oos.png" onclick="openLightbox(0)"><div class="fig-thumb-wrap"><img loading="lazy" src="01_ter26_sim_to_real/fig01_timeseries_oos.png" alt="Fig01 Timeseries OOS"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Fig01 Timeseries OOS</div><div class="fig-sub">fig01_timeseries_oos.png | 4032x2941 | 300 DPI | 1104.8 KB</div></div></article><article class="fig-card" data-search="01 ter26 rwd sim-to-real correlation &amp; can audit fig02 bode coherence fig02_bode_coherence.png" onclick="openLightbox(1)"><div class="fig-thumb-wrap"><img loading="lazy" src="01_ter26_sim_to_real/fig02_bode_coherence.png" alt="Fig02 Bode Coherence"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Fig02 Bode Coherence</div><div class="fig-sub">fig02_bode_coherence.png | 4032x2708 | 300 DPI | 828.1 KB</div></div></article><article class="fig-card" data-search="01 ter26 rwd sim-to-real correlation &amp; can audit fig03 understeer g-g fig03_understeer_gg.png" onclick="openLightbox(2)"><div class="fig-thumb-wrap"><img loading="lazy" src="01_ter26_sim_to_real/fig03_understeer_gg.png" alt="Fig03 Understeer G-G"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Fig03 Understeer G-G</div><div class="fig-sub">fig03_understeer_gg.png | 4471x1600 | 300 DPI | 893.4 KB</div></div></article><article class="fig-card" data-search="01 ter26 rwd sim-to-real correlation &amp; can audit fig04 regime heatmap residuals fig04_regime_heatmap_residuals.png" onclick="openLightbox(3)"><div class="fig-thumb-wrap"><img loading="lazy" src="01_ter26_sim_to_real/fig04_regime_heatmap_residuals.png" alt="Fig04 Regime Heatmap Residuals"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Fig04 Regime Heatmap Residuals</div><div class="fig-sub">fig04_regime_heatmap_residuals.png | 4647x1658 | 300 DPI | 384.7 KB</div></div></article><article class="fig-card" data-search="01 ter26 rwd sim-to-real correlation &amp; can audit fig05 can telemetry audit fig05_can_telemetry_audit.png" onclick="openLightbox(4)"><div class="fig-thumb-wrap"><img loading="lazy" src="01_ter26_sim_to_real/fig05_can_telemetry_audit.png" alt="Fig05 CAN Telemetry Audit"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Fig05 CAN Telemetry Audit</div><div class="fig-sub">fig05_can_telemetry_audit.png | 4325x2766 | 300 DPI | 617.4 KB</div></div></article></div></section><section class="suite-section" id="suite-02"><div class="suite-header"><div><span class="suite-tag">02 | HANDLING</span><h2>TeR27 4WD Maneuvers &amp; Handling Battery</h2><p class="suite-sub">Milliken YMD, ISO ramp-steer &amp; step-steer transients, Bode sweeps, trail braking, slalom/DLC, split-mu, and FS dynamic events.</p></div><div class="data-chips"><a class="data-chip" href="02_ter27_maneuvers_and_handling/metrics.json" target="_blank">JSON: metrics.json</a></div></div><div class="kpi-row"><div class="kpi-pill status-pass"><div class="kpi-label">YMD Trim ay (90 km/h)</div><div class="kpi-val">1.69 g</div></div><div class="kpi-pill status-pass"><div class="kpi-label">K_us (65 km/h, 3D)</div><div class="kpi-val">0.129 deg/g</div></div><div class="kpi-pill status-pass"><div class="kpi-label">Roll Gradient</div><div class="kpi-val">0.80 deg/g</div></div><div class="kpi-pill status-pass"><div class="kpi-label">Yaw BW (-3dB, 80 km/h)</div><div class="kpi-val">5.08 Hz</div></div><div class="kpi-pill status-pass"><div class="kpi-label">YMD Trim ay (60 km/h)</div><div class="kpi-val">1.28 g</div></div></div><div class="fig-grid"><article class="fig-card" data-search="02 ter27 4wd maneuvers &amp; handling battery bode yaw and lat accel bode_yaw_and_lat_accel.png" onclick="openLightbox(5)"><div class="fig-thumb-wrap"><img loading="lazy" src="02_ter27_maneuvers_and_handling/bode_yaw_and_lat_accel.png" alt="Bode Yaw And Lat Accel"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Bode Yaw And Lat Accel</div><div class="fig-sub">bode_yaw_and_lat_accel.png | 4801x2941 | 300 DPI | 775.5 KB</div></div></article><article class="fig-card" data-search="02 ter27 4wd maneuvers &amp; handling battery fs acceleration 75 m telemetry fs_acceleration_75m_telemetry.png" onclick="openLightbox(6)"><div class="fig-thumb-wrap"><img loading="lazy" src="02_ter27_maneuvers_and_handling/fs_acceleration_75m_telemetry.png" alt="FS Acceleration 75 m Telemetry"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">FS Acceleration 75 m Telemetry</div><div class="fig-sub">fs_acceleration_75m_telemetry.png | 4351x2650 | 300 DPI | 662.5 KB</div></div></article><article class="fig-card" data-search="02 ter27 4wd maneuvers &amp; handling battery fs skidpad steady state fs_skidpad_steady_state.png" onclick="openLightbox(7)"><div class="fig-thumb-wrap"><img loading="lazy" src="02_ter27_maneuvers_and_handling/fs_skidpad_steady_state.png" alt="FS Skidpad Steady State"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">FS Skidpad Steady State</div><div class="fig-sub">fs_skidpad_steady_state.png | 4350x2650 | 300 DPI | 639.7 KB</div></div></article><article class="fig-card" data-search="02 ter27 4wd maneuvers &amp; handling battery ramp steer roll and load transfer ramp_steer_roll_and_load_transfer.png" onclick="openLightbox(8)"><div class="fig-thumb-wrap"><img loading="lazy" src="02_ter27_maneuvers_and_handling/ramp_steer_roll_and_load_transfer.png" alt="Ramp Steer Roll And Load Transfer"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Ramp Steer Roll And Load Transfer</div><div class="fig-sub">ramp_steer_roll_and_load_transfer.png | 4351x1658 | 300 DPI | 437.8 KB</div></div></article><article class="fig-card" data-search="02 ter27 4wd maneuvers &amp; handling battery ramp steer understeer gradient ramp_steer_understeer_gradient.png" onclick="openLightbox(9)"><div class="fig-thumb-wrap"><img loading="lazy" src="02_ter27_maneuvers_and_handling/ramp_steer_understeer_gradient.png" alt="Ramp Steer Understeer Gradient"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Ramp Steer Understeer Gradient</div><div class="fig-sub">ramp_steer_understeer_gradient.png | 4351x2766 | 300 DPI | 718.8 KB</div></div></article><article class="fig-card" data-search="02 ter27 4wd maneuvers &amp; handling battery slalom and dlc traces slalom_and_dlc_traces.png" onclick="openLightbox(10)"><div class="fig-thumb-wrap"><img loading="lazy" src="02_ter27_maneuvers_and_handling/slalom_and_dlc_traces.png" alt="Slalom And DLC Traces"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Slalom And DLC Traces</div><div class="fig-sub">slalom_and_dlc_traces.png | 4501x2650 | 300 DPI | 689.5 KB</div></div></article><article class="fig-card" data-search="02 ter27 4wd maneuvers &amp; handling battery split mu behavior split_mu_behavior.png" onclick="openLightbox(11)"><div class="fig-thumb-wrap"><img loading="lazy" src="02_ter27_maneuvers_and_handling/split_mu_behavior.png" alt="Split mu Behavior"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Split mu Behavior</div><div class="fig-sub">split_mu_behavior.png | 4351x2591 | 300 DPI | 595.5 KB</div></div></article><article class="fig-card" data-search="02 ter27 4wd maneuvers &amp; handling battery step steer metrics comparison step_steer_metrics_comparison.png" onclick="openLightbox(12)"><div class="fig-thumb-wrap"><img loading="lazy" src="02_ter27_maneuvers_and_handling/step_steer_metrics_comparison.png" alt="Step Steer Metrics Comparison"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Step Steer Metrics Comparison</div><div class="fig-sub">step_steer_metrics_comparison.png | 4352x2591 | 300 DPI | 333.3 KB</div></div></article><article class="fig-card" data-search="02 ter27 4wd maneuvers &amp; handling battery step steer transient response step_steer_transient_response.png" onclick="openLightbox(13)"><div class="fig-thumb-wrap"><img loading="lazy" src="02_ter27_maneuvers_and_handling/step_steer_transient_response.png" alt="Step Steer Transient Response"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Step Steer Transient Response</div><div class="fig-sub">step_steer_transient_response.png | 4351x2650 | 300 DPI | 559.3 KB</div></div></article><article class="fig-card" data-search="02 ter27 4wd maneuvers &amp; handling battery trail braking stability envelope trail_braking_stability_envelope.png" onclick="openLightbox(14)"><div class="fig-thumb-wrap"><img loading="lazy" src="02_ter27_maneuvers_and_handling/trail_braking_stability_envelope.png" alt="Trail Braking Stability Envelope"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Trail Braking Stability Envelope</div><div class="fig-sub">trail_braking_stability_envelope.png | 4348x2650 | 300 DPI | 729.8 KB</div></div></article><article class="fig-card" data-search="02 ter27 4wd maneuvers &amp; handling battery ymd grip comparison ymd_grip_comparison.png" onclick="openLightbox(15)"><div class="fig-thumb-wrap"><img loading="lazy" src="02_ter27_maneuvers_and_handling/ymd_grip_comparison.png" alt="YMD Grip Comparison"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">YMD Grip Comparison</div><div class="fig-sub">ymd_grip_comparison.png | 4351x1716 | 300 DPI | 938.5 KB</div></div></article><article class="fig-card" data-search="02 ter27 4wd maneuvers &amp; handling battery ymd ter27 vs ter26 ymd_ter27_vs_ter26.png" onclick="openLightbox(16)"><div class="fig-thumb-wrap"><img loading="lazy" src="02_ter27_maneuvers_and_handling/ymd_ter27_vs_ter26.png" alt="YMD TeR27 Vs TeR26"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">YMD TeR27 Vs TeR26</div><div class="fig-sub">ymd_ter27_vs_ter26.png | 4501x1716 | 300 DPI | 938.5 KB</div></div></article><article class="fig-card" data-search="02 ter27 4wd maneuvers &amp; handling battery ymd velocity sweep ymd_velocity_sweep.png" onclick="openLightbox(17)"><div class="fig-thumb-wrap"><img loading="lazy" src="02_ter27_maneuvers_and_handling/ymd_velocity_sweep.png" alt="YMD Velocity Sweep"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">YMD Velocity Sweep</div><div class="fig-sub">ymd_velocity_sweep.png | 4801x1658 | 300 DPI | 866.3 KB</div></div></article></div></section><section class="suite-section" id="suite-03"><div class="suite-header"><div><span class="suite-tag">03 | TORQUE VECTORING</span><h2>TeR27 Torque Vectoring, 5-Mode Maps &amp; Fault Injection</h2><p class="suite-sub">Open-diff vs e-LSD vs TV architectures, 5 ECU modes, 4-wheel friction circles, HV/BSPD compliance, and 3WD fault resilience.</p></div><div class="data-chips"><a class="data-chip" href="03_ter27_torque_vectoring_and_maps/fsg_grip_calibration_from_ter26.json" target="_blank">JSON: fsg_grip_calibration_from_ter26.json</a><a class="data-chip" href="03_ter27_torque_vectoring_and_maps/skidpad_oracle_report.json" target="_blank">JSON: skidpad_oracle_report.json</a><a class="data-chip" href="03_ter27_torque_vectoring_and_maps/tv_metrics_catalog.json" target="_blank">JSON: tv_metrics_catalog.json</a></div></div><div class="kpi-row"><div class="kpi-pill status-pass"><div class="kpi-label">TV vs Open Lap Gain</div><div class="kpi-val">-0.775 s</div></div><div class="kpi-pill status-pass"><div class="kpi-label">Drivability Gain</div><div class="kpi-val">+17.68 pts</div></div><div class="kpi-pill status-pass"><div class="kpi-label">Torque-Fight Reduction</div><div class="kpi-val">-29.9%</div></div><div class="kpi-pill status-pass"><div class="kpi-label">HV / BSPD Compliance</div><div class="kpi-val">0 viol / PASS</div></div><div class="kpi-pill status-pass"><div class="kpi-label">Eff. Mode 22 km Energy</div><div class="kpi-val">4.62 kWh</div></div></div><div class="fig-grid"><article class="fig-card" data-search="03 ter27 torque vectoring, 5-mode maps &amp; fault injection skidpad 4wheel friction circles skidpad_4wheel_friction_circles.png" onclick="openLightbox(18)"><div class="fig-thumb-wrap"><img loading="lazy" src="03_ter27_torque_vectoring_and_maps/skidpad_4wheel_friction_circles.png" alt="Skidpad 4wheel Friction Circles"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Skidpad 4wheel Friction Circles</div><div class="fig-sub">skidpad_4wheel_friction_circles.png | 4325x1891 | 300 DPI | 232.6 KB</div></div></article><article class="fig-card" data-search="03 ter27 torque vectoring, 5-mode maps &amp; fault injection skidpad figure8 crossover dynamics skidpad_figure8_crossover_dynamics.png" onclick="openLightbox(19)"><div class="fig-thumb-wrap"><img loading="lazy" src="03_ter27_torque_vectoring_and_maps/skidpad_figure8_crossover_dynamics.png" alt="Skidpad Figure8 Crossover Dynamics"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Skidpad Figure8 Crossover Dynamics</div><div class="fig-sub">skidpad_figure8_crossover_dynamics.png | 4179x2708 | 300 DPI | 478.5 KB</div></div></article><article class="fig-card" data-search="03 ter27 torque vectoring, 5-mode maps &amp; fault injection skidpad sub5 before vs after skidpad_sub5_before_vs_after.png" onclick="openLightbox(20)"><div class="fig-thumb-wrap"><img loading="lazy" src="03_ter27_torque_vectoring_and_maps/skidpad_sub5_before_vs_after.png" alt="Skidpad Sub5 Before Vs After"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Skidpad Sub5 Before Vs After</div><div class="fig-sub">skidpad_sub5_before_vs_after.png | 4617x2766 | 300 DPI | 687.9 KB</div></div></article><article class="fig-card" data-search="03 ter27 torque vectoring, 5-mode maps &amp; fault injection tv 5 modes radar and bars tv_5_modes_radar_and_bars.png" onclick="openLightbox(21)"><div class="fig-thumb-wrap"><img loading="lazy" src="03_ter27_torque_vectoring_and_maps/tv_5_modes_radar_and_bars.png" alt="TV 5 Modes Radar And Bars"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">TV 5 Modes Radar And Bars</div><div class="fig-sub">tv_5_modes_radar_and_bars.png | 4910x2200 | 300 DPI | 878.9 KB</div></div></article><article class="fig-card" data-search="03 ter27 torque vectoring, 5-mode maps &amp; fault injection tv architectures laptime drivability tv_architectures_laptime_drivability.png" onclick="openLightbox(22)"><div class="fig-thumb-wrap"><img loading="lazy" src="03_ter27_torque_vectoring_and_maps/tv_architectures_laptime_drivability.png" alt="TV Architectures Laptime Drivability"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">TV Architectures Laptime Drivability</div><div class="fig-sub">tv_architectures_laptime_drivability.png | 4943x1775 | 300 DPI | 424.6 KB</div></div></article><article class="fig-card" data-search="03 ter27 torque vectoring, 5-mode maps &amp; fault injection tv control maps 2d surfaces tv_control_maps_2d_surfaces.png" onclick="openLightbox(23)"><div class="fig-thumb-wrap"><img loading="lazy" src="03_ter27_torque_vectoring_and_maps/tv_control_maps_2d_surfaces.png" alt="TV Control Maps 2D Surfaces"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">TV Control Maps 2D Surfaces</div><div class="fig-sub">tv_control_maps_2d_surfaces.png | 4651x3145 | 300 DPI | 810.7 KB</div></div></article><article class="fig-card" data-search="03 ter27 torque vectoring, 5-mode maps &amp; fault injection tv fault injection 3wd and sensor noise tv_fault_injection_3wd_and_sensor_noise.png" onclick="openLightbox(24)"><div class="fig-thumb-wrap"><img loading="lazy" src="03_ter27_torque_vectoring_and_maps/tv_fault_injection_3wd_and_sensor_noise.png" alt="TV Fault Injection 3WD And Sensor Noise"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">TV Fault Injection 3WD And Sensor Noise</div><div class="fig-sub">tv_fault_injection_3wd_and_sensor_noise.png | 4998x2883 | 300 DPI | 825.0 KB</div></div></article><article class="fig-card" data-search="03 ter27 torque vectoring, 5-mode maps &amp; fault injection tv friction circles 4-wheels tv_friction_circles_4wheels.png" onclick="openLightbox(25)"><div class="fig-thumb-wrap"><img loading="lazy" src="03_ter27_torque_vectoring_and_maps/tv_friction_circles_4wheels.png" alt="TV Friction Circles 4-Wheels"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">TV Friction Circles 4-Wheels</div><div class="fig-sub">tv_friction_circles_4wheels.png | 4032x3437 | 300 DPI | 975.0 KB</div></div></article><article class="fig-card" data-search="03 ter27 torque vectoring, 5-mode maps &amp; fault injection tv regen braking yaw stability tv_regen_braking_yaw_stability.png" onclick="openLightbox(26)"><div class="fig-thumb-wrap"><img loading="lazy" src="03_ter27_torque_vectoring_and_maps/tv_regen_braking_yaw_stability.png" alt="TV Regen Braking Yaw Stability"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">TV Regen Braking Yaw Stability</div><div class="fig-sub">tv_regen_braking_yaw_stability.png | 5042x1716 | 300 DPI | 612.9 KB</div></div></article><article class="fig-card" data-search="03 ter27 torque vectoring, 5-mode maps &amp; fault injection tv torque distribution 4-wheels trace tv_torque_distribution_4wheels_trace.png" onclick="openLightbox(27)"><div class="fig-thumb-wrap"><img loading="lazy" src="03_ter27_torque_vectoring_and_maps/tv_torque_distribution_4wheels_trace.png" alt="TV Torque Distribution 4-Wheels Trace"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">TV Torque Distribution 4-Wheels Trace</div><div class="fig-sub">tv_torque_distribution_4wheels_trace.png | 4647x2941 | 300 DPI | 799.4 KB</div></div></article><article class="fig-card" data-search="03 ter27 torque vectoring, 5-mode maps &amp; fault injection tv torque fight and power envelope tv_torque_fight_and_power_envelope.png" onclick="openLightbox(28)"><div class="fig-thumb-wrap"><img loading="lazy" src="03_ter27_torque_vectoring_and_maps/tv_torque_fight_and_power_envelope.png" alt="TV Torque Fight And Power Envelope"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">TV Torque Fight And Power Envelope</div><div class="fig-sub">tv_torque_fight_and_power_envelope.png | 4910x2650 | 300 DPI | 901.1 KB</div></div></article><article class="fig-card" data-search="03 ter27 torque vectoring, 5-mode maps &amp; fault injection tv ymd shift open vs casadi tv_ymd_shift_open_vs_casadi.png" onclick="openLightbox(29)"><div class="fig-thumb-wrap"><img loading="lazy" src="03_ter27_torque_vectoring_and_maps/tv_ymd_shift_open_vs_casadi.png" alt="TV YMD Shift Open Vs CasADi"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">TV YMD Shift Open Vs CasADi</div><div class="fig-sub">tv_ymd_shift_open_vs_casadi.png | 5039x1775 | 300 DPI | 817.5 KB</div></div></article></div></section><section class="suite-section" id="suite-04"><div class="suite-header"><div><span class="suite-tag">04 | FULL LAP / ENDURANCE</span><h2>TeR27 Full Lap OCP &amp; 22 km Endurance Simulation</h2><p class="suite-sub">FSG 2023 CasADi OCP vs 14-DOF closed-loop validation across 4 grip profiles, 22 km voltage/thermal evolution, and human drivability audit.</p></div><div class="data-chips"><a class="data-chip" href="04_ter27_full_lap_and_endurance/metrics.json" target="_blank">JSON: metrics.json</a></div></div><div class="kpi-row"><div class="kpi-pill status-pass"><div class="kpi-label">FSG Rubbered End. Lap</div><div class="kpi-val">79.70 s</div></div><div class="kpi-pill status-pass"><div class="kpi-label">OCP vs 14-DOF Gap</div><div class="kpi-val">0.01%</div></div><div class="kpi-pill status-pass"><div class="kpi-label">22 km Min Voltage</div><div class="kpi-val">547.8 V</div></div><div class="kpi-pill status-pass"><div class="kpi-label">22 km Final SOC</div><div class="kpi-val">45.1%</div></div><div class="kpi-pill status-pass"><div class="kpi-label">Drivability Score</div><div class="kpi-val">92.07 / 100</div></div></div><div class="fig-grid"><article class="fig-card" data-search="04 ter27 full lap ocp &amp; 22 km endurance simulation endurance 22 km evolution and voltage sag endurance_22km_evolution_and_voltage_sag.png" onclick="openLightbox(30)"><div class="fig-thumb-wrap"><img loading="lazy" src="04_ter27_full_lap_and_endurance/endurance_22km_evolution_and_voltage_sag.png" alt="Endurance 22 km Evolution And Voltage Sag"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Endurance 22 km Evolution And Voltage Sag</div><div class="fig-sub">endurance_22km_evolution_and_voltage_sag.png | 4588x2883 | 300 DPI | 847.0 KB</div></div></article><article class="fig-card" data-search="04 ter27 full lap ocp &amp; 22 km endurance simulation endurance energy pareto curve endurance_energy_pareto_curve.png" onclick="openLightbox(31)"><div class="fig-thumb-wrap"><img loading="lazy" src="04_ter27_full_lap_and_endurance/endurance_energy_pareto_curve.png" alt="Endurance Energy Pareto Curve"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Endurance Energy Pareto Curve</div><div class="fig-sub">endurance_energy_pareto_curve.png | 4626x1716 | 300 DPI | 504.5 KB</div></div></article><article class="fig-card" data-search="04 ter27 full lap ocp &amp; 22 km endurance simulation fsg track maps telemetry overlay fsg_track_maps_telemetry_overlay.png" onclick="openLightbox(32)"><div class="fig-thumb-wrap"><img loading="lazy" src="04_ter27_full_lap_and_endurance/fsg_track_maps_telemetry_overlay.png" alt="FSG Track Maps Telemetry Overlay"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">FSG Track Maps Telemetry Overlay</div><div class="fig-sub">fsg_track_maps_telemetry_overlay.png | 4530x3349 | 300 DPI | 1486.4 KB</div></div></article><article class="fig-card" data-search="04 ter27 full lap ocp &amp; 22 km endurance simulation human drivability inputs audit human_drivability_inputs_audit.png" onclick="openLightbox(33)"><div class="fig-thumb-wrap"><img loading="lazy" src="04_ter27_full_lap_and_endurance/human_drivability_inputs_audit.png" alt="Human Drivability Inputs Audit"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Human Drivability Inputs Audit</div><div class="fig-sub">human_drivability_inputs_audit.png | 4471x2766 | 300 DPI | 757.2 KB</div></div></article><article class="fig-card" data-search="04 ter27 full lap ocp &amp; 22 km endurance simulation laptime surface mu vs temp laptime_surface_mu_vs_temp.png" onclick="openLightbox(34)"><div class="fig-thumb-wrap"><img loading="lazy" src="04_ter27_full_lap_and_endurance/laptime_surface_mu_vs_temp.png" alt="Laptime Surface mu Vs Temp"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Laptime Surface mu Vs Temp</div><div class="fig-sub">laptime_surface_mu_vs_temp.png | 4588x1775 | 300 DPI | 589.2 KB</div></div></article></div></section><section class="suite-section" id="suite-05"><div class="suite-header"><div><span class="suite-tag">05 | TIRES &amp; THERMAL</span><h2>Hoosier R20 / R25B Tire &amp; Thermal Envelope Analysis</h2><p class="suite-sub">Pacejka MF 6.2 load/camber/combined-slip sweeps, R20 vs R25B compound delta, PINN residual hook, and thermal grip window.</p></div><div class="data-chips"><a class="data-chip" href="05_tires_and_thermal_analysis/metrics.json" target="_blank">JSON: metrics.json</a></div></div><div class="kpi-row"><div class="kpi-pill status-pass"><div class="kpi-label">R20 Peak mu_y (800 N)</div><div class="kpi-val">2.122</div></div><div class="kpi-pill status-pass"><div class="kpi-label">R25B Peak mu_y (800 N)</div><div class="kpi-val">2.229 (+5.0%)</div></div><div class="kpi-pill status-pass"><div class="kpi-label">R25B 22 km Delta</div><div class="kpi-val">-28.37 s</div></div><div class="kpi-pill status-pass"><div class="kpi-label">Optimal Thermal Window</div><div class="kpi-val">70-85 C</div></div><div class="kpi-pill status-pass"><div class="kpi-label">PINN Residual Hook</div><div class="kpi-val">Loaded</div></div></div><div class="fig-grid"><article class="fig-card" data-search="05 hoosier r20 / r25b tire &amp; thermal envelope analysis tire camber and load sensitivity tire_camber_and_load_sensitivity.png" onclick="openLightbox(35)"><div class="fig-thumb-wrap"><img loading="lazy" src="05_tires_and_thermal_analysis/tire_camber_and_load_sensitivity.png" alt="Tire Camber And Load Sensitivity"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Tire Camber And Load Sensitivity</div><div class="fig-sub">tire_camber_and_load_sensitivity.png | 4471x1716 | 300 DPI | 560.1 KB</div></div></article><article class="fig-card" data-search="05 hoosier r20 / r25b tire &amp; thermal envelope analysis tire combined slip ellipses tire_combined_slip_ellipses.png" onclick="openLightbox(36)"><div class="fig-thumb-wrap"><img loading="lazy" src="05_tires_and_thermal_analysis/tire_combined_slip_ellipses.png" alt="Tire Combined Slip Ellipses"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Tire Combined Slip Ellipses</div><div class="fig-sub">tire_combined_slip_ellipses.png | 4471x1775 | 300 DPI | 486.4 KB</div></div></article><article class="fig-card" data-search="05 hoosier r20 / r25b tire &amp; thermal envelope analysis tire fy fx mz load sweep tire_fy_fx_mz_load_sweep.png" onclick="openLightbox(37)"><div class="fig-thumb-wrap"><img loading="lazy" src="05_tires_and_thermal_analysis/tire_fy_fx_mz_load_sweep.png" alt="Tire Fy Fx Mz Load Sweep"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Tire Fy Fx Mz Load Sweep</div><div class="fig-sub">tire_fy_fx_mz_load_sweep.png | 4916x1658 | 300 DPI | 594.8 KB</div></div></article><article class="fig-card" data-search="05 hoosier r20 / r25b tire &amp; thermal envelope analysis tire r20 vs r25b comparison tire_r20_vs_r25b_comparison.png" onclick="openLightbox(38)"><div class="fig-thumb-wrap"><img loading="lazy" src="05_tires_and_thermal_analysis/tire_r20_vs_r25b_comparison.png" alt="Tire R20 Vs R25B Comparison"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Tire R20 Vs R25B Comparison</div><div class="fig-sub">tire_r20_vs_r25b_comparison.png | 4910x1658 | 300 DPI | 483.3 KB</div></div></article><article class="fig-card" data-search="05 hoosier r20 / r25b tire &amp; thermal envelope analysis tire thermal grip window tire_thermal_grip_window.png" onclick="openLightbox(39)"><div class="fig-thumb-wrap"><img loading="lazy" src="05_tires_and_thermal_analysis/tire_thermal_grip_window.png" alt="Tire Thermal Grip Window"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Tire Thermal Grip Window</div><div class="fig-sub">tire_thermal_grip_window.png | 4471x1716 | 300 DPI | 461.0 KB</div></div></article></div></section><section class="suite-section" id="suite-06"><div class="suite-header"><div><span class="suite-tag">06 | KINEMATICS &amp; FEA</span><h2>3D Double-Wishbone Kinematics &amp; FEA Load Envelopes</h2><p class="suite-sub">Exact 3D loop closure (&lt; 1e-11 mm), camber/toe/roll-center/MR curves, Ackermann steering torque, FEA member loads, and rainflow fatigue.</p></div><div class="data-chips"><a class="data-chip" href="06_suspension_kinematics_and_fea/fea_hardpoint_loads.json" target="_blank">JSON: fea_hardpoint_loads.json</a><a class="data-chip" href="06_suspension_kinematics_and_fea/metrics.json" target="_blank">JSON: metrics.json</a><a class="data-chip" href="06_suspension_kinematics_and_fea/fea_hardpoint_loads.csv" target="_blank">CSV: fea_hardpoint_loads.csv</a></div></div><div class="kpi-row"><div class="kpi-pill status-pass"><div class="kpi-label">3D Closure Residual</div><div class="kpi-val">8.83e-12 mm</div></div><div class="kpi-pill status-pass"><div class="kpi-label">Front Camber Gain</div><div class="kpi-val">-38.2 deg/m</div></div><div class="kpi-pill status-pass"><div class="kpi-label">LLTD Mechanical</div><div class="kpi-val">40.13%</div></div><div class="kpi-pill status-pass"><div class="kpi-label">Max FEA Design Load</div><div class="kpi-val">9472 N (SF=1.5)</div></div><div class="kpi-pill status-pass"><div class="kpi-label">22 km Miner Damage</div><div class="kpi-val">1.62e-07</div></div></div><div class="fig-grid"><article class="fig-card" data-search="06 3d double-wishbone kinematics &amp; fea load envelopes fea hardpoint load envelopes 3d fea_hardpoint_load_envelopes_3d.png" onclick="openLightbox(40)"><div class="fig-thumb-wrap"><img loading="lazy" src="06_suspension_kinematics_and_fea/fea_hardpoint_load_envelopes_3d.png" alt="FEA Hardpoint Load Envelopes 3D"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">FEA Hardpoint Load Envelopes 3D</div><div class="fig-sub">fea_hardpoint_load_envelopes_3d.png | 4722x1833 | 300 DPI | 341.9 KB</div></div></article><article class="fig-card" data-search="06 3d double-wishbone kinematics &amp; fea load envelopes fea rainflow fatigue spectra fea_rainflow_fatigue_spectra.png" onclick="openLightbox(41)"><div class="fig-thumb-wrap"><img loading="lazy" src="06_suspension_kinematics_and_fea/fea_rainflow_fatigue_spectra.png" alt="FEA Rainflow Fatigue Spectra"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">FEA Rainflow Fatigue Spectra</div><div class="fig-sub">fea_rainflow_fatigue_spectra.png | 4588x1716 | 300 DPI | 364.5 KB</div></div></article><article class="fig-card" data-search="06 3d double-wishbone kinematics &amp; fea load envelopes kinematics ackermann and steering torque kinematics_ackermann_and_steering_torque.png" onclick="openLightbox(42)"><div class="fig-thumb-wrap"><img loading="lazy" src="06_suspension_kinematics_and_fea/kinematics_ackermann_and_steering_torque.png" alt="Kinematics Ackermann And Steering Torque"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Kinematics Ackermann And Steering Torque</div><div class="fig-sub">kinematics_ackermann_and_steering_torque.png | 4471x1716 | 300 DPI | 417.6 KB</div></div></article><article class="fig-card" data-search="06 3d double-wishbone kinematics &amp; fea load envelopes kinematics camber toe bumpsteer kinematics_camber_toe_bumpsteer.png" onclick="openLightbox(43)"><div class="fig-thumb-wrap"><img loading="lazy" src="06_suspension_kinematics_and_fea/kinematics_camber_toe_bumpsteer.png" alt="Kinematics Camber Toe Bumpsteer"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Kinematics Camber Toe Bumpsteer</div><div class="fig-sub">kinematics_camber_toe_bumpsteer.png | 4471x1716 | 300 DPI | 524.2 KB</div></div></article><article class="fig-card" data-search="06 3d double-wishbone kinematics &amp; fea load envelopes kinematics roll center and mr kinematics_roll_center_and_mr.png" onclick="openLightbox(44)"><div class="fig-thumb-wrap"><img loading="lazy" src="06_suspension_kinematics_and_fea/kinematics_roll_center_and_mr.png" alt="Kinematics Roll Center And MR"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Kinematics Roll Center And MR</div><div class="fig-sub">kinematics_roll_center_and_mr.png | 4910x1658 | 300 DPI | 479.5 KB</div></div></article></div></section><section class="suite-section" id="suite-07"><div class="suite-header"><div><span class="suite-tag">07 | DESIGN &amp; POINTS</span><h2>Design Tradeoffs &amp; Formula Student Points Optimizer</h2><p class="suite-sub">Mass vs aero CL*A/CD*A iso-laptime contours, CG/inertia sensitivity tornado chart, and FSG/FSS Endurance + Efficiency points Pareto.</p></div><div class="data-chips"><a class="data-chip" href="07_design_tradeoffs_and_fs_points/metrics.json" target="_blank">JSON: metrics.json</a><a class="data-chip" href="07_design_tradeoffs_and_fs_points/trackside_setup_optimization_report.json" target="_blank">JSON: trackside_setup_optimization_report.json</a></div></div><div class="kpi-row"><div class="kpi-pill status-pass"><div class="kpi-label">Mass Sensitivity</div><div class="kpi-val">0.388 s / 10 kg</div></div><div class="kpi-pill status-pass"><div class="kpi-label">+10% CL*A Equiv. Mass</div><div class="kpi-val">-14.71 kg</div></div><div class="kpi-pill status-pass"><div class="kpi-label">FSG Optimal Points</div><div class="kpi-val">282.69 pts</div></div><div class="kpi-pill status-pass"><div class="kpi-label">FSS Optimal Points</div><div class="kpi-val">335.42 pts</div></div><div class="kpi-pill status-pass"><div class="kpi-label">Optimal 22 km Energy</div><div class="kpi-val">3.12 kWh</div></div></div><div class="fig-grid"><article class="fig-card" data-search="07 design tradeoffs &amp; formula student points optimizer design sensitivity tornado chart design_sensitivity_tornado_chart.png" onclick="openLightbox(45)"><div class="fig-thumb-wrap"><img loading="lazy" src="07_design_tradeoffs_and_fs_points/design_sensitivity_tornado_chart.png" alt="Design Sensitivity Tornado Chart"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Design Sensitivity Tornado Chart</div><div class="fig-sub">design_sensitivity_tornado_chart.png | 4120x2066 | 300 DPI | 445.6 KB</div></div></article><article class="fig-card" data-search="07 design tradeoffs &amp; formula student points optimizer fs points optimizer endurance efficiency fs_points_optimizer_endurance_efficiency.png" onclick="openLightbox(46)"><div class="fig-thumb-wrap"><img loading="lazy" src="07_design_tradeoffs_and_fs_points/fs_points_optimizer_endurance_efficiency.png" alt="FS Points Optimizer Endurance Efficiency"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">FS Points Optimizer Endurance Efficiency</div><div class="fig-sub">fs_points_optimizer_endurance_efficiency.png | 4588x1775 | 300 DPI | 437.7 KB</div></div></article><article class="fig-card" data-search="07 design tradeoffs &amp; formula student points optimizer trackside setup event comparison trackside_setup_event_comparison.png" onclick="openLightbox(47)"><div class="fig-thumb-wrap"><img loading="lazy" src="07_design_tradeoffs_and_fs_points/trackside_setup_event_comparison.png" alt="Trackside Setup Event Comparison"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Trackside Setup Event Comparison</div><div class="fig-sub">trackside_setup_event_comparison.png | 5059x3058 | 300 DPI | 561.4 KB</div></div></article><article class="fig-card" data-search="07 design tradeoffs &amp; formula student points optimizer tradeoff mass vs aero contour tradeoff_mass_vs_aero_contour.png" onclick="openLightbox(48)"><div class="fig-thumb-wrap"><img loading="lazy" src="07_design_tradeoffs_and_fs_points/tradeoff_mass_vs_aero_contour.png" alt="Tradeoff Mass Vs Aero Contour"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Tradeoff Mass Vs Aero Contour</div><div class="fig-sub">tradeoff_mass_vs_aero_contour.png | 4665x1775 | 300 DPI | 673.7 KB</div></div></article></div></section><section class="suite-section" id="suite-08"><div class="suite-header"><div><span class="suite-tag">08 | SIL &amp; PARITY</span><h2>C99 SIL Codegen &amp; Godot-Python Parity Verification</h2><p class="suite-sub">CasADi C99 bit-exact SIL verification (0.0 abs error), STM32F405 168 MHz RT budget, and Godot 14-DOF vs Python physics parity matrix.</p></div><div class="data-chips"><a class="data-chip" href="08_codegen_sil_and_godot_parity/metrics.json" target="_blank">JSON: metrics.json</a></div></div><div class="kpi-row"><div class="kpi-pill status-pass"><div class="kpi-label">C99 SIL Max Error</div><div class="kpi-val">0.0e+00</div></div><div class="kpi-pill status-pass"><div class="kpi-label">Host C99 Latency (p50)</div><div class="kpi-val">3.63 us</div></div><div class="kpi-pill status-pass"><div class="kpi-label">STM32F405 CPU Load</div><div class="kpi-val">6.12% @ 200Hz</div></div><div class="kpi-pill status-pass"><div class="kpi-label">Godot 3D vs Py Mean Err</div><div class="kpi-val">0.529%</div></div><div class="kpi-pill status-pass"><div class="kpi-label">SIL &amp; Parity Gate</div><div class="kpi-val">PASS</div></div></div><div class="fig-grid"><article class="fig-card" data-search="08 c99 sil codegen &amp; godot-python parity verification godot vs python parity matrix godot_vs_python_parity_matrix.png" onclick="openLightbox(49)"><div class="fig-thumb-wrap"><img loading="lazy" src="08_codegen_sil_and_godot_parity/godot_vs_python_parity_matrix.png" alt="Godot Vs Python Parity Matrix"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Godot Vs Python Parity Matrix</div><div class="fig-sub">godot_vs_python_parity_matrix.png | 4972x1775 | 300 DPI | 515.3 KB</div></div></article><article class="fig-card" data-search="08 c99 sil codegen &amp; godot-python parity verification sil c99 accuracy and latency sil_c99_accuracy_and_latency.png" onclick="openLightbox(50)"><div class="fig-thumb-wrap"><img loading="lazy" src="08_codegen_sil_and_godot_parity/sil_c99_accuracy_and_latency.png" alt="SIL C99 Accuracy And Latency"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">SIL C99 Accuracy And Latency</div><div class="fig-sub">sil_c99_accuracy_and_latency.png | 4981x1658 | 300 DPI | 596.8 KB</div></div></article></div></section><section class="suite-section" id="suite-09"><div class="suite-header"><div><span class="suite-tag">09 | SKIDPAD DEEP-DIVE</span><h2>TeR27 4WD Skidpad Sub-5s Diagnostic Deep-Dive</h2><p class="suite-sub">Calibrated FSG_RUBBERED (TeR26 = 5.50 s anchor), SKIDPAD_MAX_ATTACK_V2 200 Hz telemetry, 4-wheel grip/slip/load/3D kinematics, crossover micro-analysis, and Godot 4 14-DOF parity.</p></div><div class="data-chips"><a class="data-chip" href="09_ter27_skidpad_deep_dive/godot_skidpad_parity_trace.json" target="_blank">JSON: godot_skidpad_parity_trace.json</a><a class="data-chip" href="09_ter27_skidpad_deep_dive/skidpad_deep_dive_metrics.json" target="_blank">JSON: skidpad_deep_dive_metrics.json</a></div></div><div class="kpi-row"><div class="kpi-pill status-pass"><div class="kpi-label">TeR26 RWD Anchor</div><div class="kpi-val">5.500 s</div></div><div class="kpi-pill status-pass"><div class="kpi-label">FSG R20 MAX_ATK V2</div><div class="kpi-val">4.703 s</div></div><div class="kpi-pill status-pass"><div class="kpi-label">FSG R25B MAX_ATK V2</div><div class="kpi-val">4.683 s</div></div><div class="kpi-pill status-pass"><div class="kpi-label">COLD_18C Min Clear</div><div class="kpi-val">0.393 m</div></div><div class="kpi-pill status-pass"><div class="kpi-label">Godot vs Py Circle Err</div><div class="kpi-val">12.48%</div></div></div><div class="fig-grid"><article class="fig-card" data-search="09 ter27 4wd skidpad sub-5s diagnostic deep-dive 01 skidpad time waterfall and benchmark 01_skidpad_time_waterfall_and_benchmark.png" onclick="openLightbox(51)"><div class="fig-thumb-wrap"><img loading="lazy" src="09_ter27_skidpad_deep_dive/01_skidpad_time_waterfall_and_benchmark.png" alt="01 Skidpad Time Waterfall And Benchmark"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">01 Skidpad Time Waterfall And Benchmark</div><div class="fig-sub">01_skidpad_time_waterfall_and_benchmark.png | 4764x2650 | 300 DPI | 414.1 KB</div></div></article><article class="fig-card" data-search="09 ter27 4wd skidpad sub-5s diagnostic deep-dive 02 skidpad trajectory and cone clearance 02_skidpad_trajectory_and_cone_clearance.png" onclick="openLightbox(52)"><div class="fig-thumb-wrap"><img loading="lazy" src="09_ter27_skidpad_deep_dive/02_skidpad_trajectory_and_cone_clearance.png" alt="02 Skidpad Trajectory And Cone Clearance"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">02 Skidpad Trajectory And Cone Clearance</div><div class="fig-sub">02_skidpad_trajectory_and_cone_clearance.png | 4822x2883 | 300 DPI | 1070.3 KB</div></div></article><article class="fig-card" data-search="09 ter27 4wd skidpad sub-5s diagnostic deep-dive 03 vehicle kinematics beta yaw lataccel 03_vehicle_kinematics_beta_yaw_lataccel.png" onclick="openLightbox(53)"><div class="fig-thumb-wrap"><img loading="lazy" src="09_ter27_skidpad_deep_dive/03_vehicle_kinematics_beta_yaw_lataccel.png" alt="03 Vehicle Kinematics Beta Yaw Lataccel"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">03 Vehicle Kinematics Beta Yaw Lataccel</div><div class="fig-sub">03_vehicle_kinematics_beta_yaw_lataccel.png | 4617x3174 | 300 DPI | 587.0 KB</div></div></article><article class="fig-card" data-search="09 ter27 4wd skidpad sub-5s diagnostic deep-dive 04 4wheel friction circles and utilization 04_4wheel_friction_circles_and_utilization.png" onclick="openLightbox(54)"><div class="fig-thumb-wrap"><img loading="lazy" src="09_ter27_skidpad_deep_dive/04_4wheel_friction_circles_and_utilization.png" alt="04 4wheel Friction Circles And Utilization"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">04 4wheel Friction Circles And Utilization</div><div class="fig-sub">04_4wheel_friction_circles_and_utilization.png | 4764x2883 | 300 DPI | 657.5 KB</div></div></article><article class="fig-card" data-search="09 ter27 4wd skidpad sub-5s diagnostic deep-dive 05 4wheel slip angles and long slip 05_4wheel_slip_angles_and_long_slip.png" onclick="openLightbox(55)"><div class="fig-thumb-wrap"><img loading="lazy" src="09_ter27_skidpad_deep_dive/05_4wheel_slip_angles_and_long_slip.png" alt="05 4wheel Slip Angles And Long Slip"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">05 4wheel Slip Angles And Long Slip</div><div class="fig-sub">05_4wheel_slip_angles_and_long_slip.png | 4705x2766 | 300 DPI | 512.6 KB</div></div></article><article class="fig-card" data-search="09 ter27 4wd skidpad sub-5s diagnostic deep-dive 06 4wheel vertical loads and weight transfer 06_4wheel_vertical_loads_and_weight_transfer.png" onclick="openLightbox(56)"><div class="fig-thumb-wrap"><img loading="lazy" src="09_ter27_skidpad_deep_dive/06_4wheel_vertical_loads_and_weight_transfer.png" alt="06 4wheel Vertical Loads And Weight Transfer"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">06 4wheel Vertical Loads And Weight Transfer</div><div class="fig-sub">06_4wheel_vertical_loads_and_weight_transfer.png | 4617x2941 | 300 DPI | 514.7 KB</div></div></article><article class="fig-card" data-search="09 ter27 4wd skidpad sub-5s diagnostic deep-dive 07 suspension 3d camber toe ackermann 07_suspension_3d_camber_toe_ackermann.png" onclick="openLightbox(57)"><div class="fig-thumb-wrap"><img loading="lazy" src="09_ter27_skidpad_deep_dive/07_suspension_3d_camber_toe_ackermann.png" alt="07 Suspension 3D Camber Toe Ackermann"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">07 Suspension 3D Camber Toe Ackermann</div><div class="fig-sub">07_suspension_3d_camber_toe_ackermann.png | 4705x2825 | 300 DPI | 567.9 KB</div></div></article><article class="fig-card" data-search="09 ter27 4wd skidpad sub-5s diagnostic deep-dive 08 controller mz decomposition and tracking 08_controller_mz_decomposition_and_tracking.png" onclick="openLightbox(58)"><div class="fig-thumb-wrap"><img loading="lazy" src="09_ter27_skidpad_deep_dive/08_controller_mz_decomposition_and_tracking.png" alt="08 Controller Mz Decomposition And Tracking"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">08 Controller Mz Decomposition And Tracking</div><div class="fig-sub">08_controller_mz_decomposition_and_tracking.png | 4617x2941 | 300 DPI | 527.5 KB</div></div></article><article class="fig-card" data-search="09 ter27 4wd skidpad sub-5s diagnostic deep-dive 09 4wheel torques power and torque fight 09_4wheel_torques_power_and_torque_fight.png" onclick="openLightbox(59)"><div class="fig-thumb-wrap"><img loading="lazy" src="09_ter27_skidpad_deep_dive/09_4wheel_torques_power_and_torque_fight.png" alt="09 4wheel Torques Power And Torque Fight"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">09 4wheel Torques Power And Torque Fight</div><div class="fig-sub">09_4wheel_torques_power_and_torque_fight.png | 4764x2883 | 300 DPI | 623.8 KB</div></div></article><article class="fig-card" data-search="09 ter27 4wd skidpad sub-5s diagnostic deep-dive 10 figure8 crossover micro analysis 10_figure8_crossover_micro_analysis.png" onclick="openLightbox(60)"><div class="fig-thumb-wrap"><img loading="lazy" src="09_ter27_skidpad_deep_dive/10_figure8_crossover_micro_analysis.png" alt="10 Figure8 Crossover Micro Analysis"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">10 Figure8 Crossover Micro Analysis</div><div class="fig-sub">10_figure8_crossover_micro_analysis.png | 4617x3174 | 300 DPI | 713.5 KB</div></div></article><article class="fig-card" data-search="09 ter27 4wd skidpad sub-5s diagnostic deep-dive 11 skidpad sensitivity setup and grip sweep 11_skidpad_sensitivity_setup_and_grip_sweep.png" onclick="openLightbox(61)"><div class="fig-thumb-wrap"><img loading="lazy" src="09_ter27_skidpad_deep_dive/11_skidpad_sensitivity_setup_and_grip_sweep.png" alt="11 Skidpad Sensitivity Setup And Grip Sweep"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">11 Skidpad Sensitivity Setup And Grip Sweep</div><div class="fig-sub">11_skidpad_sensitivity_setup_and_grip_sweep.png | 4823x2008 | 300 DPI | 680.4 KB</div></div></article><article class="fig-card" data-search="09 ter27 4wd skidpad sub-5s diagnostic deep-dive 12 python vs godot skidpad parity 12_python_vs_godot_skidpad_parity.png" onclick="openLightbox(62)"><div class="fig-thumb-wrap"><img loading="lazy" src="09_ter27_skidpad_deep_dive/12_python_vs_godot_skidpad_parity.png" alt="12 Python Vs Godot Skidpad Parity"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">12 Python Vs Godot Skidpad Parity</div><div class="fig-sub">12_python_vs_godot_skidpad_parity.png | 4705x2825 | 300 DPI | 750.6 KB</div></div></article></div></section><section class="suite-section" id="suite-10"><div class="suite-header"><div><span class="suite-tag">10 | DIL &amp; SENSOR REALISM</span><h2>TeR27 DiL Telemetry, 3D Braking Line &amp; Sensor Realism</h2><p class="suite-sub">SENSOR_IDEAL vs SENSOR_TRACK_REALISM (125 ms CAN accel latency, IMU noise/bias, EKF beta/Fz) across Skidpad, Autocross, and Trail-Braking/Slalom, plus CasADi sector deltas and 3D braking ramp elevation.</p></div><div class="data-chips"><a class="data-chip" href="10_ter27_dil_and_sensor_realism/dil_sensor_realism_metrics.json" target="_blank">JSON: dil_sensor_realism_metrics.json</a></div></div><div class="kpi-row"><div class="kpi-pill status-pass"><div class="kpi-label">CAN Accel Latency</div><div class="kpi-val">125.0 ms</div></div><div class="kpi-pill status-pass"><div class="kpi-label">Skidpad Real vs Ideal</div><div class="kpi-val">-0.068 s</div></div><div class="kpi-pill status-pass"><div class="kpi-label">Autocross Sector Delta</div><div class="kpi-val">+0.343 s</div></div><div class="kpi-pill status-pass"><div class="kpi-label">Slalom Beta RMS (Real)</div><div class="kpi-val">1.01 deg</div></div><div class="kpi-pill status-pass"><div class="kpi-label">3D Brake Ramp Peak +Y</div><div class="kpi-val">0.450 m</div></div></div><div class="fig-grid"><article class="fig-card" data-search="10 ter27 dil telemetry, 3d braking line &amp; sensor realism fig01 can latency ekf step and noise fig01_can_latency_ekf_step_and_noise.png" onclick="openLightbox(63)"><div class="fig-thumb-wrap"><img loading="lazy" src="10_ter27_dil_and_sensor_realism/fig01_can_latency_ekf_step_and_noise.png" alt="Fig01 CAN Latency EKF Step And Noise"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Fig01 CAN Latency EKF Step And Noise</div><div class="fig-sub">fig01_can_latency_ekf_step_and_noise.png | 4051x2475 | 300 DPI | 658.2 KB</div></div></article><article class="fig-card" data-search="10 ter27 dil telemetry, 3d braking line &amp; sensor realism fig02 skidpad and slalom sensor stress fig02_skidpad_and_slalom_sensor_stress.png" onclick="openLightbox(64)"><div class="fig-thumb-wrap"><img loading="lazy" src="10_ter27_dil_and_sensor_realism/fig02_skidpad_and_slalom_sensor_stress.png" alt="Fig02 Skidpad And Slalom Sensor Stress"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Fig02 Skidpad And Slalom Sensor Stress</div><div class="fig-sub">fig02_skidpad_and_slalom_sensor_stress.png | 4051x2475 | 300 DPI | 846.4 KB</div></div></article><article class="fig-card" data-search="10 ter27 dil telemetry, 3d braking line &amp; sensor realism fig03 autocross casadi sector deltas fig03_autocross_casadi_sector_deltas.png" onclick="openLightbox(65)"><div class="fig-thumb-wrap"><img loading="lazy" src="10_ter27_dil_and_sensor_realism/fig03_autocross_casadi_sector_deltas.png" alt="Fig03 Autocross CasADi Sector Deltas"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Fig03 Autocross CasADi Sector Deltas</div><div class="fig-sub">fig03_autocross_casadi_sector_deltas.png | 4051x2475 | 300 DPI | 847.2 KB</div></div></article><article class="fig-card" data-search="10 ter27 dil telemetry, 3d braking line &amp; sensor realism fig04 3d braking ramp and dil telemetry fig04_3d_braking_ramp_and_dil_telemetry.png" onclick="openLightbox(66)"><div class="fig-thumb-wrap"><img loading="lazy" src="10_ter27_dil_and_sensor_realism/fig04_3d_braking_ramp_and_dil_telemetry.png" alt="Fig04 3D Braking Ramp And DiL Telemetry"><span class="zoom-hint">CLICK TO ZOOM</span></div><div class="fig-meta"><div class="fig-title">Fig04 3D Braking Ramp And DiL Telemetry</div><div class="fig-sub">fig04_3d_braking_ramp_and_dil_telemetry.png | 4051x1658 | 300 DPI | 576.7 KB</div></div></article></div></section>
+</main>
+
+<div id="lightbox" class="lightbox" onclick="if(event.target===this) closeLightbox();">
+  <div class="lb-bar">
+    <div>
+      <div id="lbTitle" class="lb-title"></div>
+      <div id="lbSub" class="lb-sub"></div>
+    </div>
+    <div class="lb-controls">
+      <button class="lb-btn" onclick="stepLightbox(-1)">Prev [Left]</button>
+      <button class="lb-btn" onclick="toggleZoom()">Zoom</button>
+      <button class="lb-btn" onclick="stepLightbox(1)">Next [Right]</button>
+      <button class="lb-btn" onclick="closeLightbox()">Close [Esc]</button>
+    </div>
+  </div>
+  <div class="lb-stage">
+    <img id="lbImg" src="" alt="" onclick="toggleZoom()">
+  </div>
+</div>
+
+<script>
+const FIGURES = [{"src": "01_ter26_sim_to_real/fig01_timeseries_oos.png", "title": "[01] Fig01 Timeseries OOS", "meta": "01_ter26_sim_to_real/fig01_timeseries_oos.png | 4032x2941 px | 300 DPI | 1104.8 KB"}, {"src": "01_ter26_sim_to_real/fig02_bode_coherence.png", "title": "[01] Fig02 Bode Coherence", "meta": "01_ter26_sim_to_real/fig02_bode_coherence.png | 4032x2708 px | 300 DPI | 828.1 KB"}, {"src": "01_ter26_sim_to_real/fig03_understeer_gg.png", "title": "[01] Fig03 Understeer G-G", "meta": "01_ter26_sim_to_real/fig03_understeer_gg.png | 4471x1600 px | 300 DPI | 893.4 KB"}, {"src": "01_ter26_sim_to_real/fig04_regime_heatmap_residuals.png", "title": "[01] Fig04 Regime Heatmap Residuals", "meta": "01_ter26_sim_to_real/fig04_regime_heatmap_residuals.png | 4647x1658 px | 300 DPI | 384.7 KB"}, {"src": "01_ter26_sim_to_real/fig05_can_telemetry_audit.png", "title": "[01] Fig05 CAN Telemetry Audit", "meta": "01_ter26_sim_to_real/fig05_can_telemetry_audit.png | 4325x2766 px | 300 DPI | 617.4 KB"}, {"src": "02_ter27_maneuvers_and_handling/bode_yaw_and_lat_accel.png", "title": "[02] Bode Yaw And Lat Accel", "meta": "02_ter27_maneuvers_and_handling/bode_yaw_and_lat_accel.png | 4801x2941 px | 300 DPI | 775.5 KB"}, {"src": "02_ter27_maneuvers_and_handling/fs_acceleration_75m_telemetry.png", "title": "[02] FS Acceleration 75 m Telemetry", "meta": "02_ter27_maneuvers_and_handling/fs_acceleration_75m_telemetry.png | 4351x2650 px | 300 DPI | 662.5 KB"}, {"src": "02_ter27_maneuvers_and_handling/fs_skidpad_steady_state.png", "title": "[02] FS Skidpad Steady State", "meta": "02_ter27_maneuvers_and_handling/fs_skidpad_steady_state.png | 4350x2650 px | 300 DPI | 639.7 KB"}, {"src": "02_ter27_maneuvers_and_handling/ramp_steer_roll_and_load_transfer.png", "title": "[02] Ramp Steer Roll And Load Transfer", "meta": "02_ter27_maneuvers_and_handling/ramp_steer_roll_and_load_transfer.png | 4351x1658 px | 300 DPI | 437.8 KB"}, {"src": "02_ter27_maneuvers_and_handling/ramp_steer_understeer_gradient.png", "title": "[02] Ramp Steer Understeer Gradient", "meta": "02_ter27_maneuvers_and_handling/ramp_steer_understeer_gradient.png | 4351x2766 px | 300 DPI | 718.8 KB"}, {"src": "02_ter27_maneuvers_and_handling/slalom_and_dlc_traces.png", "title": "[02] Slalom And DLC Traces", "meta": "02_ter27_maneuvers_and_handling/slalom_and_dlc_traces.png | 4501x2650 px | 300 DPI | 689.5 KB"}, {"src": "02_ter27_maneuvers_and_handling/split_mu_behavior.png", "title": "[02] Split mu Behavior", "meta": "02_ter27_maneuvers_and_handling/split_mu_behavior.png | 4351x2591 px | 300 DPI | 595.5 KB"}, {"src": "02_ter27_maneuvers_and_handling/step_steer_metrics_comparison.png", "title": "[02] Step Steer Metrics Comparison", "meta": "02_ter27_maneuvers_and_handling/step_steer_metrics_comparison.png | 4352x2591 px | 300 DPI | 333.3 KB"}, {"src": "02_ter27_maneuvers_and_handling/step_steer_transient_response.png", "title": "[02] Step Steer Transient Response", "meta": "02_ter27_maneuvers_and_handling/step_steer_transient_response.png | 4351x2650 px | 300 DPI | 559.3 KB"}, {"src": "02_ter27_maneuvers_and_handling/trail_braking_stability_envelope.png", "title": "[02] Trail Braking Stability Envelope", "meta": "02_ter27_maneuvers_and_handling/trail_braking_stability_envelope.png | 4348x2650 px | 300 DPI | 729.8 KB"}, {"src": "02_ter27_maneuvers_and_handling/ymd_grip_comparison.png", "title": "[02] YMD Grip Comparison", "meta": "02_ter27_maneuvers_and_handling/ymd_grip_comparison.png | 4351x1716 px | 300 DPI | 938.5 KB"}, {"src": "02_ter27_maneuvers_and_handling/ymd_ter27_vs_ter26.png", "title": "[02] YMD TeR27 Vs TeR26", "meta": "02_ter27_maneuvers_and_handling/ymd_ter27_vs_ter26.png | 4501x1716 px | 300 DPI | 938.5 KB"}, {"src": "02_ter27_maneuvers_and_handling/ymd_velocity_sweep.png", "title": "[02] YMD Velocity Sweep", "meta": "02_ter27_maneuvers_and_handling/ymd_velocity_sweep.png | 4801x1658 px | 300 DPI | 866.3 KB"}, {"src": "03_ter27_torque_vectoring_and_maps/skidpad_4wheel_friction_circles.png", "title": "[03] Skidpad 4wheel Friction Circles", "meta": "03_ter27_torque_vectoring_and_maps/skidpad_4wheel_friction_circles.png | 4325x1891 px | 300 DPI | 232.6 KB"}, {"src": "03_ter27_torque_vectoring_and_maps/skidpad_figure8_crossover_dynamics.png", "title": "[03] Skidpad Figure8 Crossover Dynamics", "meta": "03_ter27_torque_vectoring_and_maps/skidpad_figure8_crossover_dynamics.png | 4179x2708 px | 300 DPI | 478.5 KB"}, {"src": "03_ter27_torque_vectoring_and_maps/skidpad_sub5_before_vs_after.png", "title": "[03] Skidpad Sub5 Before Vs After", "meta": "03_ter27_torque_vectoring_and_maps/skidpad_sub5_before_vs_after.png | 4617x2766 px | 300 DPI | 687.9 KB"}, {"src": "03_ter27_torque_vectoring_and_maps/tv_5_modes_radar_and_bars.png", "title": "[03] TV 5 Modes Radar And Bars", "meta": "03_ter27_torque_vectoring_and_maps/tv_5_modes_radar_and_bars.png | 4910x2200 px | 300 DPI | 878.9 KB"}, {"src": "03_ter27_torque_vectoring_and_maps/tv_architectures_laptime_drivability.png", "title": "[03] TV Architectures Laptime Drivability", "meta": "03_ter27_torque_vectoring_and_maps/tv_architectures_laptime_drivability.png | 4943x1775 px | 300 DPI | 424.6 KB"}, {"src": "03_ter27_torque_vectoring_and_maps/tv_control_maps_2d_surfaces.png", "title": "[03] TV Control Maps 2D Surfaces", "meta": "03_ter27_torque_vectoring_and_maps/tv_control_maps_2d_surfaces.png | 4651x3145 px | 300 DPI | 810.7 KB"}, {"src": "03_ter27_torque_vectoring_and_maps/tv_fault_injection_3wd_and_sensor_noise.png", "title": "[03] TV Fault Injection 3WD And Sensor Noise", "meta": "03_ter27_torque_vectoring_and_maps/tv_fault_injection_3wd_and_sensor_noise.png | 4998x2883 px | 300 DPI | 825.0 KB"}, {"src": "03_ter27_torque_vectoring_and_maps/tv_friction_circles_4wheels.png", "title": "[03] TV Friction Circles 4-Wheels", "meta": "03_ter27_torque_vectoring_and_maps/tv_friction_circles_4wheels.png | 4032x3437 px | 300 DPI | 975.0 KB"}, {"src": "03_ter27_torque_vectoring_and_maps/tv_regen_braking_yaw_stability.png", "title": "[03] TV Regen Braking Yaw Stability", "meta": "03_ter27_torque_vectoring_and_maps/tv_regen_braking_yaw_stability.png | 5042x1716 px | 300 DPI | 612.9 KB"}, {"src": "03_ter27_torque_vectoring_and_maps/tv_torque_distribution_4wheels_trace.png", "title": "[03] TV Torque Distribution 4-Wheels Trace", "meta": "03_ter27_torque_vectoring_and_maps/tv_torque_distribution_4wheels_trace.png | 4647x2941 px | 300 DPI | 799.4 KB"}, {"src": "03_ter27_torque_vectoring_and_maps/tv_torque_fight_and_power_envelope.png", "title": "[03] TV Torque Fight And Power Envelope", "meta": "03_ter27_torque_vectoring_and_maps/tv_torque_fight_and_power_envelope.png | 4910x2650 px | 300 DPI | 901.1 KB"}, {"src": "03_ter27_torque_vectoring_and_maps/tv_ymd_shift_open_vs_casadi.png", "title": "[03] TV YMD Shift Open Vs CasADi", "meta": "03_ter27_torque_vectoring_and_maps/tv_ymd_shift_open_vs_casadi.png | 5039x1775 px | 300 DPI | 817.5 KB"}, {"src": "04_ter27_full_lap_and_endurance/endurance_22km_evolution_and_voltage_sag.png", "title": "[04] Endurance 22 km Evolution And Voltage Sag", "meta": "04_ter27_full_lap_and_endurance/endurance_22km_evolution_and_voltage_sag.png | 4588x2883 px | 300 DPI | 847.0 KB"}, {"src": "04_ter27_full_lap_and_endurance/endurance_energy_pareto_curve.png", "title": "[04] Endurance Energy Pareto Curve", "meta": "04_ter27_full_lap_and_endurance/endurance_energy_pareto_curve.png | 4626x1716 px | 300 DPI | 504.5 KB"}, {"src": "04_ter27_full_lap_and_endurance/fsg_track_maps_telemetry_overlay.png", "title": "[04] FSG Track Maps Telemetry Overlay", "meta": "04_ter27_full_lap_and_endurance/fsg_track_maps_telemetry_overlay.png | 4530x3349 px | 300 DPI | 1486.4 KB"}, {"src": "04_ter27_full_lap_and_endurance/human_drivability_inputs_audit.png", "title": "[04] Human Drivability Inputs Audit", "meta": "04_ter27_full_lap_and_endurance/human_drivability_inputs_audit.png | 4471x2766 px | 300 DPI | 757.2 KB"}, {"src": "04_ter27_full_lap_and_endurance/laptime_surface_mu_vs_temp.png", "title": "[04] Laptime Surface mu Vs Temp", "meta": "04_ter27_full_lap_and_endurance/laptime_surface_mu_vs_temp.png | 4588x1775 px | 300 DPI | 589.2 KB"}, {"src": "05_tires_and_thermal_analysis/tire_camber_and_load_sensitivity.png", "title": "[05] Tire Camber And Load Sensitivity", "meta": "05_tires_and_thermal_analysis/tire_camber_and_load_sensitivity.png | 4471x1716 px | 300 DPI | 560.1 KB"}, {"src": "05_tires_and_thermal_analysis/tire_combined_slip_ellipses.png", "title": "[05] Tire Combined Slip Ellipses", "meta": "05_tires_and_thermal_analysis/tire_combined_slip_ellipses.png | 4471x1775 px | 300 DPI | 486.4 KB"}, {"src": "05_tires_and_thermal_analysis/tire_fy_fx_mz_load_sweep.png", "title": "[05] Tire Fy Fx Mz Load Sweep", "meta": "05_tires_and_thermal_analysis/tire_fy_fx_mz_load_sweep.png | 4916x1658 px | 300 DPI | 594.8 KB"}, {"src": "05_tires_and_thermal_analysis/tire_r20_vs_r25b_comparison.png", "title": "[05] Tire R20 Vs R25B Comparison", "meta": "05_tires_and_thermal_analysis/tire_r20_vs_r25b_comparison.png | 4910x1658 px | 300 DPI | 483.3 KB"}, {"src": "05_tires_and_thermal_analysis/tire_thermal_grip_window.png", "title": "[05] Tire Thermal Grip Window", "meta": "05_tires_and_thermal_analysis/tire_thermal_grip_window.png | 4471x1716 px | 300 DPI | 461.0 KB"}, {"src": "06_suspension_kinematics_and_fea/fea_hardpoint_load_envelopes_3d.png", "title": "[06] FEA Hardpoint Load Envelopes 3D", "meta": "06_suspension_kinematics_and_fea/fea_hardpoint_load_envelopes_3d.png | 4722x1833 px | 300 DPI | 341.9 KB"}, {"src": "06_suspension_kinematics_and_fea/fea_rainflow_fatigue_spectra.png", "title": "[06] FEA Rainflow Fatigue Spectra", "meta": "06_suspension_kinematics_and_fea/fea_rainflow_fatigue_spectra.png | 4588x1716 px | 300 DPI | 364.5 KB"}, {"src": "06_suspension_kinematics_and_fea/kinematics_ackermann_and_steering_torque.png", "title": "[06] Kinematics Ackermann And Steering Torque", "meta": "06_suspension_kinematics_and_fea/kinematics_ackermann_and_steering_torque.png | 4471x1716 px | 300 DPI | 417.6 KB"}, {"src": "06_suspension_kinematics_and_fea/kinematics_camber_toe_bumpsteer.png", "title": "[06] Kinematics Camber Toe Bumpsteer", "meta": "06_suspension_kinematics_and_fea/kinematics_camber_toe_bumpsteer.png | 4471x1716 px | 300 DPI | 524.2 KB"}, {"src": "06_suspension_kinematics_and_fea/kinematics_roll_center_and_mr.png", "title": "[06] Kinematics Roll Center And MR", "meta": "06_suspension_kinematics_and_fea/kinematics_roll_center_and_mr.png | 4910x1658 px | 300 DPI | 479.5 KB"}, {"src": "07_design_tradeoffs_and_fs_points/design_sensitivity_tornado_chart.png", "title": "[07] Design Sensitivity Tornado Chart", "meta": "07_design_tradeoffs_and_fs_points/design_sensitivity_tornado_chart.png | 4120x2066 px | 300 DPI | 445.6 KB"}, {"src": "07_design_tradeoffs_and_fs_points/fs_points_optimizer_endurance_efficiency.png", "title": "[07] FS Points Optimizer Endurance Efficiency", "meta": "07_design_tradeoffs_and_fs_points/fs_points_optimizer_endurance_efficiency.png | 4588x1775 px | 300 DPI | 437.7 KB"}, {"src": "07_design_tradeoffs_and_fs_points/trackside_setup_event_comparison.png", "title": "[07] Trackside Setup Event Comparison", "meta": "07_design_tradeoffs_and_fs_points/trackside_setup_event_comparison.png | 5059x3058 px | 300 DPI | 561.4 KB"}, {"src": "07_design_tradeoffs_and_fs_points/tradeoff_mass_vs_aero_contour.png", "title": "[07] Tradeoff Mass Vs Aero Contour", "meta": "07_design_tradeoffs_and_fs_points/tradeoff_mass_vs_aero_contour.png | 4665x1775 px | 300 DPI | 673.7 KB"}, {"src": "08_codegen_sil_and_godot_parity/godot_vs_python_parity_matrix.png", "title": "[08] Godot Vs Python Parity Matrix", "meta": "08_codegen_sil_and_godot_parity/godot_vs_python_parity_matrix.png | 4972x1775 px | 300 DPI | 515.3 KB"}, {"src": "08_codegen_sil_and_godot_parity/sil_c99_accuracy_and_latency.png", "title": "[08] SIL C99 Accuracy And Latency", "meta": "08_codegen_sil_and_godot_parity/sil_c99_accuracy_and_latency.png | 4981x1658 px | 300 DPI | 596.8 KB"}, {"src": "09_ter27_skidpad_deep_dive/01_skidpad_time_waterfall_and_benchmark.png", "title": "[09] 01 Skidpad Time Waterfall And Benchmark", "meta": "09_ter27_skidpad_deep_dive/01_skidpad_time_waterfall_and_benchmark.png | 4764x2650 px | 300 DPI | 414.1 KB"}, {"src": "09_ter27_skidpad_deep_dive/02_skidpad_trajectory_and_cone_clearance.png", "title": "[09] 02 Skidpad Trajectory And Cone Clearance", "meta": "09_ter27_skidpad_deep_dive/02_skidpad_trajectory_and_cone_clearance.png | 4822x2883 px | 300 DPI | 1070.3 KB"}, {"src": "09_ter27_skidpad_deep_dive/03_vehicle_kinematics_beta_yaw_lataccel.png", "title": "[09] 03 Vehicle Kinematics Beta Yaw Lataccel", "meta": "09_ter27_skidpad_deep_dive/03_vehicle_kinematics_beta_yaw_lataccel.png | 4617x3174 px | 300 DPI | 587.0 KB"}, {"src": "09_ter27_skidpad_deep_dive/04_4wheel_friction_circles_and_utilization.png", "title": "[09] 04 4wheel Friction Circles And Utilization", "meta": "09_ter27_skidpad_deep_dive/04_4wheel_friction_circles_and_utilization.png | 4764x2883 px | 300 DPI | 657.5 KB"}, {"src": "09_ter27_skidpad_deep_dive/05_4wheel_slip_angles_and_long_slip.png", "title": "[09] 05 4wheel Slip Angles And Long Slip", "meta": "09_ter27_skidpad_deep_dive/05_4wheel_slip_angles_and_long_slip.png | 4705x2766 px | 300 DPI | 512.6 KB"}, {"src": "09_ter27_skidpad_deep_dive/06_4wheel_vertical_loads_and_weight_transfer.png", "title": "[09] 06 4wheel Vertical Loads And Weight Transfer", "meta": "09_ter27_skidpad_deep_dive/06_4wheel_vertical_loads_and_weight_transfer.png | 4617x2941 px | 300 DPI | 514.7 KB"}, {"src": "09_ter27_skidpad_deep_dive/07_suspension_3d_camber_toe_ackermann.png", "title": "[09] 07 Suspension 3D Camber Toe Ackermann", "meta": "09_ter27_skidpad_deep_dive/07_suspension_3d_camber_toe_ackermann.png | 4705x2825 px | 300 DPI | 567.9 KB"}, {"src": "09_ter27_skidpad_deep_dive/08_controller_mz_decomposition_and_tracking.png", "title": "[09] 08 Controller Mz Decomposition And Tracking", "meta": "09_ter27_skidpad_deep_dive/08_controller_mz_decomposition_and_tracking.png | 4617x2941 px | 300 DPI | 527.5 KB"}, {"src": "09_ter27_skidpad_deep_dive/09_4wheel_torques_power_and_torque_fight.png", "title": "[09] 09 4wheel Torques Power And Torque Fight", "meta": "09_ter27_skidpad_deep_dive/09_4wheel_torques_power_and_torque_fight.png | 4764x2883 px | 300 DPI | 623.8 KB"}, {"src": "09_ter27_skidpad_deep_dive/10_figure8_crossover_micro_analysis.png", "title": "[09] 10 Figure8 Crossover Micro Analysis", "meta": "09_ter27_skidpad_deep_dive/10_figure8_crossover_micro_analysis.png | 4617x3174 px | 300 DPI | 713.5 KB"}, {"src": "09_ter27_skidpad_deep_dive/11_skidpad_sensitivity_setup_and_grip_sweep.png", "title": "[09] 11 Skidpad Sensitivity Setup And Grip Sweep", "meta": "09_ter27_skidpad_deep_dive/11_skidpad_sensitivity_setup_and_grip_sweep.png | 4823x2008 px | 300 DPI | 680.4 KB"}, {"src": "09_ter27_skidpad_deep_dive/12_python_vs_godot_skidpad_parity.png", "title": "[09] 12 Python Vs Godot Skidpad Parity", "meta": "09_ter27_skidpad_deep_dive/12_python_vs_godot_skidpad_parity.png | 4705x2825 px | 300 DPI | 750.6 KB"}, {"src": "10_ter27_dil_and_sensor_realism/fig01_can_latency_ekf_step_and_noise.png", "title": "[10] Fig01 CAN Latency EKF Step And Noise", "meta": "10_ter27_dil_and_sensor_realism/fig01_can_latency_ekf_step_and_noise.png | 4051x2475 px | 300 DPI | 658.2 KB"}, {"src": "10_ter27_dil_and_sensor_realism/fig02_skidpad_and_slalom_sensor_stress.png", "title": "[10] Fig02 Skidpad And Slalom Sensor Stress", "meta": "10_ter27_dil_and_sensor_realism/fig02_skidpad_and_slalom_sensor_stress.png | 4051x2475 px | 300 DPI | 846.4 KB"}, {"src": "10_ter27_dil_and_sensor_realism/fig03_autocross_casadi_sector_deltas.png", "title": "[10] Fig03 Autocross CasADi Sector Deltas", "meta": "10_ter27_dil_and_sensor_realism/fig03_autocross_casadi_sector_deltas.png | 4051x2475 px | 300 DPI | 847.2 KB"}, {"src": "10_ter27_dil_and_sensor_realism/fig04_3d_braking_ramp_and_dil_telemetry.png", "title": "[10] Fig04 3D Braking Ramp And DiL Telemetry", "meta": "10_ter27_dil_and_sensor_realism/fig04_3d_braking_ramp_and_dil_telemetry.png | 4051x1658 px | 300 DPI | 576.7 KB"}];
+let currentIdx = 0;
+
+function renderLightbox() {
+  const item = FIGURES[currentIdx];
+  const img = document.getElementById("lbImg");
+  img.classList.remove("zoomed");
+  img.src = item.src;
+  img.alt = item.title;
+  document.getElementById("lbTitle").textContent = item.title + " (" + (currentIdx + 1) + " / " + FIGURES.length + ")";
+  document.getElementById("lbSub").textContent = item.meta;
+}
+
+function openLightbox(idx) {
+  currentIdx = idx;
+  renderLightbox();
+  document.getElementById("lightbox").classList.add("open");
+}
+
+function closeLightbox() {
+  document.getElementById("lightbox").classList.remove("open");
+}
+
+function stepLightbox(delta) {
+  currentIdx = (currentIdx + delta + FIGURES.length) % FIGURES.length;
+  renderLightbox();
+}
+
+function toggleZoom() {
+  document.getElementById("lbImg").classList.toggle("zoomed");
+}
+
+document.addEventListener("keydown", function(ev) {
+  const lb = document.getElementById("lightbox");
+  if (!lb.classList.contains("open")) return;
+  if (ev.key === "Escape") closeLightbox();
+  else if (ev.key === "ArrowRight") stepLightbox(1);
+  else if (ev.key === "ArrowLeft") stepLightbox(-1);
+});
+
+document.getElementById("filterInput").addEventListener("input", function(ev) {
+  const q = ev.target.value.trim().toLowerCase();
+  document.querySelectorAll(".fig-card").forEach(function(card) {
+    const hay = card.getAttribute("data-search") || "";
+    card.style.display = (!q || hay.indexOf(q) !== -1) ? "" : "none";
+  });
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,174 @@
+{
+  "grip_profile_nominal": "FSG_REAL_TRACK",
+  "nominal_params": {
+    "env_mu_scale": 0.86,
+    "cl_a_eff_nominal": 3.84,
+    "cd_a_nominal": 1.5,
+    "I_zz_nominal_kgm2": 137.140916,
+    "mass_kg": 290.0
+  },
+  "csv_format": "SimUI TelemetryCsvLogger.gd (200 Hz)",
+  "estimator": "CasADi + IPOPT Multiple-Shooting MHE / NLS (ax, ay, wz residuals + exact trapezoidal yaw dynamics)",
+  "requirement_max_error_pct": 2.5,
+  "max_error_pct_across_all_cases": 2.299,
+  "overall_pass": true,
+  "cases": [
+    {
+      "case_id": "cold_track_high_aero_heavy_yaw",
+      "telemetry_meta": {
+        "n_samples": 4000,
+        "fs_hz": 200.0,
+        "duration_s": 20.0,
+        "noise_spec": {
+          "sigma_ax_mps2": 0.15,
+          "sigma_ay_mps2": 0.15,
+          "sigma_wz_rads": 0.008,
+          "sigma_vx_mps": 0.03,
+          "sigma_vy_mps": 0.05,
+          "vx_quant_mps": 0.02,
+          "delta_quant_deg": 0.05,
+          "sigma_T_nm": 0.5
+        }
+      },
+      "ground_truth": {
+        "mu_track_scale": 0.88,
+        "aero_scale": 1.12,
+        "I_zz_scale": 1.1,
+        "I_zz_kgm2": 150.855
+      },
+      "identification": {
+        "status": "Solve_Succeeded",
+        "iterations": 5,
+        "solve_time_s": 4.463,
+        "n_raw_samples_200hz": 4000,
+        "n_mhe_knots": 1000,
+        "estimated": {
+          "mu_track_scale": 0.87693,
+          "mu_track_eff": 0.75416,
+          "aero_scale": 1.12122,
+          "cl_a_eff": 4.3055,
+          "cd_a_eff": 1.6818,
+          "I_zz_scale": 1.10965,
+          "I_zz_kgm2": 152.1781
+        },
+        "residuals_rmse": {
+          "ax_mps2": 0.0744,
+          "ay_mps2": 0.0963,
+          "wz_rads": 0.00512
+        }
+      },
+      "error_pct": {
+        "mu_track": 0.349,
+        "aero_scale": 0.109,
+        "I_zz": 0.877,
+        "max_pct": 0.877
+      },
+      "pass_lt_2p5_pct": true
+    },
+    {
+      "case_id": "rubbered_in_low_aero_light_yaw",
+      "telemetry_meta": {
+        "n_samples": 4000,
+        "fs_hz": 200.0,
+        "duration_s": 20.0,
+        "noise_spec": {
+          "sigma_ax_mps2": 0.15,
+          "sigma_ay_mps2": 0.15,
+          "sigma_wz_rads": 0.008,
+          "sigma_vx_mps": 0.03,
+          "sigma_vy_mps": 0.05,
+          "vx_quant_mps": 0.02,
+          "delta_quant_deg": 0.05,
+          "sigma_T_nm": 0.5
+        }
+      },
+      "ground_truth": {
+        "mu_track_scale": 1.08,
+        "aero_scale": 0.85,
+        "I_zz_scale": 0.92,
+        "I_zz_kgm2": 126.1696
+      },
+      "identification": {
+        "status": "Solve_Succeeded",
+        "iterations": 5,
+        "solve_time_s": 4.081,
+        "n_raw_samples_200hz": 4000,
+        "n_mhe_knots": 1000,
+        "estimated": {
+          "mu_track_scale": 1.06839,
+          "mu_track_eff": 0.91881,
+          "aero_scale": 0.85261,
+          "cl_a_eff": 3.274,
+          "cd_a_eff": 1.2789,
+          "I_zz_scale": 0.94116,
+          "I_zz_kgm2": 129.0709
+        },
+        "residuals_rmse": {
+          "ax_mps2": 0.0747,
+          "ay_mps2": 0.094,
+          "wz_rads": 0.00452
+        }
+      },
+      "error_pct": {
+        "mu_track": 1.075,
+        "aero_scale": 0.307,
+        "I_zz": 2.299,
+        "max_pct": 2.299
+      },
+      "pass_lt_2p5_pct": true
+    },
+    {
+      "case_id": "damp_asphalt_nominal_aero_high_yaw",
+      "telemetry_meta": {
+        "n_samples": 4000,
+        "fs_hz": 200.0,
+        "duration_s": 20.0,
+        "noise_spec": {
+          "sigma_ax_mps2": 0.15,
+          "sigma_ay_mps2": 0.15,
+          "sigma_wz_rads": 0.008,
+          "sigma_vx_mps": 0.03,
+          "sigma_vy_mps": 0.05,
+          "vx_quant_mps": 0.02,
+          "delta_quant_deg": 0.05,
+          "sigma_T_nm": 0.5
+        }
+      },
+      "ground_truth": {
+        "mu_track_scale": 0.78,
+        "aero_scale": 1.0,
+        "I_zz_scale": 1.15,
+        "I_zz_kgm2": 157.7121
+      },
+      "identification": {
+        "status": "Solve_Succeeded",
+        "iterations": 5,
+        "solve_time_s": 4.212,
+        "n_raw_samples_200hz": 4000,
+        "n_mhe_knots": 1000,
+        "estimated": {
+          "mu_track_scale": 0.77744,
+          "mu_track_eff": 0.6686,
+          "aero_scale": 0.99854,
+          "cl_a_eff": 3.8344,
+          "cd_a_eff": 1.4978,
+          "I_zz_scale": 1.15203,
+          "I_zz_kgm2": 157.9904
+        },
+        "residuals_rmse": {
+          "ax_mps2": 0.0759,
+          "ay_mps2": 0.0947,
+          "wz_rads": 0.00501
+        }
+      },
+      "error_pct": {
+        "mu_track": 0.328,
+        "aero_scale": 0.146,
+        "I_zz": 0.176,
+        "max_pct": 0.328
+      },
+      "pass_lt_2p5_pct": true
+    }
+  ],
+  "total_runtime_s": 18.501
+}

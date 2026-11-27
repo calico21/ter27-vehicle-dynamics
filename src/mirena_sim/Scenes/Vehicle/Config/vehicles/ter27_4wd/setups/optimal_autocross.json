@@ -1,0 +1,32 @@
+{
+  "name": "optimal_autocross",
+  "vehicle_id": "ter27_4wd",
+  "event": "autocross",
+  "description": "CasADi-IPOPT co-optimized Autocross setup on FSG_RUBBERED (lambda_muy=0.57)",
+  "spring_rate_front_n_m": 35000.0,
+  "spring_rate_rear_n_m": 48000.0,
+  "arb_front_nm_rad": 4238.8,
+  "arb_rear_nm_rad": 5807.1,
+  "lltd": 0.4425,
+  "camber_front_deg": -0.645,
+  "camber_rear_deg": -1.093,
+  "toe_front_deg": 0.5,
+  "toe_rear_deg": 0.6,
+  "ride_height_front_m": 0.03189,
+  "ride_height_rear_m": 0.03811,
+  "rake_mm": 6.223,
+  "brake_bias": 0.78,
+  "tire_pressure_front_bar": 0.72,
+  "tire_pressure_rear_bar": 0.72,
+  "tv_map": "05_smc_pivot_4wd.json",
+  "power_limit_kw": 80.0,
+  "control_law_mode": "smc",
+  "casadi_metrics": {
+    "grip_profile": "FSG_RUBBERED",
+    "compound": "R25B",
+    "lambda_muy": 0.57,
+    "base_time_s": 67.5635,
+    "optimal_time_s": 67.1057,
+    "delta_time_s": -0.4578
+  }
+}

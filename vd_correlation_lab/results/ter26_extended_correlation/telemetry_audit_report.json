@@ -1,0 +1,601 @@
+{
+  "pipeline": "clean_ter26_telemetry.py",
+  "vehicle_id": "ter26_rwd",
+  "fs_hz": 200.0,
+  "dt_s": 0.005,
+  "iso_8855_convention": "+X forward, +Y left, +Z up, +wz left turn, +delta left steer",
+  "outputs": {
+    "parquet": "vd_correlation_lab/results/ter26_extended_correlation/ter26_clean_ground_truth.parquet",
+    "csv": "vd_correlation_lab/results/ter26_extended_correlation/ter26_clean_ground_truth.csv",
+    "n_rows": 356891,
+    "n_columns": 59,
+    "columns": [
+      "run_id",
+      "log_type",
+      "split",
+      "t_s",
+      "t_global_s",
+      "vx_ms",
+      "vx_ekf_ms",
+      "vy_ekf_ms",
+      "beta_ekf_rad",
+      "beta_ekf_deg",
+      "vx_wheel_ms",
+      "ax_ms2",
+      "ay_ms2",
+      "ax_cg_ms2",
+      "ay_cg_ms2",
+      "az_cg_ms2",
+      "ax_cg_raw_ms2",
+      "ay_cg_raw_ms2",
+      "wx_rads",
+      "wy_rads",
+      "wz_rads",
+      "wz_raw_rads",
+      "alpha_z_rads2",
+      "steer_raw_deg",
+      "steer_deg",
+      "delta_wheel_deg",
+      "delta_wheel_rad",
+      "delta_dot_rads",
+      "throttle",
+      "brake",
+      "bpps_bar_clean",
+      "trq_limit_nm",
+      "wheel_rpm_fl",
+      "wheel_rpm_fr",
+      "wheel_rpm_rl",
+      "wheel_rpm_rr",
+      "kappa_rl",
+      "kappa_rr",
+      "T_tire_fl_c",
+      "T_tire_fr_c",
+      "T_tire_rl_c",
+      "T_tire_rr_c",
+      "motor_temp_l_c",
+      "motor_temp_r_c",
+      "inv_temp_l_c",
+      "inv_temp_r_c",
+      "gps_lat",
+      "gps_lon",
+      "is_active",
+      "can_dropout",
+      "imu_spike",
+      "bpps_emi",
+      "neg_rpm_glitch",
+      "flag_wheelspin",
+      "flag_brake_lockup",
+      "flag_inner_wheel_lift",
+      "res_ax_ms2",
+      "res_ay_ms2",
+      "valid_for_sysid"
+    ],
+    "dtypes": {
+      "run_id": "object",
+      "log_type": "object",
+      "split": "object",
+      "t_s": "float64",
+      "t_global_s": "float64",
+      "vx_ms": "float64",
+      "vx_ekf_ms": "float64",
+      "vy_ekf_ms": "float64",
+      "beta_ekf_rad": "float64",
+      "beta_ekf_deg": "float64",
+      "vx_wheel_ms": "float64",
+      "ax_ms2": "float64",
+      "ay_ms2": "float64",
+      "ax_cg_ms2": "float64",
+      "ay_cg_ms2": "float64",
+      "az_cg_ms2": "float64",
+      "ax_cg_raw_ms2": "float64",
+      "ay_cg_raw_ms2": "float64",
+      "wx_rads": "float64",
+      "wy_rads": "float64",
+      "wz_rads": "float64",
+      "wz_raw_rads": "float64",
+      "alpha_z_rads2": "float64",
+      "steer_raw_deg": "float64",
+      "steer_deg": "float64",
+      "delta_wheel_deg": "float64",
+      "delta_wheel_rad": "float64",
+      "delta_dot_rads": "float64",
+      "throttle": "float64",
+      "brake": "float64",
+      "bpps_bar_clean": "float64",
+      "trq_limit_nm": "float64",
+      "wheel_rpm_fl": "float64",
+      "wheel_rpm_fr": "float64",
+      "wheel_rpm_rl": "float64",
+      "wheel_rpm_rr": "float64",
+      "kappa_rl": "float64",
+      "kappa_rr": "float64",
+      "T_tire_fl_c": "float64",
+      "T_tire_fr_c": "float64",
+      "T_tire_rl_c": "float64",
+      "T_tire_rr_c": "float64",
+      "motor_temp_l_c": "float64",
+      "motor_temp_r_c": "float64",
+      "inv_temp_l_c": "float64",
+      "inv_temp_r_c": "float64",
+      "gps_lat": "float64",
+      "gps_lon": "float64",
+      "is_active": "bool",
+      "can_dropout": "bool",
+      "imu_spike": "bool",
+      "bpps_emi": "bool",
+      "neg_rpm_glitch": "bool",
+      "flag_wheelspin": "bool",
+      "flag_brake_lockup": "bool",
+      "flag_inner_wheel_lift": "bool",
+      "res_ax_ms2": "float64",
+      "res_ay_ms2": "float64",
+      "valid_for_sysid": "bool"
+    }
+  },
+  "global_calibration": {
+    "dt_can_accel_ms": 125.0,
+    "dt_can_steer_ms": -50.0,
+    "steer_vs_wz_total_lag_ms": -72.5,
+    "imu_yaw_offset_deg": -20.682,
+    "imu_yaw_offset_nominal_deg": -22.25,
+    "i_steer_calibrated": 1.2963,
+    "i_steer_sensor_calib_nominal": 1.255,
+    "ter21_xlsx_nominal_steering_ratio": 101.6,
+    "i_steer_kinematic_r2": 0.9721,
+    "i_steer_note": "TER.dbc STEER.ANGLE is ECU pre-scaled in [-30, +30] deg. Calibrated ratio maps STEER.ANGLE to road-wheel angle delta_wheel via low-speed kinematics delta ~ atan(L*wz/vx), L=1.550 m (vs nominal 1.255 in sensor_calibration.json; TER21 FINAL.xlsx Steering Ratio = 101.6 is mechanical rack C-factor mm/rev)."
+  },
+  "ir_tire_temp_remap": {
+    "ir_tire_temps_present_in_logs": false,
+    "missing_can_ids": [
+      "0x3F0 (1008 flTemp)",
+      "0x3F4 (1012 frTemp)",
+      "0x3F8 (1016 rrTemp)",
+      "0x3FC (1020 rlTemp)"
+    ],
+    "note": "Zero IR tire temperature frames exist in the 5 October CAN logs (T_tire_*_c columns are NaN, never fabricated). The RL <-> FR remap is implemented in remap_ir_tire_temps() and verified against corner slip-energy kinematics below; motor/inverter/cooling temperatures ARE logged.",
+    "remap_rule": "raw_RL -> real_FR, raw_FR -> real_RL, FL/RR unchanged",
+    "before_remap_unit_check": {
+      "corr_raw_fr_vs_true_fr_energy": -0.5159,
+      "corr_raw_rl_vs_true_rl_energy": -0.5159
+    },
+    "after_remap_unit_check": {
+      "corr_fixed_fr_vs_true_fr_energy": 1.0,
+      "corr_fixed_rl_vs_true_rl_energy": 1.0
+    },
+    "remap_verified": true
+  },
+  "data_quality_summary": {
+    "total_samples_200hz": 356891,
+    "total_duration_s": 1784.45,
+    "raw_corrupted_samples_all": 1354,
+    "pct_raw_corrupted_all": 0.379,
+    "raw_corrupted_samples_track_active": 1133,
+    "pct_raw_corrupted_track_active": 0.492,
+    "wheel_event_samples_track_active": 32076,
+    "pct_wheel_events_track_active": 13.93,
+    "valid_for_sysid_samples": 197416,
+    "pct_valid_of_total": 55.32,
+    "pct_valid_of_track_active": 85.74,
+    "split_counts_valid_for_sysid": {
+      "calib_70": 138369,
+      "val_30": 59047
+    }
+  },
+  "sanity_gates": {
+    "all_gates_passed": true,
+    "rms_limit_ms2": 0.35,
+    "gates": {
+      "iso8855_wz_ay_positive": {
+        "passed": true,
+        "corr_wz_ay": 0.94249,
+        "positive_sign_fraction": 0.98212
+      },
+      "iso8855_delta_wz_positive": {
+        "passed": true,
+        "corr_delta_wz": 0.96741,
+        "positive_sign_fraction": 0.99448
+      },
+      "kinematic_residual_ax_rms": {
+        "passed": true,
+        "rms_ms2": 0.27344,
+        "p95_abs_ms2": 0.47052,
+        "mean_ms2": -0.04423,
+        "all_track_active_rms_ms2": 0.27432
+      },
+      "kinematic_residual_ay_rms": {
+        "passed": true,
+        "rms_ms2": 0.3264,
+        "p95_abs_ms2": 0.59693,
+        "mean_ms2": 0.19939,
+        "all_track_active_rms_ms2": 0.33773
+      },
+      "no_nan_on_valid_segments": {
+        "passed": true
+      },
+      "static_zero_velocity_bias": {
+        "passed": true,
+        "rest_ax_mean_ms2": 0.00724,
+        "rest_ay_mean_ms2": 0.00039,
+        "rest_wz_mean_rads": 2e-06
+      }
+    },
+    "coverage": {
+      "n_total_samples": 356891,
+      "n_track_samples": 336991,
+      "n_track_active_samples": 230263,
+      "n_valid_for_sysid": 197416,
+      "pct_valid_of_total": 55.32,
+      "pct_valid_of_track": 58.58,
+      "pct_valid_of_track_active": 85.74
+    },
+    "per_run": {
+      "20261003T172622.377Z": {
+        "n_samples": 78938,
+        "log_type": "track",
+        "n_valid_for_sysid": 32224,
+        "pct_valid_of_run": 40.82,
+        "rms_res_ax_ms2": 0.3567,
+        "rms_res_ay_ms2": 0.2094
+      },
+      "20261003T173334.167Z": {
+        "n_samples": 6520,
+        "log_type": "paddock_slow",
+        "n_valid_for_sysid": 0,
+        "pct_valid_of_run": 0.0,
+        "rms_res_ax_ms2": null,
+        "rms_res_ay_ms2": null
+      },
+      "20261003T173417.162Z": {
+        "n_samples": 13380,
+        "log_type": "paddock_slow",
+        "n_valid_for_sysid": 0,
+        "pct_valid_of_run": 0.0,
+        "rms_res_ax_ms2": null,
+        "rms_res_ay_ms2": null
+      },
+      "20261004T093600.310Z": {
+        "n_samples": 144456,
+        "log_type": "track",
+        "n_valid_for_sysid": 69444,
+        "pct_valid_of_run": 48.07,
+        "rms_res_ax_ms2": 0.2549,
+        "rms_res_ay_ms2": 0.3411
+      },
+      "20261004T095356.855Z": {
+        "n_samples": 113597,
+        "log_type": "track",
+        "n_valid_for_sysid": 95748,
+        "pct_valid_of_run": 84.29,
+        "rms_res_ax_ms2": 0.2535,
+        "rms_res_ay_ms2": 0.3471
+      }
+    }
+  },
+  "runs": [
+    {
+      "run_id": "20261003T172622.377Z",
+      "log_type": "track",
+      "duration_s": 394.69,
+      "n_samples_200hz": 78938,
+      "vx_max_ms": 19.61,
+      "vx_p95_ms": 15.75,
+      "ay_p95_ms2": 9.976,
+      "ir_tire_temps_present": false,
+      "static_imu_roll_deg": -5.659,
+      "static_imu_pitch_deg": 0.949,
+      "static_gyro_bias_rads": [
+        0.002633,
+        -0.003176,
+        0.002098
+      ],
+      "ay_scale_corr": 1.1217,
+      "ax_bias_dyn_ms2": 0.0,
+      "ay_bias_dyn_ms2": 0.0,
+      "steer_zero_raw_deg": -2.5729,
+      "steer_zero_wheel_deg": -1.9848,
+      "corruption_counts": {
+        "can_dropout_samples": 720,
+        "imu_spike_samples": 1,
+        "bpps_emi_samples": 718,
+        "neg_rpm_glitch_samples": 245,
+        "any_raw_corrupted_samples": 1085,
+        "pct_raw_corrupted": 1.374
+      },
+      "wheel_event_counts": {
+        "wheelspin_samples": 2433,
+        "brake_lockup_samples": 1261,
+        "inner_wheel_lift_samples": 2430
+      },
+      "stream_stats": {
+        "Accel.a_x": {
+          "n_raw": 78108,
+          "median_hz": 199.52,
+          "max_gap_s": 0.1274,
+          "n_dropout_gaps": 27,
+          "dropout_samples": 640
+        },
+        "AngRate.Yaw_Rate_z": {
+          "n_raw": 78174,
+          "median_hz": 199.4,
+          "max_gap_s": 0.1451,
+          "n_dropout_gaps": 27,
+          "dropout_samples": 666
+        },
+        "WheelInfo.rlRPM": {
+          "n_raw": 39098,
+          "median_hz": 100.0,
+          "max_gap_s": 0.1433,
+          "n_dropout_gaps": 27,
+          "dropout_samples": 693
+        },
+        "STEER.ANGLE": {
+          "n_raw": 48781,
+          "median_hz": 125.02,
+          "max_gap_s": 0.16,
+          "n_dropout_gaps": 27,
+          "dropout_samples": 704
+        }
+      }
+    },
+    {
+      "run_id": "20261003T173334.167Z",
+      "log_type": "paddock_slow",
+      "duration_s": 32.599,
+      "n_samples_200hz": 6520,
+      "vx_max_ms": 0.116,
+      "vx_p95_ms": 0.013,
+      "ay_p95_ms2": 0.066,
+      "ir_tire_temps_present": false,
+      "static_imu_roll_deg": -5.606,
+      "static_imu_pitch_deg": 0.476,
+      "static_gyro_bias_rads": [
+        0.002651,
+        -0.003186,
+        0.000829
+      ],
+      "ay_scale_corr": 1.0,
+      "ax_bias_dyn_ms2": 0.0,
+      "ay_bias_dyn_ms2": 0.0,
+      "steer_zero_raw_deg": -2.8484,
+      "steer_zero_wheel_deg": -2.1974,
+      "corruption_counts": {
+        "can_dropout_samples": 2,
+        "imu_spike_samples": 0,
+        "bpps_emi_samples": 0,
+        "neg_rpm_glitch_samples": 23,
+        "any_raw_corrupted_samples": 25,
+        "pct_raw_corrupted": 0.383
+      },
+      "wheel_event_counts": {
+        "wheelspin_samples": 0,
+        "brake_lockup_samples": 0,
+        "inner_wheel_lift_samples": 0
+      },
+      "stream_stats": {
+        "Accel.a_x": {
+          "n_raw": 6490,
+          "median_hz": 200.36,
+          "max_gap_s": 0.0102,
+          "n_dropout_gaps": 0,
+          "dropout_samples": 1
+        },
+        "AngRate.Yaw_Rate_z": {
+          "n_raw": 6520,
+          "median_hz": 198.65,
+          "max_gap_s": 0.0062,
+          "n_dropout_gaps": 0,
+          "dropout_samples": 1
+        },
+        "WheelInfo.rlRPM": {
+          "n_raw": 3260,
+          "median_hz": 100.01,
+          "max_gap_s": 0.0109,
+          "n_dropout_gaps": 0,
+          "dropout_samples": 2
+        },
+        "STEER.ANGLE": {
+          "n_raw": 4074,
+          "median_hz": 125.02,
+          "max_gap_s": 0.016,
+          "n_dropout_gaps": 0,
+          "dropout_samples": 1
+        }
+      }
+    },
+    {
+      "run_id": "20261003T173417.162Z",
+      "log_type": "paddock_slow",
+      "duration_s": 66.898,
+      "n_samples_200hz": 13380,
+      "vx_max_ms": 5.245,
+      "vx_p95_ms": 4.888,
+      "ay_p95_ms2": 0.602,
+      "ir_tire_temps_present": false,
+      "static_imu_roll_deg": -5.646,
+      "static_imu_pitch_deg": 0.51,
+      "static_gyro_bias_rads": [
+        0.002733,
+        -0.003202,
+        0.000632
+      ],
+      "ay_scale_corr": 1.0,
+      "ax_bias_dyn_ms2": 0.0,
+      "ay_bias_dyn_ms2": 0.0,
+      "steer_zero_raw_deg": -2.7615,
+      "steer_zero_wheel_deg": -2.1303,
+      "corruption_counts": {
+        "can_dropout_samples": 3,
+        "imu_spike_samples": 0,
+        "bpps_emi_samples": 14,
+        "neg_rpm_glitch_samples": 19,
+        "any_raw_corrupted_samples": 36,
+        "pct_raw_corrupted": 0.269
+      },
+      "wheel_event_counts": {
+        "wheelspin_samples": 55,
+        "brake_lockup_samples": 0,
+        "inner_wheel_lift_samples": 0
+      },
+      "stream_stats": {
+        "Accel.a_x": {
+          "n_raw": 13328,
+          "median_hz": 200.36,
+          "max_gap_s": 0.0104,
+          "n_dropout_gaps": 0,
+          "dropout_samples": 1
+        },
+        "AngRate.Yaw_Rate_z": {
+          "n_raw": 13379,
+          "median_hz": 200.12,
+          "max_gap_s": 0.0099,
+          "n_dropout_gaps": 0,
+          "dropout_samples": 1
+        },
+        "WheelInfo.rlRPM": {
+          "n_raw": 6690,
+          "median_hz": 100.01,
+          "max_gap_s": 0.011,
+          "n_dropout_gaps": 0,
+          "dropout_samples": 2
+        },
+        "STEER.ANGLE": {
+          "n_raw": 8361,
+          "median_hz": 125.02,
+          "max_gap_s": 0.016,
+          "n_dropout_gaps": 0,
+          "dropout_samples": 3
+        }
+      }
+    },
+    {
+      "run_id": "20261004T093600.310Z",
+      "log_type": "track",
+      "duration_s": 722.275,
+      "n_samples_200hz": 144456,
+      "vx_max_ms": 18.509,
+      "vx_p95_ms": 14.448,
+      "ay_p95_ms2": 9.897,
+      "ir_tire_temps_present": false,
+      "static_imu_roll_deg": -5.152,
+      "static_imu_pitch_deg": 1.124,
+      "static_gyro_bias_rads": [
+        0.001047,
+        -0.001158,
+        0.000596
+      ],
+      "ay_scale_corr": 1.0498,
+      "ax_bias_dyn_ms2": 0.0,
+      "ay_bias_dyn_ms2": 0.0,
+      "steer_zero_raw_deg": -2.3603,
+      "steer_zero_wheel_deg": -1.8208,
+      "corruption_counts": {
+        "can_dropout_samples": 3,
+        "imu_spike_samples": 0,
+        "bpps_emi_samples": 0,
+        "neg_rpm_glitch_samples": 179,
+        "any_raw_corrupted_samples": 182,
+        "pct_raw_corrupted": 0.126
+      },
+      "wheel_event_counts": {
+        "wheelspin_samples": 5367,
+        "brake_lockup_samples": 3158,
+        "inner_wheel_lift_samples": 8329
+      },
+      "stream_stats": {
+        "Accel.a_x": {
+          "n_raw": 143986,
+          "median_hz": 199.6,
+          "max_gap_s": 0.0108,
+          "n_dropout_gaps": 0,
+          "dropout_samples": 2
+        },
+        "AngRate.Yaw_Rate_z": {
+          "n_raw": 143945,
+          "median_hz": 200.08,
+          "max_gap_s": 0.0151,
+          "n_dropout_gaps": 0,
+          "dropout_samples": 2
+        },
+        "WheelInfo.rlRPM": {
+          "n_raw": 71987,
+          "median_hz": 99.95,
+          "max_gap_s": 0.0302,
+          "n_dropout_gaps": 0,
+          "dropout_samples": 3
+        },
+        "STEER.ANGLE": {
+          "n_raw": 89991,
+          "median_hz": 124.95,
+          "max_gap_s": 0.024,
+          "n_dropout_gaps": 0,
+          "dropout_samples": 2
+        }
+      }
+    },
+    {
+      "run_id": "20261004T095356.855Z",
+      "log_type": "track",
+      "duration_s": 567.984,
+      "n_samples_200hz": 113597,
+      "vx_max_ms": 18.447,
+      "vx_p95_ms": 15.602,
+      "ay_p95_ms2": 11.637,
+      "ir_tire_temps_present": false,
+      "static_imu_roll_deg": -5.485,
+      "static_imu_pitch_deg": 1.104,
+      "static_gyro_bias_rads": [
+        0.001564,
+        -0.00175,
+        0.000895
+      ],
+      "ay_scale_corr": 1.0449,
+      "ax_bias_dyn_ms2": 0.0,
+      "ay_bias_dyn_ms2": 0.0,
+      "steer_zero_raw_deg": -2.3097,
+      "steer_zero_wheel_deg": -1.7818,
+      "corruption_counts": {
+        "can_dropout_samples": 3,
+        "imu_spike_samples": 0,
+        "bpps_emi_samples": 0,
+        "neg_rpm_glitch_samples": 23,
+        "any_raw_corrupted_samples": 26,
+        "pct_raw_corrupted": 0.023
+      },
+      "wheel_event_counts": {
+        "wheelspin_samples": 6492,
+        "brake_lockup_samples": 2210,
+        "inner_wheel_lift_samples": 12039
+      },
+      "stream_stats": {
+        "Accel.a_x": {
+          "n_raw": 113229,
+          "median_hz": 199.24,
+          "max_gap_s": 0.0105,
+          "n_dropout_gaps": 0,
+          "dropout_samples": 1
+        },
+        "AngRate.Yaw_Rate_z": {
+          "n_raw": 113248,
+          "median_hz": 200.12,
+          "max_gap_s": 0.0105,
+          "n_dropout_gaps": 0,
+          "dropout_samples": 1
+        },
+        "WheelInfo.rlRPM": {
+          "n_raw": 56606,
+          "median_hz": 99.95,
+          "max_gap_s": 0.0395,
+          "n_dropout_gaps": 0,
+          "dropout_samples": 2
+        },
+        "STEER.ANGLE": {
+          "n_raw": 70970,
+          "median_hz": 124.95,
+          "max_gap_s": 0.0085,
+          "n_dropout_gaps": 0,
+          "dropout_samples": 2
+        }
+      }
+    }
+  ]
+}

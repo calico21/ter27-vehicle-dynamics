@@ -1,0 +1,1 @@
+t_s,lap,s_m,x,y,yaw_deg,vx,vy,ax,ay,wz,beta_deg,steer_deg,throttle,brake,p_dc_kw,e_net_kj,e_reg_kj,ey_race_m,ey_base_m,fx0,fx1,fx2,fx3,fy0,fy1,fy2,fy3,fz0,fz1,fz2,fz3,dz0,dz1,dz2,dz3,fspr0,fspr1,fspr2,fspr3,fdmp0,fdmp1,fdmp2,fdmp3,farb0,farb1,farb2,farb3,t_surf_max_c,disc_max_c,soc,v_dc,ekf_vx,mu_hat_min,rls0,mz_int,curb_act,limp_act

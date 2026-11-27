@@ -1,12 +1,12 @@
 class_name BrakeModel
 extends RefCounted
 
-## Brakes Model for Mirena Dynamics
-## Computes per-wheel mechanical friction brake torques, EBS distribution,
-## regenerative brake blending, and 1-node AP Racing RQ3 disc thermal model.
+## brakes model for mirena dynamics
+## computes per-wheel mechanical friction brake torques, ebs distribution,
+## regenerative brake blending, and 1-node ap racing rq3 disc thermal model
 
-const VehicleConfig = preload("../Core/VehicleConfig.gd")
-const VehicleInputs = preload("../Core/VehicleInputs.gd")
+const VehicleConfig = preload("../../Config/VehicleConfig.gd")
+const VehicleInputs = preload("../../Inputs/VehicleInputs.gd")
 
 const DEFAULT_BRAKE_MU: float = 1.30
 const DEFAULT_BRAKE_BIAS_FRONT: float = 0.58
@@ -20,7 +20,7 @@ const DEFAULT_DISC_CONV_BASE_W_K: float = 12.0
 const DEFAULT_DISC_CONV_SPEED_COEFF: float = 1.8
 
 
-## Per-wheel thermal and blended braking state [FL, FR, RL, RR].
+## per-wheel thermal and blended braking state [fl, fr, rl, rr]
 class BrakeState extends RefCounted:
 	var disc_temp: Array[float] = [40.0, 40.0, 40.0, 40.0]
 	var hydraulic_torques: Array[float] = [0.0, 0.0, 0.0, 0.0]
@@ -32,7 +32,7 @@ class BrakeState extends RefCounted:
 	func _init(ambient_c: float = 40.0) -> void:
 		reset(ambient_c)
 
-	## Resets disc temperatures, torques, and pad friction to resting defaults.
+	## resets disc temperatures, torques, and pad friction to resting defaults
 	func reset(ambient_c: float = 40.0) -> void:
 		for i in range(4):
 			disc_temp[i] = ambient_c
@@ -65,7 +65,7 @@ static func _cfg_bool(config: Variant, prop: String, default_val: bool) -> bool:
 	return default_val
 
 
-## Computes per-wheel friction brake torques [FL, FR, RL, RR] in Nm.
+## computes per-wheel friction brake torques [fl, fr, rl, rr] in nm
 static func compute_brake_torques(inputs: VehicleInputs, config: VehicleConfig) -> Array[float]:
 	var brake_torques: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	
@@ -92,8 +92,8 @@ static func compute_brake_torques(inputs: VehicleInputs, config: VehicleConfig) 
 	return brake_torques
 
 
-## AP Racing RQ3 pad friction multiplier vs disc temperature (deg C).
-## Optimal window [120, 500] C -> 1.0, cold (40 C) -> 0.94, fade >520 C -> ~0.78 at 650 C.
+## ap racing rq3 pad friction multiplier vs disc temperature (deg c)
+## optimal window [120, 500] c -> 1.0, cold (40 c) -> 0.94, fade >520 c -> ~0.78 at 650 c
 static func compute_pad_mu_scale(temp_c: float) -> float:
 	if temp_c <= 40.0:
 		return 0.94
@@ -104,7 +104,7 @@ static func compute_pad_mu_scale(temp_c: float) -> float:
 	return lerpf(1.0, 0.78, smoothstep(520.0, 650.0, temp_c))
 
 
-## Computes motor speed taper factor [0, 1] for regenerative torque capability.
+## computes motor speed taper factor [0, 1] for regenerative torque capability
 static func _compute_motor_taper_scale(wheel_omega: float, config: Variant) -> float:
 	var max_rpm: float = _cfg_float(config, "motor_max_rpm", 22000.0)
 	if max_rpm <= 0.0:
@@ -121,7 +121,7 @@ static func _compute_motor_taper_scale(wheel_omega: float, config: Variant) -> f
 	return 1.0 - (omega_motor - omega_taper_start) / maxf(omega_max - omega_taper_start, 1e-5)
 
 
-## Reads HV accumulator SOC safely when hv_state is attached.
+## reads hv accumulator soc safely when hv_state is attached
 static func _compute_soc_regen_scale(hv_state: Variant) -> float:
 	if hv_state == null:
 		return 1.0
@@ -131,11 +131,11 @@ static func _compute_soc_regen_scale(hv_state: Variant) -> float:
 	var soc: float = float(soc_val)
 	if soc < 0.995:
 		return 1.0
-	# Smoothly derate regen once SOC >= 0.995 to prevent cell overcharge.
+	# smoothly derate regen once soc >= 0.995 to prevent cell overcharge
 	return clampf((0.998 - soc) / 0.008, 0.0, 1.0)
 
 
-## Computes series-blended regenerative + hydraulic braking torques and updates 1-node disc thermal state.
+## computes series-blended regenerative + hydraulic braking torques and updates 1-node disc thermal state
 static func compute_blended_braking(
 	inputs: Variant,
 	config: Variant,

@@ -1,0 +1,62 @@
+{
+  "grip_profile": "FSG_REAL_TRACK",
+  "compiler": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "compile_flags": "-std=c99 -O3 -lm",
+  "compile_time_s": 1.524,
+  "generated_files": {
+    "c_source": "vd_correlation_lab/results/casadi_suite/ter27_casadi_eval.c",
+    "h_header": "vd_correlation_lab/results/casadi_suite/ter27_casadi_eval.h",
+    "c_size_kb": 381.96,
+    "h_size_kb": 2.6
+  },
+  "verification": {
+    "n_operating_points": 64,
+    "torque_eval_max_abs_err": 0.0,
+    "torque_eval_max_rel_err": 0.0,
+    "torque_eval_per_output_max_abs_err": {
+      "Fx_tot": 0.0,
+      "Fy_tot": 0.0,
+      "Mz_tot": 0.0,
+      "P_dc_kw": 0.0,
+      "tire_util_4": 0.0,
+      "J_T": 0.0
+    },
+    "kappa_eval_max_abs_err": 0.0,
+    "kappa_eval_max_rel_err": 0.0,
+    "kappa_eval_per_output_max_abs_err": {
+      "Fx_tot": 0.0,
+      "Fy_tot": 0.0,
+      "Mz_tot": 0.0,
+      "P_dc_kw": 0.0,
+      "tire_util_4": 0.0,
+      "T_motor_4": 0.0,
+      "J_T_ift": 0.0
+    },
+    "accuracy_target": 1e-09,
+    "accuracy_pass": true
+  },
+  "latency_us": {
+    "bench_iters": 5000,
+    "ter27_eval_torque": {
+      "mean_us": 12.5838,
+      "p50_us": 12.309,
+      "p95_us": 14.747,
+      "p99_us": 19.178,
+      "work_buffer_doubles": 0,
+      "work_buffer_bytes": 0
+    },
+    "ter27_eval_kappa": {
+      "mean_us": 1.4674,
+      "p50_us": 1.422,
+      "p95_us": 1.674,
+      "p99_us": 1.983,
+      "work_buffer_doubles": 0,
+      "work_buffer_bytes": 0
+    },
+    "p99_target_us": 50.0,
+    "latency_pass": true,
+    "stm32f405_200hz_budget_us": 5000.0
+  },
+  "overall_pass": true,
+  "total_runtime_s": 1.863
+}
