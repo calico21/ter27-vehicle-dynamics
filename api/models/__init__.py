@@ -14,6 +14,8 @@ from api.models.simulation import (
     SimulationJobStatusResponse,
     SimulationModeName,
     SimulationRunRequest,
+    SuspensionModeName,
+    VehicleModelName,
 )
 from api.models.telemetry import (
     DilDeltaTelemetry,
@@ -40,6 +42,14 @@ from api.models.tires import (
     TireEvaluateRequest,
     TireEvaluateResponse,
 )
+from api.models.trackside import (
+    PitBoxAdjustmentSchema,
+    SysIdSummarySchema,
+    TracksideAnalyzeRequest,
+    TracksideAnalyzeResponse,
+    WhatIfSimulateRequest,
+    WhatIfSimulateResponse,
+)
 from api.models.validation import (
     VaultCatalogResponse,
     VaultFigure,
@@ -49,8 +59,13 @@ from api.models.validation import (
 from api.models.vehicle import (
     CornerHardpoints3D,
     GripProfileSpec,
+    ModelSuspensionCombination,
+    ModelsCatalogConstraints,
+    ModelsCatalogResponse,
+    SuspensionModeSpec,
     SuspensionOverview,
     ValidationStatusSummary,
+    VehicleModelSpec,
     VehicleOverviewResponse,
     VehiclePhysicalParams,
 )
@@ -67,7 +82,16 @@ __all__ = [
     "GripProfileSpec",
     "HealthResponse",
     "HvPowerTelemetry",
+    "ModelSuspensionCombination",
+    "ModelsCatalogConstraints",
+    "ModelsCatalogResponse",
+    "PitBoxAdjustmentSchema",
     "SensorProfileName",
+    "SysIdSummarySchema",
+    "TracksideAnalyzeRequest",
+    "TracksideAnalyzeResponse",
+    "WhatIfSimulateRequest",
+    "WhatIfSimulateResponse",
     "SessionABComparisonResponse",
     "SessionKindName",
     "SessionsListResponse",
@@ -80,6 +104,8 @@ __all__ = [
     "SimulationJobStatusResponse",
     "SimulationModeName",
     "SimulationRunRequest",
+    "SuspensionModeName",
+    "SuspensionModeSpec",
     "SuspensionOverview",
     "TelemetryFrame",
     "TelemetrySource",
@@ -93,6 +119,8 @@ __all__ = [
     "VaultFigure",
     "VaultKpi",
     "VaultSuite",
+    "VehicleModelName",
+    "VehicleModelSpec",
     "VehicleOverviewResponse",
     "VehiclePhysicalParams",
     "VehicleState14Dof",

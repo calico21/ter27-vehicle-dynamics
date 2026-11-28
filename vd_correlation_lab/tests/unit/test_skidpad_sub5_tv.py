@@ -92,10 +92,13 @@ def test_skidpad_oracle_report_valid() -> None:
         assert int(row["hv_violations"]) == 0, f"{key} hv_violations={row['hv_violations']}"
         assert -25.05 <= float(row["p_dc_stat_kw"]) <= 80.05
 
-    # TeR27 4WD < 5.00 s in calibrated FSG_RUBBERED (R20 and R25B)
+    # TeR27 4WD < 5.00 s in calibrated FSG_RUBBERED (R20 and R25B) and <= 4.64 s on R25B
     for key in ["FSG_RUBBERED__R20", "FSG_RUBBERED__R25B"]:
         t_val = _extract_time_s(summary[key])
         assert t_val < 5.00, f"Oracle {key} time {t_val:.4f} s >= 5.00 s"
+    assert _extract_time_s(summary["FSG_RUBBERED__R25B"]) <= 4.64, (
+        "FSG_RUBBERED__R25B Skidpad OCP exceeded 4.64 s gate"
+    )
 
 
 def test_skidpad_max_attack_v2_controller_hv_crossover_and_telemetry() -> None:
@@ -123,7 +126,7 @@ def test_skidpad_max_attack_v2_controller_hv_crossover_and_telemetry() -> None:
     # Outer > Inner in steady turn
     assert out_ss["t_motor_4"][3] > out_ss["t_motor_4"][2] > 0.0
     assert float(out_ss["torque_fight_kw"]) >= 0.0
-    assert float(out_ss["dMz_dbeta"]) <= 0.0, f"Unstable dMz_dbeta={out_ss['dMz_dbeta']}"
+    assert float(out_ss["dMz_dbeta"]) < 0.0, f"Unstable dMz_dbeta={out_ss['dMz_dbeta']} (must be < 0)"
     assert len(out_ss["wheel_mu_util"]) == 4
     assert len(out_ss["T_cmd"]) == 4
     assert len(out_ss["T_actual"]) == 4
@@ -224,6 +227,10 @@ def test_skidpad_deep_dive_vault_09_assets_and_gates() -> None:
                 assert int(obj["hv_violations"]) == 0, (
                     f"{path_key}: hv_violations={obj['hv_violations']} != 0"
                 )
+            if "dMz_dbeta_max_nm_rad" in obj and isinstance(obj["dMz_dbeta_max_nm_rad"], (int, float)):
+                assert float(obj["dMz_dbeta_max_nm_rad"]) < 0.0, (
+                    f"{path_key}: dMz_dbeta_max_nm_rad={obj['dMz_dbeta_max_nm_rad']} >= 0"
+                )
             up = path_key.upper()
             if "FSG_RUBBERED" in up and ("MAX_ATTACK" in up or "V2" in up) and "LEGACY" not in up:
                 for tk in ("t_mean_s", "t_f8_mean_s", "t_circle_s", "t_skidpad_s"):
@@ -233,7 +240,7 @@ def test_skidpad_deep_dive_vault_09_assets_and_gates() -> None:
                             assert t_val < 5.00, f"{path_key} R20 time {t_val:.4f} s >= 5.00 s"
                             found_r20_sub5 = True
                         if "R25B" in up:
-                            assert t_val <= 4.80, f"{path_key} R25B time {t_val:.4f} s > 4.80 s"
+                            assert t_val <= 4.70, f"{path_key} R25B time {t_val:.4f} s > 4.70 s"
                             found_r25b_sub5 = True
             for k, v in obj.items():
                 _walk(v, f"{path_key}.{k}" if path_key else str(k))

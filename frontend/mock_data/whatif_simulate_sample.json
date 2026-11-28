@@ -1,0 +1,32 @@
+{
+  "vehicle_id": "ter27_4wd",
+  "event": "autocross",
+  "source": "cached_matrix",
+  "request_params": {
+    "event": "autocross",
+    "mass_kg": 280.0,
+    "grip_lambda_mu": 0.57,
+    "tire_temp_c": 75.0,
+    "aero_cla_m2": 4.68,
+    "suspension_mode": "3d_double_wishbone_lut",
+    "model_id": "differentiable_casadi_14dof",
+    "tube_mpc_enabled": true,
+    "fault_mode": "nominal",
+    "use_cached_matrix": true
+  },
+  "predicted_time_s": 72.5,
+  "baseline_280kg_time_s": 79.2302,
+  "delta_vs_baseline_ms": -6730.2,
+  "max_ay_g": 1.361,
+  "max_ax_g": 0.817,
+  "max_vx_mps": 21.669,
+  "p_dc_min_kw": -22.319,
+  "p_dc_max_kw": 59.591,
+  "min_clear_m": 0.593,
+  "cones_hit": 0,
+  "bspd_violations": 0,
+  "dmz_dbeta_nm_rad": -50.61,
+  "yaw_stable": true,
+  "invariants_passed": true,
+  "matched_scenario_id": "ax5_refined_asymmetric_tube_mpc_nominal_autocross_1184m"
+}

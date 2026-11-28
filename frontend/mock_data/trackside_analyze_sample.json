@@ -1,0 +1,214 @@
+{
+  "vehicle_id": "ter27_4wd",
+  "event": "autocross",
+  "run_id": "ter27_4wd_default_demo",
+  "total_pipeline_time_s": 15.0109,
+  "within_30s_budget": true,
+  "within_15min_budget": true,
+  "total_pit_time_min": 8.0,
+  "combined_delta_ms": -396.18,
+  "ingested_summary": {
+    "run_id": "ter27_4wd_default_demo",
+    "source_path": "in_memory_trace",
+    "source_format": "trace_dict",
+    "vehicle_id": "ter27_4wd",
+    "fs_hz": 100.0,
+    "dt": 0.01,
+    "n_samples": 1199,
+    "duration_s": 11.98,
+    "segment_stats": {
+      "active": {
+        "samples": 1199,
+        "duration_s": 11.99,
+        "pct_total": 100.0
+      },
+      "straight": {
+        "samples": 83,
+        "duration_s": 0.83,
+        "pct_total": 6.92
+      },
+      "steady_corner": {
+        "samples": 768,
+        "duration_s": 7.68,
+        "pct_total": 64.05
+      },
+      "heavy_braking": {
+        "samples": 226,
+        "duration_s": 2.26,
+        "pct_total": 18.85
+      },
+      "acceleration": {
+        "samples": 368,
+        "duration_s": 3.68,
+        "pct_total": 30.69
+      }
+    },
+    "quality_stats": {
+      "log_type": "track",
+      "vx_p95_ms": 18.427,
+      "ay_p95_ms2": 11.46,
+      "ax_min_ms2": -2.7,
+      "ax_max_ms2": 2.7,
+      "active_samples": 1199,
+      "total_samples": 1199,
+      "emi_spikes_filtered": 0,
+      "channel_missing_rate": 0.0,
+      "tire_temps_present": false,
+      "tire_temp_remap_applied": false,
+      "tire_temp_remap_rule": "none",
+      "iso8855_corr_wz_ay": 0.9748,
+      "iso8855_corr_delta_wz": 0.9748,
+      "iso8855_ay_flipped": false,
+      "iso8855_delta_flipped": false,
+      "iso8855_passed": true
+    }
+  },
+  "sysid": {
+    "vehicle_id": "ter27_4wd",
+    "run_id": "ter27_4wd_default_demo",
+    "wall_time_s": 11.4686,
+    "within_30s_budget": true,
+    "n_iterations": 6,
+    "n_windows": 4,
+    "n_total_steps": 200,
+    "dt_sysid_s": 0.02,
+    "lambda_mu_hat": 0.35,
+    "sigma_lambda_mu": 0.06638,
+    "cl_a_hat": 8.0,
+    "cd_a_hat": 2.8,
+    "cl_over_cd": 2.8571,
+    "k_arb_f_hat": 5000.0,
+    "k_arb_r_hat": 8921.21,
+    "k_arb_ratio": 0.3592,
+    "k_spring_f_hat": 33956.1,
+    "k_spring_r_hat": 50283.33,
+    "k_spring_ratio": 0.4031,
+    "loss_initial": 16.150821,
+    "loss_final": 11.032018,
+    "loss_reduction_pct": 31.69,
+    "fit_metrics": {
+      "rmse_vx_ms": 7.2922,
+      "rmse_ax_ms2": 3.4414,
+      "rmse_ay_ms2": 3.2414,
+      "rmse_wz_rads": 1.6914,
+      "r_ay": 0.9495,
+      "r_wz": 0.7581
+    },
+    "param_uncertainties": {
+      "lambda_mu": 0.06638,
+      "cl_a": 7.67362,
+      "cd_a": 2.85706,
+      "k_arb_f": 14552.03867,
+      "k_arb_r": 14693.59343,
+      "k_spring_f": 14451.10316,
+      "k_spring_r": 14601.56992
+    },
+    "dT_dtheta": {
+      "mass": 0.069267,
+      "i_xx": -0.018096,
+      "i_yy": -0.000264,
+      "i_zz": 0.011721,
+      "h_cg": 18.0,
+      "front_weight_dist": 9.088388,
+      "k_spring_f": -1.2e-05,
+      "k_spring_r": -2.2e-05,
+      "k_arb_f": -7e-06,
+      "k_arb_r": -1.3e-05,
+      "c_damp_f_scale": -0.141682,
+      "c_damp_r_scale": -0.226087,
+      "h_rc_f": 0.252945,
+      "h_rc_r": 0.715133,
+      "anti_dive_f": -0.257824,
+      "anti_squat_r": -0.459872,
+      "camber_f_rad": -9.357819,
+      "camber_r_rad": -3.990848,
+      "ackermann_factor": -0.092906,
+      "cl_a": -0.022932,
+      "cd_a": 0.756932,
+      "aero_balance_front": -0.781337,
+      "lambda_mux": -43.983524,
+      "lambda_muy": -81.213497,
+      "kya_scale": 2.87329,
+      "sigma_y": -0.142027,
+      "sigma_x": -1.482156,
+      "k_steer_comp": -2e-06
+    }
+  },
+  "top_3_adjustments": [
+    {
+      "rank": 1,
+      "lever_id": "tire_pressure_rear_steps",
+      "category": "tire_pressure",
+      "action_label": "tire_pressure_rear_steps: +0.04 bar",
+      "delta_steps": 0.04,
+      "step_unit": "bar",
+      "delta_value_si": 0.016,
+      "theta_param": "lambda_muy",
+      "predicted_delta_ms": -180.0,
+      "time_to_adjust_min": 2.0,
+      "is_pit_box_legal": true,
+      "rationale": "Adjoint dT/d(lambda_muy)=-81.2135 s/unit; predicted -180.0 ms in 2.0 min."
+    },
+    {
+      "rank": 2,
+      "lever_id": "tire_pressure_front_steps",
+      "category": "tire_pressure",
+      "action_label": "tire_pressure_front_steps: -0.04 bar",
+      "delta_steps": -0.04,
+      "step_unit": "bar",
+      "delta_value_si": -0.05,
+      "theta_param": "kya_scale",
+      "predicted_delta_ms": -143.66,
+      "time_to_adjust_min": 2.0,
+      "is_pit_box_legal": true,
+      "rationale": "Adjoint dT/d(kya_scale)=+2.8733 s/unit; predicted -143.7 ms in 2.0 min."
+    },
+    {
+      "rank": 3,
+      "lever_id": "arb_rear_clicks",
+      "category": "arb",
+      "action_label": "arb_rear_clicks: +2 clicks",
+      "delta_steps": 2.0,
+      "step_unit": "clicks",
+      "delta_value_si": 8000.0,
+      "theta_param": "k_arb_r",
+      "predicted_delta_ms": -106.97,
+      "time_to_adjust_min": 4.0,
+      "is_pit_box_legal": true,
+      "rationale": "Adjoint dT/d(k_arb_r)=-0.0000 s/unit; predicted -107.0 ms in 4.0 min."
+    }
+  ],
+  "fsae_ev_invariants": {
+    "p_dc_min_kw": -17.756,
+    "p_dc_max_kw": 73.95,
+    "hv_dc_in_bounds": true,
+    "bspd_ev23_violations": 0,
+    "min_clear_m": 0.165,
+    "cone_clearance_ok": true,
+    "dMz_dbeta_nm_rad": -92.55,
+    "yaw_stability_ok": true,
+    "all_invariants_passed": true
+  },
+  "excluded_hardware_swaps": [
+    {
+      "lever": "spring_swap",
+      "min_time_min": 45.0,
+      "reason": "Requires corner disassembly and re-corner-weighting (>15 min)"
+    },
+    {
+      "lever": "gearbox_ratio_swap",
+      "min_time_min": 120.0,
+      "reason": "Requires hub/gearbox teardown (>15 min)"
+    },
+    {
+      "lever": "wishbone_pickup_swap",
+      "min_time_min": 90.0,
+      "reason": "Requires suspension alignment and toe/camber reset (>15 min)"
+    },
+    {
+      "lever": "aero_wing_swap",
+      "min_time_min": 35.0,
+      "reason": "Requires structural mount swap and ride-height check (>15 min)"
+    }
+  ]
+}

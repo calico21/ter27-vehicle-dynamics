@@ -100,6 +100,7 @@ def _make_summary_row(
         "T_plateau_L_nm": [round(v, 2) for v in fig8["T_motor_plateau_L_nm"]],
         "mu_util_plateau_4": [round(v, 3) for v in fig8["mu_util_plateau_4"]],
         "accel_75m_valid": bool(acc75["converged_valid"]),
+        "ackermann_pct": round(float(st_opt.get("ackermann_pct", -11.0)), 2),
         "beta_star_deg": round(st_opt["beta_deg"], 3),
         "T_star_4_nm": [round(v, 2) for v in st_opt["T_motor_4_nm"]],
         "mz_tv_star_nm": round(st_opt["mz_tv_nm"], 2),
@@ -233,6 +234,7 @@ def main() -> int:
             "toe_r_deg": opt_setup["toe_r_deg"],
             "brake_bias_front": opt_setup["brake_bias_front"],
             "rake_mm": opt_setup.get("rake_mm", 0.0),
+            "ackermann_pct": opt_setup.get("ackermann_pct", 0.0),
         }
         fig8_ded = solve_skidpad_figure8_casadi(
             "FSG_RUBBERED", comp, v_entry_ms=4.0, n_circle=24, design_overrides=setup_overrides
@@ -252,6 +254,7 @@ def main() -> int:
             f"[SETUP | FSG_RUBBERED | {comp:4s}] R*={row_ded['r_eff_star_m']:.3f}m | "
             f"t_stat={row_ded['t_stat_s']:.3f}s t_per={row_ded['t_mean_s']:.3f}s t_fig8={row_ded['t_mean_as_timed_s']:.3f}s | "
             f"ay={row_ded['ay_mean_g']:.3f}g LLTD={opt_setup['lltd']:.3f} rake={opt_setup.get('rake_mm', 0.0):+.1f}mm "
+            f"ack={opt_setup.get('ackermann_pct', 0.0):.1f}% "
             f"camF={opt_setup['camber_f_deg']:.2f} camR={opt_setup['camber_r_deg']:.2f} "
             f"toeF={opt_setup['toe_f_deg']:+.2f} toeR={opt_setup['toe_r_deg']:+.2f} | "
             f"clear={row_ded['min_clear_m']:.3f}m hv_viol={row_ded['hv_violations']}",

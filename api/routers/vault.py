@@ -1,4 +1,4 @@
-"""Validation Vault catalog router (master_metrics_catalog.json + suites 01..10)."""
+"""Validation Vault catalog router (master_metrics_catalog.json + suites 01..11)."""
 
 from __future__ import annotations
 

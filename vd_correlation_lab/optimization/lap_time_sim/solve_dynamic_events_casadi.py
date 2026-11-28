@@ -37,7 +37,12 @@ from vd_correlation_lab.models.vehicle_14dof.ter27_casadi_model import (  # noqa
     SMOOTHING_PARAMS,
     TeR27CasADiVehicle,
     default_design_params,
+    sabs,
+    sclip,
     smax,
+    smin,
+    sneg,
+    spos,
 )
 from vd_correlation_lab.models.vehicle_14dof.ter27_physics import (  # noqa: E402
     GRIP_PROFILES,
@@ -56,26 +61,329 @@ HALF_TRACK_M: float = 0.615
 R_EFF_MIN_M: float = R_INNER_M + HALF_TRACK_M + CONE_MARGIN_M  # 8.390 m
 
 
+ACKERMANN_PCT_BOUNDS: Tuple[float, float] = (0.0, 100.0)
+DAMP_RATIO_BOUNDS: Tuple[float, float] = (0.55, 1.35)
+NOMINAL_DAMP_REBOUND_NS_M: float = 3000.0
+NOMINAL_DAMP_COMP_NS_M: float = 2000.0
+NOMINAL_DAMP_RATIO: float = NOMINAL_DAMP_COMP_NS_M / NOMINAL_DAMP_REBOUND_NS_M  # 0.6667
+
+# Real In-Hub Electrical Loss Map constants (1:1 parity with alqp_power_abs_pitch.py InHubLossModel)
+INHUB_LOSS_PARAMS: Dict[str, float] = {
+    "k_t_nm_per_a": 0.26,
+    "r_phase_25c_ohm": 0.135,
+    "alpha_cu_per_k": 0.00393,
+    "v_ce0_v": 0.85,
+    "r_on_ohm": 0.012,
+    "f_sw_hz": 16000.0,
+    "k_sw_j_per_a": 1.85e-4,
+    "i_d_max_a": 55.0,
+    "k_fw": 1.0,
+    "c_iron_w_s2": 1.2e-4,
+    "eta_gear": 0.965,
+    "t_motor_front_c": 50.0,
+    "t_motor_rear_c": 75.0,
+}
+
+
 class SkidpadSetupCasADiVehicle(TeR27CasADiVehicle):
     """
-    TeR27CasADiVehicle extension adding smooth static front/rear toe angles
-    (toe_f_deg, toe_r_deg; positive = toe-in) and static rake (rake_mm in [-8, +8] mm)
-    for trackside setup co-optimization without altering base ter27_casadi_model.py.
+    TeR27CasADiVehicle extension adding:
+      1. Smooth static front/rear toe angles (toe_f_deg, toe_r_deg; positive = toe-in)
+      2. Dynamic Ackermann percentage (ackermann_pct in [0.0, 100.0]%, defaulting to
+         p.ackermann_factor * 100.0 = -11.0% when unspecified)
+      3. Asymmetric front/rear bump-to-rebound damping ratios (damp_ratio_f, damp_ratio_r
+         in [0.55, 1.35], where < 1.0 is softer bump / stiffer rebound) active ONLY during
+         transient load transfer (ay_dot != 0 or ax_dot != 0; identically 0 in steady state)
+      4. Static rake (rake_mm in [-8, +8] mm)
+    without altering base ter27_casadi_model.py.
     """
 
     def ackermann_steer_smooth(self, delta: Any) -> Any:
-        base = super().ackermann_steer_smooth(delta)
+        p = self.params
+        ack_pct = self._dp("ackermann_pct", float(p.ackermann_factor) * 100.0)
+        ack = ack_pct * 0.01
+        L = p.wheelbase
+        half_t = 0.5 * p.track_front
+        tan_d = ca.tan(delta)
+        abs_tan_d = sabs(tan_d, 1e-6)
+        min_den = 0.25 * L * abs_tan_d
+        eps = self.smoothing["eps_ack_denom"]
+        den_fl = smax(L - half_t * tan_d, min_den, eps)
+        den_fr = smax(L + half_t * tan_d, min_den, eps)
+        d_fl_ack = ca.atan2(L * tan_d, den_fl)
+        d_fr_ack = ca.atan2(L * tan_d, den_fr)
+        d_fl = delta + ack * (d_fl_ack - delta)
+        d_fr = delta + ack * (d_fr_ack - delta)
+
         toe_f_deg = self._dp("toe_f_deg", 0.0)
         toe_r_deg = self._dp("toe_r_deg", 0.0)
         toe_f_rad = toe_f_deg * (math.pi / 180.0)
         toe_r_rad = toe_r_deg * (math.pi / 180.0)
         # ISO 8855: positive toe-in -> left wheel points right (-), right wheel points left (+)
         return ca.vertcat(
-            base[0] - toe_f_rad,
-            base[1] + toe_f_rad,
-            base[2] - toe_r_rad,
-            base[3] + toe_r_rad,
+            d_fl - toe_f_rad,
+            d_fr + toe_f_rad,
+            -toe_r_rad,
+            toe_r_rad,
         )
+
+    def eval_hv_power_kw(self, T_4: Any, omega_4: Any) -> Tuple[Any, Any]:
+        """
+        HV DC electrical power (kW).
+        When design_params['use_real_electrical_loss_map'] is True, uses the smooth C^2
+        InHubLossModel (1:1 parity with alqp_power_abs_pitch.py):
+          P_cu(T) = 3 * I_rms^2 * R_phase(T), P_inv = (3*V_ce0 + k_sw*f_sw)*I_rms + 3*R_on*I_rms^2,
+          P_fw via I_d above omega_base, P_mech_loss = c_iron*om_m^2 + (1-eta_gear)*|T_w*om_w|.
+        Otherwise falls back to base TeR27CasADiVehicle flat efficiency (eta_drive=0.90).
+        """
+        if not bool(self._dp("use_real_electrical_loss_map", False)):
+            return super().eval_hv_power_kw(T_4, omega_4)
+
+        p = self.params
+        lp = INHUB_LOSS_PARAMS
+        n_g = self._dp("gear_ratio", p.gear_ratio)
+        k_t = lp["k_t_nm_per_a"]
+        v_scale = float(np.clip(p.v_oc_nom / p.v_nom, 0.5, 1.25))
+        om_base = p.base_speed_rpm * (2.0 * math.pi / 60.0) * v_scale
+
+        t_f_c = float(self._dp("t_motor_front_c", lp["t_motor_front_c"]))
+        t_r_c = float(self._dp("t_motor_rear_c", lp["t_motor_rear_c"]))
+        t_mot_vec = ca.DM([t_f_c, t_f_c, t_r_c, t_r_c])
+        r_ph_vec = lp["r_phase_25c_ohm"] * (1.0 + lp["alpha_cu_per_k"] * (t_mot_vec - 25.0))
+
+        i_q = sabs(T_4, 0.05) / (n_g * k_t)
+        om_m = sabs(omega_4, 0.05) * n_g
+        om_m_safe = smax(om_m, 1.0, 0.5)
+        fw_frac = spos(1.0 - om_base / om_m_safe, 1e-3)
+        i_d = lp["k_fw"] * fw_frac * lp["i_d_max_a"]
+        i_rms_sq = i_q * i_q + i_d * i_d + 1e-4
+        i_rms = ca.sqrt(i_rms_sq)
+
+        p_cu = 3.0 * i_rms_sq * r_ph_vec
+        p_inv = (3.0 * lp["v_ce0_v"] + lp["k_sw_j_per_a"] * lp["f_sw_hz"]) * i_rms + 3.0 * lp["r_on_ohm"] * i_rms_sq
+        p_mech = T_4 * omega_4
+        p_mech_loss = lp["c_iron_w_s2"] * om_m * om_m + (1.0 - lp["eta_gear"]) * sabs(p_mech, 10.0)
+        p_dc_w = ca.sum1(p_mech + p_cu + p_inv + p_mech_loss)
+        p_dc_kw = p_dc_w * 1e-3
+        return p_dc_kw, p_dc_kw
+
+    def normal_forces_smooth(
+        self,
+        ax: Any,
+        ay: Any,
+        vx: Any,
+        vy: Any,
+        ay_dot: Any = 0.0,
+        ax_dot: Any = 0.0,
+    ) -> Tuple[Any, Any]:
+        """
+        Smooth C^2 4-wheel normal forces including optional transient asymmetric
+        bump/rebound damping load transfer when ay_dot != 0 (identically zero at ay_dot = 0).
+        """
+        p = self.params
+        eps_fz = self.smoothing["eps_fz_n"]
+        _, _, f_down_f, f_down_r = self.aero_forces_smooth(vx, vy, ax)
+
+        mass = self._dp("mass_kg", p.mass)
+        h_cg = self._dp("h_cg", p.h_cog)
+        h_rc_f = self._dp("h_rc_f", p.h_rc_f)
+        h_rc_r = self._dp("h_rc_r", p.h_rc_r)
+        lltd = self._dp("lltd", p.lltd_elastic_f)
+        k_roll_scale = self._dp("k_roll_scale", 1.0)
+
+        mg = mass * p.gravity
+        fz_f_stat = mg * (p.b_cog / p.wheelbase)
+        fz_r_stat = mg * (p.a_cog / p.wheelbase)
+
+        dfz_long = (mass * ax * h_cg) / p.wheelbase
+        fz_f_tot = spos(fz_f_stat - dfz_long + f_down_f, eps_fz)
+        fz_r_tot = spos(fz_r_stat + dfz_long + f_down_r, eps_fz)
+
+        m_s = mass - p.unsprung_mass_total
+        m_u_axle = 0.5 * p.unsprung_mass_total
+        k_roll_tot = (p.k_roll_f + p.k_roll_r) * k_roll_scale
+        k_roll_f = lltd * k_roll_tot
+        k_roll_r = (1.0 - lltd) * k_roll_tot
+
+        h_s = p.h_sprung_cog + (h_cg - p.h_cog)
+        h_rc_cg = h_rc_f + (h_rc_r - h_rc_f) * (p.a_cog / p.wheelbase)
+        h_roll_arm = smax(h_s - h_rc_cg, 0.0, 1e-5)
+
+        roll_denom = smax(k_roll_tot - m_s * p.gravity * h_roll_arm, 1.0, 1e-3)
+        phi = (m_s * ay * h_roll_arm) / roll_denom
+
+        dfz_lat_f_raw = (
+            (k_roll_f * phi) / p.track_front
+            + (m_s * (p.b_cog / p.wheelbase) * ay * h_rc_f) / p.track_front
+            + (m_u_axle * ay * p.wheel_radius) / p.track_front
+        )
+        dfz_lat_r_raw = (
+            (k_roll_r * phi) / p.track_rear
+            + (m_s * (p.a_cog / p.wheelbase) * ay * h_rc_r) / p.track_rear
+            + (m_u_axle * ay * p.wheel_radius) / p.track_rear
+        )
+
+        # Transient asymmetric bump/rebound damping dynamics (active only when ay_dot != 0)
+        has_transient = not (isinstance(ay_dot, (int, float)) and abs(float(ay_dot)) < 1e-12)
+        if has_transient:
+            rd_f = self._dp("damp_ratio_f", NOMINAL_DAMP_RATIO)
+            rd_r = self._dp("damp_ratio_r", NOMINAL_DAMP_RATIO)
+            phi_dot = (m_s * ay_dot * h_roll_arm) / roll_denom
+            abs_phi_dot = sabs(phi_dot, 1e-3)
+
+            c_reb_f = NOMINAL_DAMP_REBOUND_NS_M
+            c_reb_r = NOMINAL_DAMP_REBOUND_NS_M
+            c_comp_f = rd_f * c_reb_f
+            c_comp_r = rd_r * c_reb_r
+
+            mr_f_sq = float(p.mr_f) * float(p.mr_f)
+            mr_r_sq = float(p.mr_r) * float(p.mr_r)
+
+            # Dynamic roll-damping lateral load transfer on each axle
+            # Softer bump (rd < 1) reduces outer-wheel compressive load spike on turn-in;
+            # stiffer rear bump relative to front increases transient rear LLTD for slalom agility.
+            c_roll_f = 0.5 * (c_comp_f + c_reb_f) * mr_f_sq * (0.5 * p.track_front)
+            c_roll_r = 0.5 * (c_comp_r + c_reb_r) * mr_r_sq * (0.5 * p.track_rear)
+            dfz_lat_f_raw = dfz_lat_f_raw + c_roll_f * phi_dot
+            dfz_lat_r_raw = dfz_lat_r_raw + c_roll_r * phi_dot
+
+            # Asymmetric damper jack-down (mild aero-seal downforce gain when rd < 1)
+            # balanced by rebound packing / inner-wheel contact-patch starvation when rd < 0.72.
+            asym_f = (c_reb_f - c_comp_f) * mr_f_sq * (0.5 * p.track_front) * abs_phi_dot
+            asym_r = (c_reb_r - c_comp_r) * mr_r_sq * (0.5 * p.track_rear) * abs_phi_dot
+            dz_pack_f_mm = 1e3 * asym_f / max(2.0 * float(p.k_wheel_f), 1.0)
+            dz_pack_r_mm = 1e3 * asym_r / max(2.0 * float(p.k_wheel_r), 1.0)
+
+            # Mild transient aero seal gain from dynamic jack-down (capped smoothly)
+            fz_f_tot = spos(fz_f_tot + f_down_f * 0.012 * sclip(dz_pack_f_mm, -2.0, 3.0, 0.1), eps_fz)
+            fz_r_tot = spos(fz_r_tot + f_down_r * 0.012 * sclip(dz_pack_r_mm, -2.0, 3.0, 0.1), eps_fz)
+
+            # Rebound packing penalty if ratio is too low (inner wheel cannot extend fast enough
+            # across consecutive slalom reversals, losing k_wheel * dz_pack droop load)
+            pack_excess_f = spos(0.74 - rd_f, 0.02)
+            pack_excess_r = spos(0.82 - rd_r, 0.02)
+            sgn_ay = ca.tanh(ay / 1.5)
+            dfz_lat_f_raw = dfz_lat_f_raw + sgn_ay * 45000.0 * (pack_excess_f * pack_excess_f) * abs_phi_dot
+            dfz_lat_r_raw = dfz_lat_r_raw + sgn_ay * 45000.0 * (pack_excess_r * pack_excess_r) * abs_phi_dot
+
+        dfz_lat_f = sclip(dfz_lat_f_raw, -0.5 * fz_f_tot, 0.5 * fz_f_tot, eps_fz)
+        dfz_lat_r = sclip(dfz_lat_r_raw, -0.5 * fz_r_tot, 0.5 * fz_r_tot, eps_fz)
+
+        fz = ca.vertcat(
+            spos(0.5 * fz_f_tot - dfz_lat_f, eps_fz),
+            spos(0.5 * fz_f_tot + dfz_lat_f, eps_fz),
+            spos(0.5 * fz_r_tot - dfz_lat_r, eps_fz),
+            spos(0.5 * fz_r_tot + dfz_lat_r, eps_fz),
+        )
+        return fz, phi
+
+    def eval_forces_from_kappa(
+        self,
+        vx: Any,
+        vy: Any,
+        wz: Any,
+        delta: Any,
+        kappa_4: Any,
+        F_brk_hyd: Any,
+        ax_lt: Any,
+        ay_lt: Any,
+        T_tire_4: Optional[Any] = None,
+        ay_dot: Any = 0.0,
+        ax_dot: Any = 0.0,
+    ) -> Dict[str, Any]:
+        """Override supporting optional transient (ay_dot, ax_dot) for asymmetric damping."""
+        if (isinstance(ay_dot, (int, float)) and abs(float(ay_dot)) < 1e-12) and (
+            isinstance(ax_dot, (int, float)) and abs(float(ax_dot)) < 1e-12
+        ):
+            return super().eval_forces_from_kappa(
+                vx, vy, wz, delta, kappa_4, F_brk_hyd, ax_lt, ay_lt, T_tire_4=T_tire_4
+            )
+        p = self.params
+        s = self.smoothing
+        delta_w = self.ackermann_steer_smooth(delta)
+        cos_d = ca.cos(delta_w)
+        sin_d = ca.sin(delta_w)
+
+        v_wx, v_wy, u_den, alpha = self._wheel_kinematics(vx, vy, wz, delta_w)
+        f_drag_x, f_drag_y, f_down_f, f_down_r = self.aero_forces_smooth(vx, vy, ax_lt)
+        fz, phi = self.normal_forces_smooth(ax_lt, ay_lt, vx, vy, ay_dot=ay_dot, ax_dot=ax_dot)
+        gamma = self.cambers_smooth(delta_w, phi, ax_lt)
+
+        t_eff = T_tire_4 if T_tire_4 is not None else self.tire_temp_c
+        if t_eff is not None:
+            from vd_correlation_lab.models.vehicle_14dof.ter27_casadi_model import thermal_grip_multiplier_smooth
+            mu_thermal = thermal_grip_multiplier_smooth(t_eff)
+        else:
+            mu_thermal = 1.0
+
+        side = ca.DM(self.side_sign)
+        fx_w, fy_w, mz_tire, _ = self.eval_tire_mf62(kappa_4, alpha, fz, gamma, side, mu_thermal=mu_thermal)
+
+        fx_c = fx_w * cos_d - fy_w * sin_d
+        fy_c = fx_w * sin_d + fy_w * cos_d
+
+        x_w = ca.DM(self.x_w)
+        y_w = ca.DM(self.y_w)
+
+        Fx_tot = ca.sum1(fx_c) + f_drag_x
+        Fy_tot = ca.sum1(fy_c) + f_drag_y
+        Mz_tot = ca.sum1(x_w * fy_c - y_w * fx_c + mz_tire)
+
+        rho_rad = smin(fz / p.k_tire_z, 0.5 * p.wheel_radius, s["eps_r_eff"])
+        r_load = p.wheel_radius - rho_rad
+        r_eff = p.wheel_radius - rho_rad / 3.0
+
+        f_rr = p.rolling_resistance_coeff * fz * ca.tanh(v_wx / 0.5)
+        T_total_4 = (fx_w + f_rr) * r_load
+        hyd_split = self._hyd_split_vec()
+        T_hyd_4 = F_brk_hyd * hyd_split * r_load
+        T_motor_4 = T_total_4 + T_hyd_4
+
+        omega_4 = (v_wx + kappa_4 * u_den) / smax(r_eff, 0.1, s["eps_r_eff"])
+        T_max_4, T_min_4 = self.motor_torque_limit_smooth(omega_4)
+        P_dc_ecu_kw, P_dc_drv_kw = self.eval_hv_power_kw(T_motor_4, omega_4)
+
+        Fx_f_sin_delta = fx_w[0] * sin_d[0] + fx_w[1] * sin_d[1]
+        Mz_tv_long = ca.sum1(-y_w * (fx_w * cos_d) + x_w * (fx_w * sin_d))
+
+        from vd_correlation_lab.models.vehicle_14dof.ter27_casadi_model import (
+            slip_power_smooth,
+            tire_temp_dot_smooth,
+        )
+        slip_power_4 = slip_power_smooth(fx_w, fy_w, v_wx, v_wy, kappa_4)
+        t_ref_for_ode = t_eff if t_eff is not None else (self.temp_c + 30.0)
+        dT_tire_dt_4 = tire_temp_dot_smooth(t_ref_for_ode, self.temp_c, slip_power_4, vx)
+
+        return {
+            "Fx_tot": Fx_tot,
+            "Fy_tot": Fy_tot,
+            "Mz_tot": Mz_tot,
+            "P_dc_kw": P_dc_ecu_kw,
+            "P_dc_ecu_kw": P_dc_ecu_kw,
+            "P_dc_drv_kw": P_dc_drv_kw,
+            "Fz_4": fz,
+            "Fx_w_4": fx_w,
+            "Fy_w_4": fy_w,
+            "Mz_tire_4": mz_tire,
+            "alpha_4": alpha,
+            "kappa_4": kappa_4,
+            "T_motor_4": T_motor_4,
+            "T_total_4": T_total_4,
+            "omega_4": omega_4,
+            "T_max_4": T_max_4,
+            "T_min_4": T_min_4,
+            "Fx_f_sin_delta": Fx_f_sin_delta,
+            "Mz_tv_long": Mz_tv_long,
+            "phi": phi,
+            "delta_w_4": delta_w,
+            "f_drag_x": f_drag_x,
+            "f_drag_y": f_drag_y,
+            "f_down_f": f_down_f,
+            "f_down_r": f_down_r,
+            "slip_power_4": slip_power_4,
+            "dT_tire_dt_4": dT_tire_dt_4,
+            "mu_thermal_4": mu_thermal,
+        }
 
 
 def _apply_rake_to_design_params(dp: Dict[str, Any], base_cop_front: float) -> None:
@@ -229,6 +537,8 @@ def build_physics_model_for_compound(
             model.p.static_toe_f_rad = math.radians(float(design_overrides["toe_f_deg"]))
         if "toe_r_deg" in design_overrides:
             model.p.static_toe_r_rad = math.radians(float(design_overrides["toe_r_deg"]))
+        if "ackermann_pct" in design_overrides:
+            model.p.ackermann_factor = float(design_overrides["ackermann_pct"]) * 0.01
         if "brake_bias_front" in design_overrides:
             model.p.brake_bias_front = float(design_overrides["brake_bias_front"])
         elif "brake_bias" in design_overrides:
@@ -358,22 +668,32 @@ def solve_skidpad_stationary_casadi(
     design_overrides: Optional[Dict[str, float]] = None,
     optimize_setup: bool = False,
     optimize_trackside_setup: bool = False,
+    optimize_ackermann: bool = True,
     equal_front_drive: bool = False,
+    use_real_electrical_loss_map: bool = False,
 ) -> Dict[str, Any]:
     """
     Solve the stationary optimal skidpad cornering NLP with CasADi + IPOPT.
     Maximizes cornering speed (minimizes t_circle = 2*pi*R / V) over
     [V, delta, beta, kappa_FL, kappa_FR, kappa_RL, kappa_RR, R]
-    and optionally co-optimizes the 7 mechanical trackside setup parameters:
-    [lltd, camber_f_deg, camber_r_deg, toe_f_deg, toe_r_deg, brake_bias, rake_mm].
+    and optionally co-optimizes the mechanical trackside setup parameters:
+    [lltd, camber_f_deg, camber_r_deg, toe_f_deg, toe_r_deg, brake_bias, rake_mm, ackermann_pct].
     """
     do_opt_setup = bool(optimize_setup or optimize_trackside_setup)
+    do_opt_ack = bool(do_opt_setup and optimize_ackermann)
     p_nom = load_ter27_params()
     dp_init: Dict[str, Any] = dict(design_overrides) if design_overrides else {}
+    if use_real_electrical_loss_map:
+        dp_init["use_real_electrical_loss_map"] = True
     s_sc: Optional[ca.SX] = None
-    setup_scale = np.array([0.5, 2.0, 2.0, 0.5, 0.5, 0.6, 8.0], dtype=float)
+    n_setup = 8 if do_opt_ack else 7
+    setup_scale = (
+        np.array([0.5, 2.0, 2.0, 0.5, 0.5, 0.6, 8.0, 100.0], dtype=float)
+        if do_opt_ack
+        else np.array([0.5, 2.0, 2.0, 0.5, 0.5, 0.6, 8.0], dtype=float)
+    )
     if do_opt_setup:
-        s_sc = ca.SX.sym("s_sc", 7)
+        s_sc = ca.SX.sym("s_sc", n_setup)
         s_val = s_sc * ca.DM(setup_scale)
         dp_init["lltd"] = s_val[0]
         dp_init["k_roll_scale"] = 1.0
@@ -383,6 +703,8 @@ def solve_skidpad_stationary_casadi(
         dp_init["toe_r_deg"] = s_val[4]
         dp_init["brake_bias_front"] = s_val[5]
         dp_init["rake_mm"] = s_val[6]
+        if do_opt_ack:
+            dp_init["ackermann_pct"] = s_val[7]
 
     veh = build_casadi_vehicle_for_compound(grip_profile, compound, design_overrides=dp_init if dp_init else None)
     p = veh.params
@@ -495,16 +817,16 @@ def solve_skidpad_stationary_casadi(
 
     if do_opt_setup:
         b = TRACKSIDE_SETUP_BOUNDS
-        # [lltd, camber_f_deg, camber_r_deg, toe_f_deg, toe_r_deg, brake_bias, rake_mm]
-        s_lb = np.array([
+        # [lltd, camber_f_deg, camber_r_deg, toe_f_deg, toe_r_deg, brake_bias, rake_mm (, ackermann_pct)]
+        s_lb_list = [
             b["lltd"][0], b["camber_f_deg"][0], b["camber_r_deg"][0],
             b["toe_f_deg"][0], b["toe_r_deg"][0], b["brake_bias"][0], b["rake_mm"][0],
-        ], dtype=float) / setup_scale
-        s_ub = np.array([
+        ]
+        s_ub_list = [
             b["lltd"][1], b["camber_f_deg"][1], b["camber_r_deg"][1],
             b["toe_f_deg"][1], b["toe_r_deg"][1], b["brake_bias"][1], b["rake_mm"][1],
-        ], dtype=float) / setup_scale
-        s_0 = np.array([
+        ]
+        s_0_list = [
             np.clip(p_nom.lltd_elastic_f, b["lltd"][0], b["lltd"][1]),
             np.clip(math.degrees(p_nom.static_camber_f_rad), b["camber_f_deg"][0], b["camber_f_deg"][1]),
             np.clip(math.degrees(p_nom.static_camber_r_rad), b["camber_r_deg"][0], b["camber_r_deg"][1]),
@@ -512,7 +834,14 @@ def solve_skidpad_stationary_casadi(
             0.0,
             np.clip(p_nom.brake_bias_front, b["brake_bias"][0], b["brake_bias"][1]),
             0.0,
-        ], dtype=float) / setup_scale
+        ]
+        if do_opt_ack:
+            s_lb_list.append(ACKERMANN_PCT_BOUNDS[0])
+            s_ub_list.append(ACKERMANN_PCT_BOUNDS[1])
+            s_0_list.append(50.0)
+        s_lb = np.array(s_lb_list, dtype=float) / setup_scale
+        s_ub = np.array(s_ub_list, dtype=float) / setup_scale
+        s_0 = np.array(s_0_list, dtype=float) / setup_scale
         lbx.extend(s_lb.tolist())
         ubx.extend(s_ub.tolist())
         x0.extend(s_0.tolist())
@@ -531,7 +860,8 @@ def solve_skidpad_stationary_casadi(
     resolved_dp: Dict[str, float] = dict(design_overrides) if design_overrides else {}
     opt_setup_dict: Optional[Dict[str, float]] = None
     if do_opt_setup:
-        s_opt = x_raw[8:15] * setup_scale
+        s_opt = x_raw[8:8 + n_setup] * setup_scale
+        ack_opt_pct = float(s_opt[7]) if do_opt_ack else float(resolved_dp.get("ackermann_pct", p_nom.ackermann_factor * 100.0))
         resolved_dp = {
             "lltd": float(s_opt[0]),
             "k_roll_scale": 1.0,
@@ -542,6 +872,9 @@ def solve_skidpad_stationary_casadi(
             "brake_bias_front": float(s_opt[5]),
             "brake_bias": float(s_opt[5]),
             "rake_mm": float(s_opt[6]),
+            "ackermann_pct": ack_opt_pct,
+            "damp_ratio_f": float(resolved_dp.get("damp_ratio_f", NOMINAL_DAMP_RATIO)),
+            "damp_ratio_r": float(resolved_dp.get("damp_ratio_r", NOMINAL_DAMP_RATIO)),
         }
         arb_f, arb_r = _implied_arb_stiffness_nm_m(p_nom, resolved_dp["lltd"], resolved_dp["k_roll_scale"])
         opt_setup_dict = {
@@ -551,6 +884,8 @@ def solve_skidpad_stationary_casadi(
         }
 
     # Build numeric vehicle with resolved setup for clean post-evaluation & stability check
+    if use_real_electrical_loss_map:
+        resolved_dp["use_real_electrical_loss_map"] = True
     veh_eval = build_casadi_vehicle_for_compound(grip_profile, compound, design_overrides=resolved_dp if resolved_dp else None)
     phys = build_physics_model_for_compound(grip_profile, compound, design_overrides=resolved_dp if resolved_dp else None)
 
@@ -573,6 +908,10 @@ def solve_skidpad_stationary_casadi(
         veh_eval, vx_s, vy_s, r_s, d_s, k_s, ax_s, ay_s
     )
 
+    alpha_4_deg = np.degrees(np.array(ev_s["alpha_4"]).flatten())
+    delta_w_4_deg = np.degrees(np.array(ev_s["delta_w_4"]).flatten())
+    ack_eff_pct = float(resolved_dp.get("ackermann_pct", p_nom.ackermann_factor * 100.0))
+
     out_dict: Dict[str, Any] = {
         "success": bool(stats.get("success", False)),
         "return_status": str(stats.get("return_status", "")),
@@ -583,6 +922,7 @@ def solve_skidpad_stationary_casadi(
         "equal_front_drive": equal_front_drive,
         "optimize_setup": do_opt_setup,
         "optimize_trackside_setup": do_opt_setup,
+        "ackermann_pct": round(ack_eff_pct, 2),
         "r_eff_m": R_s,
         "t_circle_s": float(2.0 * math.pi * R_s / V_s),
         "v_ms": V_s,
@@ -590,6 +930,8 @@ def solve_skidpad_stationary_casadi(
         "ay_g": abs(ay_s) / p.gravity,
         "beta_deg": math.degrees(b_s),
         "delta_deg": math.degrees(d_s),
+        "delta_w_4_deg": [round(float(v), 3) for v in delta_w_4_deg],
+        "alpha_4_deg": [round(float(v), 3) for v in alpha_4_deg],
         "wz_rads": r_s,
         "T_motor_4_nm": [float(v) for v in t_mot_s],
         "kappa_4": [float(v) for v in k_s],
@@ -1041,18 +1383,27 @@ def solve_skidpad_figure8_casadi(
 def solve_accel_75m_casadi(
     grip_profile: str = "FSG_RUBBERED",
     compound: str = "R20",
-    n_steps: int = 35,
+    n_steps: int = 50,
     design_overrides: Optional[Dict[str, float]] = None,
     optimize_trackside_setup: bool = False,
+    staging_rollout_m: float = 0.30,
+    use_real_electrical_loss_map: bool = False,
+    fixed_front_torque_ratio: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
     Solve the Official FS 0-75 m Acceleration OCP with CasADi + IPOPT (time-domain).
     Enforces strict 80.0 kW HV DC ceiling and real motor torque/speed envelope.
+    Models the official FSG / FSAE D 5.2.2 0.30 m staging rollout from standstill:
+      - Car launches from s = -staging_rollout_m (v = 0) with conservative 45 ms torque ramp,
+        crossing the timing beam at s = 0.0 m with physically computed v_beam_ms.
+      - Set staging_rollout_m = 0.0 for legacy v0 = 1.5 m/s boundary comparison.
     Optionally co-optimizes the 7 mechanical trackside setup parameters:
     [lltd, camber_f_deg, camber_r_deg, toe_f_deg, toe_r_deg, brake_bias, rake_mm].
     """
     p_nom = load_ter27_params()
     dp_init: Dict[str, Any] = dict(design_overrides) if design_overrides else {}
+    if use_real_electrical_loss_map:
+        dp_init["use_real_electrical_loss_map"] = True
     s_sc: Optional[ca.SX] = None
     setup_scale = np.array([0.5, 2.0, 2.0, 0.5, 0.5, 0.6, 8.0], dtype=float)
     if optimize_trackside_setup:
@@ -1069,7 +1420,22 @@ def solve_accel_75m_casadi(
 
     veh = build_casadi_vehicle_for_compound(grip_profile, compound, design_overrides=dp_init if dp_init else None)
     p = veh.params
-    p_max_kw = (p.p_dc_max_w - 100.0) * 1e-3
+    p_max_kw = (p.p_dc_max_w - 20.0) * 1e-3  # 79.98 kW strict ceiling (0 HV violations)
+
+    # Physical staging rollout velocity at s = 0.0 m timing beam (FSG D 5.2.2: 0.30 m behind line)
+    if staging_rollout_m > 0.0:
+        # Evaluate launch acceleration at low speed with realistic 45 ms motor torque ramp
+        veh_ref = build_casadi_vehicle_for_compound(grip_profile, compound, design_overrides=design_overrides)
+        ev_l = veh_ref.eval_forces_from_kappa(
+            1.5, 0.0, 0.0, 0.0, np.array([0.10, 0.10, 0.11, 0.11]), 0.0, 14.0, 0.0
+        )
+        # Clamp launch torque to motor peak envelope (312.5 Nm)
+        ax_peak_launch = min(float(ev_l["Fx_tot"]) / p.mass, 14.9)
+        # Conservative average acceleration over 0.30 m rollout including 45 ms launch torque ramp
+        ax_rollout_avg = 0.85 * ax_peak_launch
+        v_beam_ms = math.sqrt(2.0 * ax_rollout_avg * float(staging_rollout_m))
+    else:
+        v_beam_ms = 1.5
 
     # Scaled variables: T_75 (1), and per node [s_m/50, vx/20, kf/0.1, kr/0.1, ax_lt/10]
     T_sc = ca.SX.sym("T_sc")
@@ -1080,7 +1446,7 @@ def solve_accel_75m_casadi(
     Z = Z_sc * ca.DM(z_scale)
     dt = T_75 / n_steps
 
-    g_list: List[Any] = [Z[0, 0] / 50.0, (Z[1, 0] - 1.5) / 20.0, (Z[0, n_steps] - 75.0) / 50.0]
+    g_list: List[Any] = [Z[0, 0] / 50.0, (Z[1, 0] - v_beam_ms) / 20.0, (Z[0, n_steps] - 75.0) / 50.0]
     lbg: List[float] = [0.0, 0.0, 0.0]
     ubg: List[float] = [0.0, 0.0, 0.0]
 
@@ -1103,6 +1469,12 @@ def solve_accel_75m_casadi(
         ])
         lbg.extend([0.0] + [0.0] * 10)
         ubg.extend([0.0] + [ca.inf] * 10)
+        if fixed_front_torque_ratio is not None:
+            sf_fix = float(fixed_front_torque_ratio)
+            sr_fix = 1.0 - sf_fix
+            g_list.append((sr_fix * ev["T_motor_4"][0] - sf_fix * ev["T_motor_4"][2]) / 100.0)
+            lbg.append(0.0)
+            ubg.append(0.0)
 
     state_sc = ca.DM([50.0, 20.0])
     for k in range(n_steps):
@@ -1137,7 +1509,7 @@ def solve_accel_75m_casadi(
     z0 = np.zeros((nx, n_steps + 1), dtype=float)
     frac = np.linspace(0.0, 1.0, n_steps + 1)
     z0[0] = 75.0 * frac * frac
-    z0[1] = 1.5 + 30.0 * frac
+    z0[1] = v_beam_ms + (30.5 - v_beam_ms) * frac
     z0[2] = 0.08
     z0[3] = 0.09
     z0[4] = 8.0
@@ -1195,6 +1567,8 @@ def solve_accel_75m_casadi(
             "arb_stiffness_rear_nm_m": round(arb_r, 1),
         }
 
+    if use_real_electrical_loss_map:
+        resolved_dp["use_real_electrical_loss_map"] = True
     veh_eval = build_casadi_vehicle_for_compound(grip_profile, compound, design_overrides=resolved_dp if resolved_dp else None)
     pdc_arr = np.zeros(n_steps + 1, dtype=float)
     ax_arr = np.zeros(n_steps + 1, dtype=float)
@@ -1213,14 +1587,388 @@ def solve_accel_75m_casadi(
         "grip_profile": grip_profile,
         "compound": compound,
         "optimize_trackside_setup": optimize_trackside_setup,
+        "staging_rollout_m": float(staging_rollout_m),
+        "v_beam_ms": round(float(v_beam_ms), 4),
         "time_75m_s": t75,
         "v_exit_kmh": float(z_opt[1, -1] * 3.6),
         "peak_ax_g": float(np.max(ax_arr)),
         "max_hv_power_kw": float(np.max(pdc_arr)),
+        "hv_violations": int(np.sum((pdc_arr > 80.05) | (pdc_arr < -25.05))),
     }
     if opt_setup_dict is not None:
         out["optimal_setup"] = opt_setup_dict
     return out
+
+
+def solve_autocross_transient_coopt_casadi(
+    grip_profile: str = "FSG_RUBBERED",
+    compound: str = "R25B",
+    n_intervals: int = 160,
+    base_setup_overrides: Optional[Dict[str, Any]] = None,
+    optimize_transient_params: bool = True,
+    use_real_electrical_loss_map: bool = False,
+    grip_realism_factor: float = 0.71,
+    ipopt_max_iter: int = 500,
+) -> Dict[str, Any]:
+    """
+    Transient Autocross full-lap + slalom/chicane/hairpin OCP on FSG 2023 using CasADi + IPOPT.
+    Models transient lateral acceleration rate ay_dot = d(ay)/dt along the curvilinear lap
+    to co-optimize:
+      - damp_ratio_f in [0.55, 1.35] (front bump/rebound ratio; < 1.0 = softer bump / stiffer rebound)
+      - damp_ratio_r in [0.55, 1.35] (rear bump/rebound ratio)
+      - ackermann_pct in [0.0, 100.0] % (dynamic Ackermann for tight hairpins)
+    while preserving steady-state cornering stability (ay_dot = 0 -> identical steady-state dMz/dbeta),
+    strict 4-corner cone clearance >= 0.18 m, HV DC power in [-25.0, +80.0] kW, and BSPD EV 2.3.
+    """
+    import json as _json
+    import time as _time
+    from scipy.interpolate import CubicSpline
+
+    t0 = _time.perf_counter()
+    track_path = REPO_ROOT / "data" / "tracks" / "fsg_2023.json"
+    rl_path = REPO_ROOT / "src" / "mirena_sim" / "Assets" / "RacingLines" / "fsg_2023_racing_line_real.json"
+    raw = _json.loads(track_path.read_text(encoding="utf-8"))
+    length = float(raw["length"])
+    s_raw = np.asarray(raw["s"], dtype=np.float64)
+    x_raw = np.asarray(raw["x"], dtype=np.float64)
+    y_raw = np.asarray(raw["y"], dtype=np.float64)
+    k_raw = np.asarray(raw["kappa"], dtype=np.float64)
+    wl_raw = np.asarray(raw["w_left"], dtype=np.float64)
+    wr_raw = np.asarray(raw["w_right"], dtype=np.float64)
+
+    s_ext = np.append(s_raw, length)
+    cs_x = CubicSpline(s_ext, np.append(x_raw, x_raw[0]), bc_type="periodic")
+    cs_y = CubicSpline(s_ext, np.append(y_raw, y_raw[0]), bc_type="periodic")
+    cs_k = CubicSpline(s_ext, np.append(k_raw, k_raw[0]), bc_type="periodic")
+    cs_wl = CubicSpline(s_ext, np.append(wl_raw, wl_raw[0]), bc_type="periodic")
+    cs_wr = CubicSpline(s_ext, np.append(wr_raw, wr_raw[0]), bc_type="periodic")
+
+    ds = length / float(n_intervals)
+    m_pts = 2 * n_intervals
+    s_all = np.arange(m_pts, dtype=np.float64) * (0.5 * ds)
+    psi_all = np.arctan2(cs_y(s_all, 1), cs_x(s_all, 1))
+    kappa_c = cs_k(s_all)
+    w_left = cs_wl(s_all)
+    w_right = cs_wr(s_all)
+
+    # Build symbolic vehicle with transient parameters
+    dp_init: Dict[str, Any] = dict(base_setup_overrides) if base_setup_overrides else {}
+    dp_init["use_real_electrical_loss_map"] = bool(use_real_electrical_loss_map)
+    s_tr_sym: Optional[ca.SX] = None
+    tr_scale = np.array([1.0, 1.0, 100.0], dtype=float)
+    if optimize_transient_params:
+        s_tr_sym = ca.SX.sym("s_tr", 3)
+        dp_init["damp_ratio_f"] = s_tr_sym[0]
+        dp_init["damp_ratio_r"] = s_tr_sym[1]
+        dp_init["ackermann_pct"] = s_tr_sym[2]
+    else:
+        dp_init.setdefault("damp_ratio_f", NOMINAL_DAMP_RATIO)
+        dp_init.setdefault("damp_ratio_r", NOMINAL_DAMP_RATIO)
+
+    veh = build_casadi_vehicle_for_compound(grip_profile, compound, design_overrides=dp_init)
+    veh.lmux = float(veh.lmux) * float(grip_realism_factor)
+    veh.lmuy = float(veh.lmuy) * float(grip_realism_factor)
+    p = veh.params
+    mass = float(p.mass)
+    izz = float(p.izz_total)
+    max_steer = float(p.max_steer_angle)
+
+    # Compile SX physics function with ay_dot input
+    s_vx = ca.SX.sym("vx")
+    s_vy = ca.SX.sym("vy")
+    s_wz = ca.SX.sym("wz")
+    s_del = ca.SX.sym("delta")
+    s_kap = ca.SX.sym("kappa_4", 4)
+    s_fbrk = ca.SX.sym("F_brk_hyd")
+    s_ax = ca.SX.sym("ax_lt")
+    s_ay = ca.SX.sym("ay_lt")
+    s_aydot = ca.SX.sym("ay_dot")
+    ev_s = veh.eval_forces_from_kappa(
+        s_vx, s_vy, s_wz, s_del, s_kap, s_fbrk, s_ax, s_ay, ay_dot=s_aydot
+    )
+    fn_in = [s_vx, s_vy, s_wz, s_del, s_kap, s_fbrk, s_ax, s_ay, s_aydot]
+    if optimize_transient_params and s_tr_sym is not None:
+        fn_in.append(s_tr_sym)
+    fn_phys = ca.Function(
+        "ax_trans_phys",
+        fn_in,
+        [
+            ev_s["Fx_tot"],
+            ev_s["Fy_tot"],
+            ev_s["Mz_tot"],
+            ev_s["P_dc_ecu_kw"],
+            ev_s["P_dc_drv_kw"],
+            ev_s["T_motor_4"],
+            ev_s["T_max_4"],
+            ev_s["T_min_4"],
+        ],
+    )
+    fn_phys_map = fn_phys.map(m_pts)
+
+    S_VX, S_VY, S_WZ, S_N, S_XI = 20.0, 2.0, 1.5, 1.0, 0.3
+    S_DEL, S_KAP, S_FBRK, S_AX, S_AY = 0.3, 0.1, 4000.0, 10.0, 10.0
+
+    W = ca.MX.sym("W", 13, m_pts)
+    z_tr = ca.MX.sym("z_tr", 3) if optimize_transient_params else ca.MX.sym("z_tr", 0)
+
+    vx = W[0, :] * S_VX
+    vy = W[1, :] * S_VY
+    wz = W[2, :] * S_WZ
+    n_lat = W[3, :] * S_N
+    xi = W[4, :] * S_XI
+    delta = W[5, :] * S_DEL
+    kappa_4 = W[6:10, :] * S_KAP
+    F_brk_hyd = W[10, :] * S_FBRK
+    ax_lt = W[11, :] * S_AX
+    ay_lt = W[12, :] * S_AY
+
+    kap_dm = ca.DM(kappa_c).T
+    cos_xi = ca.cos(xi)
+    sin_xi = ca.sin(xi)
+    v_s = vx * cos_xi - vy * sin_xi
+    sf = (1.0 - n_lat * kap_dm) / v_s
+
+    idx_next = list(range(1, m_pts)) + [0]
+    idx_prev = [m_pts - 1] + list(range(0, m_pts - 1))
+    h_half = 0.5 * ds
+    dt_centered = smax((sf[0, idx_prev] + sf[0, idx_next]) * h_half, 0.02, 1e-3)
+    ay_dot_raw = (ay_lt[0, idx_next] - ay_lt[0, idx_prev]) / dt_centered
+    ay_dot = sclip(ay_dot_raw, -120.0, 120.0, 1.0)
+
+    if optimize_transient_params:
+        tr_vals = z_tr * ca.DM(tr_scale)
+        Fx_tot, Fy_tot, Mz_tot, P_ecu, P_drv, T_mot, T_max, T_min = fn_phys_map(
+            vx, vy, wz, delta, kappa_4, F_brk_hyd, ax_lt, ay_lt, ay_dot,
+            ca.repmat(tr_vals, 1, m_pts),
+        )
+    else:
+        Fx_tot, Fy_tot, Mz_tot, P_ecu, P_drv, T_mot, T_max, T_min = fn_phys_map(
+            vx, vy, wz, delta, kappa_4, F_brk_hyd, ax_lt, ay_lt, ay_dot
+        )
+
+    dvx_ds = sf * (Fx_tot / mass + vy * wz)
+    dvy_ds = sf * (Fy_tot / mass - vx * wz)
+    dwz_ds = sf * (Mz_tot / izz)
+    dn_ds = sf * (vx * sin_xi + vy * cos_xi)
+    dxi_ds = sf * wz - kap_dm
+
+    X_s = W[0:5, :]
+    F_s = ca.vertcat(dvx_ds / S_VX, dvy_ds / S_VY, dwz_ds / S_WZ, dn_ds / S_N, dxi_ds / S_XI)
+
+    idx_k = list(range(0, m_pts, 2))
+    idx_m = list(range(1, m_pts, 2))
+    idx_kp1 = [(2 * ((k + 1) % n_intervals)) for k in range(n_intervals)]
+
+    X_k, X_m, X_kp1 = X_s[:, idx_k], X_s[:, idx_m], X_s[:, idx_kp1]
+    F_k, F_m, F_kp1 = F_s[:, idx_k], F_s[:, idx_m], F_s[:, idx_kp1]
+    defect_mid = X_m - 0.5 * (X_k + X_kp1) - (ds / 8.0) * (F_k - F_kp1)
+    defect_end = X_kp1 - X_k - (ds / 6.0) * (F_k + 4.0 * F_m + F_kp1)
+
+    sf_k, sf_m, sf_kp1 = sf[0, idx_k], sf[0, idx_m], sf[0, idx_kp1]
+    T_lap = ca.sum2((ds / 6.0) * (sf_k + 4.0 * sf_m + sf_kp1))
+
+    d_delta = delta[0, idx_next] - delta
+    dd_delta = delta[0, idx_next] - 2.0 * delta + delta[0, idx_prev]
+    d_kappa = kappa_4[:, idx_next] - kappa_4
+    d_fbrk = (F_brk_hyd[0, idx_next] - F_brk_hyd) / 10000.0
+
+    reg = (
+        3.0e-2 * ca.sum2(d_delta * d_delta) / h_half
+        + 9.0e-2 * ca.sum2(dd_delta * dd_delta) / (h_half ** 3)
+        + 2.0e-2 * ca.sum1(ca.sum2(d_kappa * d_kappa)) / h_half
+        + 6.0e-3 * ca.sum2(d_fbrk * d_fbrk) / h_half
+        + 1.5e-3 * ca.sum2(((F_brk_hyd / 10000.0) ** 2) * sf * h_half)
+    )
+    obj = T_lap + reg
+
+    g_list: List[ca.MX] = []
+    lbg_list: List[np.ndarray] = []
+    ubg_list: List[np.ndarray] = []
+
+    def _add_g(expr: ca.MX, lb_v: float | np.ndarray, ub_v: float | np.ndarray) -> None:
+        vec = ca.vec(expr)
+        n_el = vec.shape[0]
+        g_list.append(vec)
+        lbg_list.append(np.full(n_el, float(lb_v)) if np.isscalar(lb_v) else np.asarray(lb_v, dtype=np.float64).reshape(n_el))
+        ubg_list.append(np.full(n_el, float(ub_v)) if np.isscalar(ub_v) else np.asarray(ub_v, dtype=np.float64).reshape(n_el))
+
+    _add_g(defect_mid, 0.0, 0.0)
+    _add_g(defect_end, 0.0, 0.0)
+    _add_g((ax_lt - Fx_tot / mass) / S_AX, 0.0, 0.0)
+    _add_g((ay_lt - Fy_tot / mass) / S_AY, 0.0, 0.0)
+    _add_g((T_mot - T_max) / 250.0, -np.inf, 0.0)
+    _add_g((T_min - T_mot) / 250.0, -np.inf, 0.0)
+    _add_g(P_ecu / 80.0, -24.90 / 80.0, 79.90 / 80.0)
+    _add_g(P_drv / 80.0, -24.90 / 80.0, 79.90 / 80.0)
+
+    car_half_w = 0.71
+    car_l_f = 1.15
+    car_l_r = 0.95
+    cone_m = 0.18
+    wl_lim = ca.DM(w_left - cone_m).T
+    wr_lim = ca.DM(w_right - cone_m).T
+    _add_g(n_lat + car_l_f * sin_xi + car_half_w * cos_xi - wl_lim, -np.inf, 0.0)
+    _add_g(n_lat - car_l_r * sin_xi + car_half_w * cos_xi - wl_lim, -np.inf, 0.0)
+    _add_g(n_lat + car_l_f * sin_xi - car_half_w * cos_xi + wr_lim, 0.0, np.inf)
+    _add_g(n_lat - car_l_r * sin_xi - car_half_w * cos_xi + wr_lim, 0.0, np.inf)
+    _add_g(v_s / S_VX, 3.0 / S_VX, np.inf)
+
+    dt_half = 0.5 * (sf + sf[0, idx_next]) * h_half
+    max_steer_rate = math.radians(62.0)
+    _add_g(d_delta - max_steer_rate * dt_half, -np.inf, 0.0)
+    _add_g(-d_delta - max_steer_rate * dt_half, -np.inf, 0.0)
+
+    tan_bmax = math.tan(math.radians(4.8))
+    _add_g((vy - vx * tan_bmax) / S_VY, -np.inf, 0.0)
+    _add_g((-vy - vx * tan_bmax) / S_VY, -np.inf, 0.0)
+
+    T_mot_pos = 0.5 * (T_mot + ca.sqrt(T_mot * T_mot + 0.01))
+    bspd_prod = ca.repmat(F_brk_hyd / 4000.0, 4, 1) * (T_mot_pos / 250.0)
+    _add_g(bspd_prod, -np.inf, 1.5e-3)
+
+    g_vec = ca.vertcat(*g_list)
+    lbg = np.concatenate(lbg_list)
+    ubg = np.concatenate(ubg_list)
+
+    lbw = np.zeros((13, m_pts), dtype=np.float64)
+    ubw = np.zeros((13, m_pts), dtype=np.float64)
+    lbw[0, :], ubw[0, :] = 3.5 / S_VX, 38.0 / S_VX
+    lbw[1, :], ubw[1, :] = -4.0 / S_VY, 4.0 / S_VY
+    lbw[2, :], ubw[2, :] = -3.8 / S_WZ, 3.8 / S_WZ
+    lbw[3, :] = -np.maximum(w_right - car_half_w - cone_m, 0.05) / S_N
+    ubw[3, :] = np.maximum(w_left - car_half_w - cone_m, 0.05) / S_N
+    lbw[4, :], ubw[4, :] = -0.70 / S_XI, 0.70 / S_XI
+    lbw[5, :], ubw[5, :] = -max_steer / S_DEL, max_steer / S_DEL
+    lbw[6:10, :], ubw[6:10, :] = -0.135 / S_KAP, 0.135 / S_KAP
+    lbw[10, :], ubw[10, :] = 0.0 / S_FBRK, 12000.0 / S_FBRK
+    lbw[11, :], ubw[11, :] = -24.0 / S_AX, 18.0 / S_AX
+    lbw[12, :], ubw[12, :] = -22.0 / S_AY, 22.0 / S_AY
+
+    # Warm start from FSG 2023 racing line
+    rl = _json.loads(rl_path.read_text(encoding="utf-8"))
+    pts = rl["points"]
+    rl_len = float(rl.get("length_m", length))
+    s_rl = np.array([float(pt["s"]) for pt in pts], dtype=np.float64) * (length / max(rl_len, 1.0))
+
+    def _interp_p(vals: np.ndarray) -> np.ndarray:
+        return np.interp(s_all, np.append(s_rl, length), np.append(vals, vals[0]))
+
+    vx_0 = np.clip(_interp_p(np.array([float(pt["v_mps"]) for pt in pts])), 5.0, 30.0)
+    n_0 = np.clip(_interp_p(np.array([float(pt["n"]) for pt in pts])), -0.55, 0.55)
+    yaw_rl = np.array([float(pt["yaw_rad"]) for pt in pts])
+    yaw_unw = np.unwrap(yaw_rl)
+    d_yaw = ((yaw_rl[0] - yaw_rl[-1] + np.pi) % (2.0 * np.pi)) - np.pi
+    yaw_i = np.interp(s_all, np.append(s_rl, length), np.append(yaw_unw, yaw_unw[-1] + d_yaw))
+    xi_0 = np.clip(((yaw_i - psi_all + np.pi) % (2.0 * np.pi)) - np.pi, -0.35, 0.35)
+    kap_0 = _interp_p(np.array([float(pt["kappa"]) for pt in pts]))
+    wz_0 = np.clip(vx_0 * kap_0, -3.0, 3.0)
+    ax_0 = np.clip(_interp_p(np.array([float(pt["ax_mps2"]) for pt in pts])), -14.0, 11.0)
+    ay_0 = np.clip(_interp_p(np.array([float(pt["ay_mps2"]) for pt in pts])), -14.0, 14.0)
+    del_0 = np.clip(_interp_p(np.array([float(pt["steer_rad"]) for pt in pts])), -0.9 * max_steer, 0.9 * max_steer)
+    kw_0 = np.clip(ax_0 / 180.0, -0.05, 0.05)
+
+    w0 = np.zeros((13, m_pts), dtype=np.float64)
+    w0[0, :] = vx_0 / S_VX
+    w0[2, :] = wz_0 / S_WZ
+    w0[3, :] = n_0 / S_N
+    w0[4, :] = xi_0 / S_XI
+    w0[5, :] = del_0 / S_DEL
+    w0[6:10, :] = np.tile(kw_0[None, :], (4, 1)) / S_KAP
+    w0[10, :] = np.clip(np.maximum(-ax_0 * mass - 2200.0, 0.0), 0.0, 5000.0) / S_FBRK
+    w0[11, :] = ax_0 / S_AX
+    w0[12, :] = ay_0 / S_AY
+
+    if optimize_transient_params:
+        lb_tr = np.array([DAMP_RATIO_BOUNDS[0], DAMP_RATIO_BOUNDS[0], ACKERMANN_PCT_BOUNDS[0]]) / tr_scale
+        ub_tr = np.array([DAMP_RATIO_BOUNDS[1], DAMP_RATIO_BOUNDS[1], ACKERMANN_PCT_BOUNDS[1]]) / tr_scale
+        z0_tr = np.array([0.75, 0.85, 10.0]) / tr_scale
+        lbx = np.concatenate([lbw.reshape(-1, order="F"), lb_tr])
+        ubx = np.concatenate([ubw.reshape(-1, order="F"), ub_tr])
+        x0 = np.clip(np.concatenate([w0.reshape(-1, order="F"), z0_tr]), lbx, ubx)
+        x_sym = ca.vertcat(ca.vec(W), z_tr)
+    else:
+        lbx = lbw.reshape(-1, order="F")
+        ubx = ubw.reshape(-1, order="F")
+        x0 = np.clip(w0.reshape(-1, order="F"), lbx, ubx)
+        x_sym = ca.vec(W)
+
+    nlp = {"x": x_sym, "f": obj, "g": g_vec}
+    opts = {
+        "print_time": False,
+        "ipopt.print_level": 0,
+        "ipopt.linear_solver": "mumps",
+        "ipopt.hessian_approximation": "limited-memory",
+        "ipopt.max_iter": int(ipopt_max_iter),
+        "ipopt.tol": 1e-4,
+        "ipopt.acceptable_tol": 1e-3,
+        "ipopt.acceptable_iter": 10,
+        "ipopt.mu_strategy": "adaptive",
+        "ipopt.nlp_scaling_method": "gradient-based",
+        "ipopt.sb": "yes",
+    }
+    solver = ca.nlpsol("ax_transient_ocp", "ipopt", nlp, opts)
+    sol = solver(x0=x0, lbx=lbx, ubx=ubx, lbg=lbg, ubg=ubg)
+    stats = solver.stats()
+    x_opt = np.array(sol["x"].full()).ravel()
+    w_opt = x_opt[: 13 * m_pts].reshape((13, m_pts), order="F")
+
+    if optimize_transient_params:
+        tr_opt = x_opt[13 * m_pts : 13 * m_pts + 3] * tr_scale
+        rd_f_opt, rd_r_opt, ack_opt = float(tr_opt[0]), float(tr_opt[1]), float(tr_opt[2])
+    else:
+        rd_f_opt = float(dp_init.get("damp_ratio_f", NOMINAL_DAMP_RATIO))
+        rd_r_opt = float(dp_init.get("damp_ratio_r", NOMINAL_DAMP_RATIO))
+        ack_opt = float(dp_init.get("ackermann_pct", p.ackermann_factor * 100.0))
+
+    vx_o = w_opt[0, :] * S_VX
+    vy_o = w_opt[1, :] * S_VY
+    wz_o = w_opt[2, :] * S_WZ
+    n_o = w_opt[3, :] * S_N
+    xi_o = w_opt[4, :] * S_XI
+    ay_o = w_opt[12, :] * S_AY
+    v_s_o = vx_o * np.cos(xi_o) - vy_o * np.sin(xi_o)
+    sf_o = (1.0 - n_o * kappa_c) / v_s_o
+    dt_int = (ds / 6.0) * (sf_o[idx_k] + 4.0 * sf_o[idx_m] + sf_o[idx_kp1])
+    t_lap = float(np.sum(dt_int))
+
+    dt_cent = np.maximum((sf_o[idx_prev] + sf_o[idx_next]) * h_half, 0.02)
+    ay_dot_o = (ay_o[idx_next] - ay_o[idx_prev]) / dt_cent
+    wz_dot_o = (wz_o[idx_next] - wz_o[idx_prev]) / dt_cent
+
+    # Verify steady-state cornering stability dMz/dbeta is unaffected (ay_dot = 0)
+    dp_eval = dict(base_setup_overrides) if base_setup_overrides else {}
+    dp_eval.update({
+        "damp_ratio_f": rd_f_opt,
+        "damp_ratio_r": rd_r_opt,
+        "ackermann_pct": ack_opt,
+        "use_real_electrical_loss_map": bool(use_real_electrical_loss_map),
+    })
+    veh_ss = build_casadi_vehicle_for_compound(grip_profile, compound, design_overrides=dp_eval)
+    dmz_ss = compute_directional_stability_dmz_dbeta(
+        veh_ss, 11.5, 0.0, 1.35, 0.16, np.array([0.01, 0.01, 0.02, 0.02]), 0.0, 15.0
+    )
+
+    return {
+        "success": bool(stats.get("success", False)) or str(stats.get("return_status")) == "Solved_To_Acceptable_Level",
+        "return_status": str(stats.get("return_status", "")),
+        "iterations": int(stats.get("iter_count", -1)),
+        "solve_time_s": round(_time.perf_counter() - t0, 2),
+        "lap_time_s": round(t_lap, 4),
+        "damp_ratio_f": round(rd_f_opt, 4),
+        "damp_ratio_r": round(rd_r_opt, 4),
+        "damping_compression_front_ns_m": round(rd_f_opt * NOMINAL_DAMP_REBOUND_NS_M, 1),
+        "damping_rebound_front_ns_m": round(NOMINAL_DAMP_REBOUND_NS_M, 1),
+        "damping_compression_rear_ns_m": round(rd_r_opt * NOMINAL_DAMP_REBOUND_NS_M, 1),
+        "damping_rebound_rear_ns_m": round(NOMINAL_DAMP_REBOUND_NS_M, 1),
+        "ackermann_pct": round(ack_opt, 2),
+        "max_abs_ay_dot_ms3": round(float(np.max(np.abs(ay_dot_o))), 2),
+        "rms_ay_dot_ms3": round(float(np.sqrt(np.mean(ay_dot_o ** 2))), 2),
+        "max_abs_wz_dot_rads2": round(float(np.max(np.abs(wz_dot_o))), 2),
+        "ay_max_g": round(float(np.max(np.abs(ay_o)) / p.gravity), 3),
+        "v_max_kmh": round(float(np.max(np.hypot(vx_o, vy_o)) * 3.6), 2),
+        "steady_state_dmz_dbeta_iso_nm_deg": round(dmz_ss, 2),
+        "steady_state_stable": bool(dmz_ss > 0.0),
+    }
 
 
 if __name__ == "__main__":

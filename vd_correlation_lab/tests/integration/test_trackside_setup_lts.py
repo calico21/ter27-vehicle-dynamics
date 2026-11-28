@@ -154,6 +154,14 @@ def test_trackside_setup_optimization_report_and_plot() -> None:
                         f"Report {aliases[0]}: {param}={val} outside [{lo}, {hi}]"
                     )
 
+    # Lock in upgraded 4WD dynamic event performance gates on FSG_RUBBERED (R25B)
+    t_skid_opt = float(low_keys["skidpad"]["optimal_time_s"])
+    t_accel_opt = float(low_keys["accel"]["optimal_time_s"])
+    t_autocross_opt = float(low_keys["autocross"]["optimal_time_s"])
+    assert t_skid_opt <= 4.64, f"Skidpad optimal {t_skid_opt:.4f} s > 4.64 s gate"
+    assert t_accel_opt < 3.50, f"Accel 75m optimal {t_accel_opt:.4f} s >= 3.50 s gate"
+    assert t_autocross_opt < 67.106, f"Autocross optimal {t_autocross_opt:.4f} s >= 67.106 s baseline"
+
     # Check 300 DPI comparison PNG exists and is valid
     png_path = VAULT_07_DESIGN_POINTS / "trackside_setup_event_comparison.png"
     assert png_path.exists(), f"Missing comparison PNG: {png_path}"

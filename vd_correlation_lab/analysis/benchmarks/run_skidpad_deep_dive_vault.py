@@ -38,6 +38,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from vd_correlation_lab.config.paths import (
+    TER27_CONFIG_DIR,
     VAULT_03_TV_MAPS,
     VAULT_09_SKIDPAD_DEEP_DIVE,
 )
@@ -48,6 +49,7 @@ from vd_correlation_lab.models.vehicle_14dof.ter27_physics import (
     TeR27Params,
     TeR27PhysicsModel,
     load_ter27_params,
+    rake_to_aero_modifiers,
 )
 from vd_correlation_lab.models.kinematics.ter26_double_wishbone_3d import TeR26Kinematics3D
 from vd_correlation_lab.analysis.visualization.plot_style import (
@@ -235,13 +237,21 @@ def simulate_figure8_deep_dive(
     toe_f_rad = 0.0
     toe_r_rad = 0.0
     if setup_override:
-        cf = setup_override.get("static_camber_f_deg", setup_override.get("camber_f_deg"))
-        cr = setup_override.get("static_camber_r_deg", setup_override.get("camber_r_deg"))
+        cf = setup_override.get(
+            "static_camber_f_deg",
+            setup_override.get("camber_front_deg", setup_override.get("camber_f_deg")),
+        )
+        cr = setup_override.get(
+            "static_camber_r_deg",
+            setup_override.get("camber_rear_deg", setup_override.get("camber_r_deg")),
+        )
         lf_val = setup_override.get("lltd_elastic_f", setup_override.get("lltd"))
-        if setup_override.get("toe_f_deg") is not None:
-            toe_f_rad = math.radians(float(setup_override["toe_f_deg"]))
-        if setup_override.get("toe_r_deg") is not None:
-            toe_r_rad = math.radians(float(setup_override["toe_r_deg"]))
+        tf_deg = setup_override.get("toe_front_deg", setup_override.get("toe_f_deg"))
+        tr_deg = setup_override.get("toe_rear_deg", setup_override.get("toe_r_deg"))
+        if tf_deg is not None:
+            toe_f_rad = math.radians(float(tf_deg))
+        if tr_deg is not None:
+            toe_r_rad = math.radians(float(tr_deg))
         if cf is not None:
             m_veh.p.static_camber_f_rad = math.radians(float(cf))
         if cr is not None:
@@ -253,6 +263,12 @@ def simulate_figure8_deep_dive(
             m_veh.p.k_roll_f = lf * k_tot
             m_veh.p.k_roll_r = (1.0 - lf) * k_tot
             m_veh.p.lltd_elastic_f = lf
+        rake_mm = setup_override.get("rake_mm")
+        if rake_mm is not None:
+            cl_mod, cd_mod, cop_f = rake_to_aero_modifiers(float(rake_mm), float(m_veh.p.aero_balance_front))
+            m_veh.p.cl_a *= cl_mod
+            m_veh.p.cd_a *= cd_mod
+            m_veh.p.aero_balance_front = cop_f
 
     ctrl = SkidpadMaxAttackController()
     ctrl.reset()
@@ -328,12 +344,15 @@ def simulate_figure8_deep_dive(
         psi_tan = ang_c + turn_sgn * 0.5 * math.pi
         e_psi = (psi_tan - psi + math.pi) % (2.0 * math.pi) - math.pi
 
-        # Path-following steering with radial PD tracking for >= 0.15 m cone clearance
+        # Path-following steering with radial PID tracking for >= 0.15 m cone clearance
+        if abs(e_r) < 0.45:
+            e_r_int = float(np.clip(e_r_int + e_r * dt, -0.25, 0.25))
         delta_ff = turn_sgn * math.atan(params.wheelbase / r_tgt_now)
         k_psi = 1.35 if profile.upper() != "COLD_18C" else 1.40
         k_er = 0.36 if profile.upper() != "COLD_18C" else 0.32
+        k_eri = 0.22 if (mode == "max_attack_v2" and profile.upper() != "COLD_18C") else 0.0
         k_erd = 0.11
-        delta_cmd = delta_ff + k_psi * e_psi + turn_sgn * (k_er * e_r + k_erd * e_r_dot)
+        delta_cmd = delta_ff + k_psi * e_psi + turn_sgn * (k_er * e_r + k_eri * e_r_int + k_erd * e_r_dot)
         max_dd = 4.2 * dt
         delta += float(np.clip(delta_cmd - delta, -max_dd, max_dd))
         delta = float(np.clip(delta, -0.255, 0.255))
@@ -570,6 +589,13 @@ def simulate_figure8_deep_dive(
     hv_viol = int(np.sum((p_arr > HV_MAX_KW + 0.05) | (p_arr < HV_MIN_KW - 0.05)))
     tf_arr = np.asarray(hist["torque_fight_kw"])
     tf_energy_kj = float(np.sum(tf_arr) * dt)
+    t_arr_h = np.asarray(hist["t"])
+    vx_arr_h = np.asarray(hist["vx"])
+    dmz_arr_h = np.asarray(hist["dMz_dbeta"])
+    t_cr_val = float(t_crossover or 0.0)
+    cr_mask = (t_arr_h >= t_cr_val - 0.5) & (t_arr_h <= t_cr_val + 1.5)
+    vx_cr_min = float(np.min(vx_arr_h[cr_mask])) if np.any(cr_mask) else float(np.min(vx_arr_h))
+    vx_mean_val = float(np.mean(vx_arr_h))
 
     return {
         "profile": profile,
@@ -579,13 +605,17 @@ def simulate_figure8_deep_dive(
         "t_right_s": round(t_right, 3),
         "t_left_s": round(t_left, 3),
         "t_mean_s": round(t_mean, 3),
-        "t_crossover_s": round(float(t_crossover or 0.0), 3),
-        "v_mean_ms": round(float(np.mean(hist["vx"])), 3),
-        "v_mean_kmh": round(float(np.mean(hist["vx"])) * 3.6, 2),
+        "t_crossover_s": round(t_cr_val, 3),
+        "v_mean_ms": round(vx_mean_val, 3),
+        "v_mean_kmh": round(vx_mean_val * 3.6, 2),
+        "crossover_vx_min_ms": round(vx_cr_min, 3),
+        "crossover_vx_drop_ms": round(max(vx_mean_val - vx_cr_min, 0.0), 3),
         "ay_sustained_g": round(float(np.percentile(np.abs(hist["ay_g"]), 85)), 3),
         "ay_peak_g": round(float(np.max(np.abs(hist["ay_g"]))), 3),
         "beta_mean_abs_deg": round(float(np.mean(np.abs(hist["beta_deg"]))), 2),
         "beta_max_abs_deg": round(float(np.max(np.abs(hist["beta_deg"]))), 2),
+        "dMz_dbeta_max_nm_rad": round(float(np.max(dmz_arr_h)), 2),
+        "dMz_dbeta_mean_nm_rad": round(float(np.mean(dmz_arr_h)), 2),
         "p_dc_min_kw": round(float(np.min(p_arr)), 2),
         "p_dc_max_kw": round(float(np.max(p_arr)), 2),
         "hv_violations": hv_viol,
@@ -1446,20 +1476,26 @@ def main() -> int:
     cal = load_fsg_calibration()
     oracle = load_oracle_report()
     params = load_ter27_params()
+    opt_skidpad_path = TER27_CONFIG_DIR / "setups" / "optimal_skidpad.json"
+    opt_skidpad_cfg = (
+        json.loads(opt_skidpad_path.read_text(encoding="utf-8"))
+        if opt_skidpad_path.exists()
+        else None
+    )
     ded_setup = oracle.get("dedicated_setup_opt", {})
     ded_r20_raw = ded_setup.get("R20", {}).get("optimal_setup") if isinstance(ded_setup, dict) else None
     ded_r25_raw = ded_setup.get("R25B", {}).get("optimal_setup") if isinstance(ded_setup, dict) else None
-    # Match LLTD to 0.48 for V2 rear-drive torque allocator (prevents rear oversteer & keeps >= 0.15 m clearance)
-    ded_r20 = {**ded_r20_raw, "lltd": 0.48} if isinstance(ded_r20_raw, dict) else None
-    ded_r25 = {**ded_r25_raw, "lltd": 0.48} if isinstance(ded_r25_raw, dict) else None
+    # Use optimal_skidpad.json (lltd=0.5007, rake_mm=7.282, camber/toe) when available
+    ded_r20 = opt_skidpad_cfg if isinstance(opt_skidpad_cfg, dict) else ded_r20_raw
+    ded_r25 = opt_skidpad_cfg if isinstance(opt_skidpad_cfg, dict) else ded_r25_raw
 
     cases = [
         ("FSG_RUBBERED_R20_OPEN", "R20", "FSG_RUBBERED", "legacy_open", R_CENTER, None),
         ("FSG_RUBBERED_R20_TV_V1", "R20", "FSG_RUBBERED", "tv_v1", 8.60, None),
-        ("FSG_RUBBERED_R20_MAX_ATTACK_V2", "R20", "FSG_RUBBERED", "max_attack_v2", 8.31, ded_r20),
-        ("FSG_RUBBERED_R25B_MAX_ATTACK_V2", "R25B", "FSG_RUBBERED", "max_attack_v2", 8.31, ded_r25),
-        ("TTC_PEAK_R20_MAX_ATTACK_V2", "R20", "TTC_PEAK", "max_attack_v2", 8.35, None),
-        ("TTC_PEAK_R25B_MAX_ATTACK_V2", "R25B", "TTC_PEAK", "max_attack_v2", 8.35, None),
+        ("FSG_RUBBERED_R20_MAX_ATTACK_V2", "R20", "FSG_RUBBERED", "max_attack_v2", 8.35, ded_r20),
+        ("FSG_RUBBERED_R25B_MAX_ATTACK_V2", "R25B", "FSG_RUBBERED", "max_attack_v2", 8.34, ded_r25),
+        ("TTC_PEAK_R20_MAX_ATTACK_V2", "R20", "TTC_PEAK", "max_attack_v2", 8.38, None),
+        ("TTC_PEAK_R25B_MAX_ATTACK_V2", "R25B", "TTC_PEAK", "max_attack_v2", 8.38, None),
         ("COLD_18C_R20_MAX_ATTACK_V2", "R20", "COLD_18C", "max_attack_v2", 8.85, None),
         ("COLD_18C_R25B_MAX_ATTACK_V2", "R25B", "COLD_18C", "max_attack_v2", 8.85, None),
     ]

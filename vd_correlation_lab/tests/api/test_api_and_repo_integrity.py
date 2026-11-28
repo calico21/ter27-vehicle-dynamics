@@ -79,6 +79,7 @@ EXPECTED_VAULT_FOLDERS: List[str] = [
     "08_codegen_sil_and_godot_parity",
     "09_ter27_skidpad_deep_dive",
     "10_ter27_dil_and_sensor_realism",
+    "11_differentiable_casadi_and_tubes",
 ]
 
 EXPECTED_OPTIMAL_PRESETS: List[str] = [
@@ -203,8 +204,8 @@ def test_fastapi_rest_endpoints_and_schemas() -> None:
         r_vault = client.get("/api/vault/catalog")
         assert r_vault.status_code == 200
         vault = VaultCatalogResponse.model_validate(r_vault.json())
-        assert vault.n_suites == 10
-        assert vault.total_pngs >= 60
+        assert vault.n_suites == 11
+        assert vault.total_pngs >= 65
 
 
 def test_websocket_telemetry_stream() -> None:

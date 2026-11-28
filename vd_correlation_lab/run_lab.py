@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-CLI unificado del laboratorio de correlación multi-vehículo y multi-modelo.
+Unified multi-vehicle and multi-model correlation lab CLI.
 
-Uso:
+Usage:
   python3 vd_correlation_lab/run_lab.py --vehicle ter26_rwd --model full_14dof
+  python3 vd_correlation_lab/run_lab.py --vehicle ter26_rwd --model differentiable_casadi_14dof --suspension 3d_double_wishbone_lut
   python3 vd_correlation_lab/run_lab.py --vehicle ter26_rwd --model all
   python3 vd_correlation_lab/run_lab.py --vehicle all --model all
   python3 vd_correlation_lab/run_lab.py --compare ter26_rwd ter27_4wd --model fast_3dof
@@ -46,7 +47,16 @@ from plotting import (
     suite_10_cross_model,
 )
 
-AVAILABLE_MODELS = ["full_14dof", "fast_3dof"]
+from vd_correlation_lab.models.registry import (
+    SUSPENSION_MODES,
+    VEHICLE_MODELS,
+    create_vehicle_model,
+    normalize_model_id,
+    normalize_suspension_mode,
+)
+
+AVAILABLE_MODELS = list(VEHICLE_MODELS)
+AVAILABLE_SUSPENSION_MODES = list(SUSPENSION_MODES)
 
 SIGNALS_TO_EVAL = [
     ("vx_ms", "vx_sim"),
@@ -83,12 +93,12 @@ def _prepare_vehicle_logs(vehicle_id: str, dbc: DbcDatabase) -> Dict[str, Any]:
 
     log_files = sorted(list(logs_dir.glob("*.log")) + list(logs_dir.glob("*.csv")))
     if not log_files and bool(calib.get("is_synthetic", False)):
-        print(f"[{vehicle_id}] Sin logs CAN de pista; generando maniobra sintética de referencia...")
+        print(f"[{vehicle_id}] No track CAN logs; generating synthetic reference maneuver...", flush=True)
         log_files = [ensure_synthetic_log(REPO_ROOT, logs_dir, vehicle_id, calib)]
     if not log_files:
-        raise FileNotFoundError(f"No hay logs (.log o .csv) en {logs_dir}")
+        raise FileNotFoundError(f"No logs (.log or .csv) found in {logs_dir}")
 
-    print(f"[{vehicle_id}] Acondicionando {len(log_files)} log(s)...")
+    print(f"[{vehicle_id}] Conditioning {len(log_files)} log(s)...", flush=True)
     tmp_dir = Path(tempfile.mkdtemp(prefix=f"vd_lab_{vehicle_id}_"))
     base_runs: List[Dict[str, Any]] = []
     for lf in log_files:
@@ -107,7 +117,96 @@ def _prepare_vehicle_logs(vehicle_id: str, dbc: DbcDatabase) -> Dict[str, Any]:
     return {"vdir": vdir, "calib": calib, "wb": wb, "tmp_dir": tmp_dir, "base_runs": base_runs}
 
 
-def evaluate_vehicle_model(vehicle_id: str, prep: Dict[str, Any], model_id: str, no_plots: bool = False) -> Dict[str, Any]:
+def _run_differentiable_casadi_replay(
+    vehicle_id: str,
+    suspension_mode: str,
+    df_real: pd.DataFrame,
+    horizon_s: float = 0.0,
+) -> pd.DataFrame:
+    """Run open-loop or receding-horizon replay using DifferentiableVehicle14Dof."""
+    from vd_correlation_lab.models.differentiable_casadi import (
+        OUTPUT_IDX,
+        STATE_IDX,
+    )
+
+    dt = 0.01
+    if len(df_real) > 1:
+        dt = float(np.median(np.diff(df_real["t_s"].to_numpy())))
+        dt = max(0.002, min(0.02, dt))
+
+    model = create_vehicle_model(
+        model_id="differentiable_casadi_14dof",
+        vehicle_id=vehicle_id,
+        suspension_mode=suspension_mode,
+        grip_profile="COLD_TEST_OCT" if vehicle_id == "ter26_rwd" else "FSG_RUBBERED",
+        dt=dt,
+        rk4_substeps=2,
+    )
+    theta = model.default_theta()
+    w = model.default_disturbance()
+
+    t_arr = df_real["t_s"].to_numpy()
+    vx_real = df_real["vx_ms"].to_numpy()
+    wz_real = df_real["wz_rads"].to_numpy()
+    steer_rad = np.radians(df_real["steer_deg"].to_numpy()) if "steer_deg" in df_real.columns else np.zeros_like(t_arr)
+    thr_arr = df_real["throttle"].to_numpy() if "throttle" in df_real.columns else np.zeros_like(t_arr)
+    brk_arr = df_real["brake"].to_numpy() if "brake" in df_real.columns else np.zeros_like(t_arr)
+
+    n = len(t_arr)
+    vx_sim = np.zeros(n)
+    ax_sim = np.zeros(n)
+    ay_sim = np.zeros(n)
+    wz_sim = np.zeros(n)
+    rpm_fl = np.zeros(n)
+    rpm_fr = np.zeros(n)
+    rpm_rl = np.zeros(n)
+    rpm_rr = np.zeros(n)
+
+    x = model.default_state(vx=max(float(vx_real[0]), 0.5), vy=0.0, wz=float(wz_real[0]))
+    last_reset_t = float(t_arr[0]) if n > 0 else 0.0
+    rad_s_to_rpm = 60.0 / (2.0 * np.pi)
+
+    for i in range(n):
+        if horizon_s > 0.0 and (float(t_arr[i]) - last_reset_t) >= horizon_s:
+            x = model.default_state(vx=max(float(vx_real[i]), 0.5), vy=0.0, wz=float(wz_real[i]))
+            last_reset_t = float(t_arr[i])
+        u = model.inputs_from_driver(
+            delta_cmd=float(steer_rad[i]),
+            throttle=float(np.clip(thr_arr[i], 0.0, 1.0)),
+            brake=float(np.clip(brk_arr[i], 0.0, 1.0)),
+        )
+        x, y = model.step(x, u, theta=theta, w=w)
+        vx_sim[i] = float(x[STATE_IDX["vx"]])
+        wz_sim[i] = float(x[STATE_IDX["wz"]])
+        ax_sim[i] = float(y[OUTPUT_IDX["ax"]])
+        ay_sim[i] = float(y[OUTPUT_IDX["ay"]])
+        rpm_fl[i] = float(x[STATE_IDX["omega_FL"]]) * rad_s_to_rpm
+        rpm_fr[i] = float(x[STATE_IDX["omega_FR"]]) * rad_s_to_rpm
+        rpm_rl[i] = float(x[STATE_IDX["omega_RL"]]) * rad_s_to_rpm
+        rpm_rr[i] = float(x[STATE_IDX["omega_RR"]]) * rad_s_to_rpm
+
+    return pd.DataFrame({
+        "t_s": t_arr,
+        "vx_sim": vx_sim,
+        "ax_sim": ax_sim,
+        "ay_sim": ay_sim,
+        "wz_sim": wz_sim,
+        "wheel_rpm_fl_sim": rpm_fl,
+        "wheel_rpm_fr_sim": rpm_fr,
+        "wheel_rpm_rl_sim": rpm_rl,
+        "wheel_rpm_rr_sim": rpm_rr,
+    })
+
+
+def evaluate_vehicle_model(
+    vehicle_id: str,
+    prep: Dict[str, Any],
+    model_id: str,
+    suspension_mode: str = "3d_double_wishbone_lut",
+    no_plots: bool = False,
+) -> Dict[str, Any]:
+    model_id = normalize_model_id(model_id)
+    suspension_mode = normalize_suspension_mode(suspension_mode)
     vdir: Path = prep["vdir"]
     calib: Dict[str, Any] = prep["calib"]
     wb: float = prep["wb"]
@@ -116,33 +215,56 @@ def evaluate_vehicle_model(vehicle_id: str, prep: Dict[str, Any], model_id: str,
     tv_map_id = int(calib.get("tv_map_id", 2))
 
     runs: List[Dict[str, Any]] = []
-    batch_jobs: List[Dict[str, Any]] = []
-    for br in prep["base_runs"]:
-        out_h = tmp_dir / f"{br['name']}_{model_id}_horizon10s.csv"
-        out_o = tmp_dir / f"{br['name']}_{model_id}_openloop.csv"
-        batch_jobs.append({
-            "kind": "replay", "vehicle_id": vehicle_id, "setup": "default", "fidelity": model_id,
-            "input_csv": str(br["in_csv"]), "out_csv": str(out_h), "horizon_s": 10.0,
-            "ecu_mode": ecu_mode, "tv_map_id": tv_map_id,
-        })
-        batch_jobs.append({
-            "kind": "replay", "vehicle_id": vehicle_id, "setup": "default", "fidelity": model_id,
-            "input_csv": str(br["in_csv"]), "out_csv": str(out_o), "horizon_s": 0.0,
-            "ecu_mode": ecu_mode, "tv_map_id": tv_map_id,
-        })
-        runs.append({
-            "name": br["name"], "real": br["real"], "meta": br["meta"],
-            "duration_s": br["duration_s"], "out_h": out_h, "out_o": out_o,
-        })
+    if model_id == "differentiable_casadi_14dof":
+        print(
+            f"[{vehicle_id}][{model_id}][{suspension_mode}] Running {len(prep['base_runs'])} replay(s) in Differentiable CasADi 14-DOF...",
+            flush=True,
+        )
+        t0 = time.perf_counter()
+        for br in prep["base_runs"]:
+            df_h = _run_differentiable_casadi_replay(vehicle_id, suspension_mode, br["real"], horizon_s=10.0)
+            df_o = _run_differentiable_casadi_replay(vehicle_id, suspension_mode, br["real"], horizon_s=0.0)
+            runs.append({
+                "name": br["name"],
+                "real": br["real"],
+                "meta": br["meta"],
+                "duration_s": br["duration_s"],
+                "sim_horizon": df_h,
+                "sim_open": df_o,
+            })
+        elapsed_s = time.perf_counter() - t0
+    else:
+        batch_jobs: List[Dict[str, Any]] = []
+        for br in prep["base_runs"]:
+            out_h = tmp_dir / f"{br['name']}_{model_id}_horizon10s.csv"
+            out_o = tmp_dir / f"{br['name']}_{model_id}_openloop.csv"
+            batch_jobs.append({
+                "kind": "replay", "vehicle_id": vehicle_id, "setup": "default", "fidelity": model_id,
+                "suspension_mode": suspension_mode,
+                "input_csv": str(br["in_csv"]), "out_csv": str(out_h), "horizon_s": 10.0,
+                "ecu_mode": ecu_mode, "tv_map_id": tv_map_id,
+            })
+            batch_jobs.append({
+                "kind": "replay", "vehicle_id": vehicle_id, "setup": "default", "fidelity": model_id,
+                "suspension_mode": suspension_mode,
+                "input_csv": str(br["in_csv"]), "out_csv": str(out_o), "horizon_s": 0.0,
+                "ecu_mode": ecu_mode, "tv_map_id": tv_map_id,
+            })
+            runs.append({
+                "name": br["name"], "real": br["real"], "meta": br["meta"],
+                "duration_s": br["duration_s"], "out_h": out_h, "out_o": out_o,
+            })
 
-    print(f"[{vehicle_id}][{model_id}] Ejecutando {len(batch_jobs)} simulaciones en Godot headless...")
-    t0 = time.perf_counter()
-    run_godot_batch(REPO_ROOT, batch_jobs, timeout_s=240)
-    elapsed_s = time.perf_counter() - t0
+        print(f"[{vehicle_id}][{model_id}][{suspension_mode}] Running {len(batch_jobs)} simulations in Godot headless...", flush=True)
+        t0 = time.perf_counter()
+        run_godot_batch(REPO_ROOT, batch_jobs, timeout_s=240)
+        elapsed_s = time.perf_counter() - t0
+
+        for r in runs:
+            r["sim_horizon"] = pd.read_csv(r["out_h"])
+            r["sim_open"] = pd.read_csv(r["out_o"])
 
     for r in runs:
-        r["sim_horizon"] = pd.read_csv(r["out_h"])
-        r["sim_open"] = pd.read_csv(r["out_o"])
         active = r["real"]["is_active"].to_numpy()
         r["metrics_horizon"] = {}
         r["metrics_open"] = {}
@@ -183,6 +305,7 @@ def evaluate_vehicle_model(vehicle_id: str, prep: Dict[str, Any], model_id: str,
     payload: Dict[str, Any] = {
         "vehicle_id": vehicle_id,
         "model_id": model_id,
+        "suspension_mode": suspension_mode,
         "display_name": calib.get("display_name", vehicle_id),
         "legend_label": f"{base_lbl} ({model_id})",
         "is_synthetic": bool(calib.get("is_synthetic", False)),
@@ -211,7 +334,7 @@ def evaluate_vehicle_model(vehicle_id: str, prep: Dict[str, Any], model_id: str,
 
     plots_dir = model_dir / "plots"
     if not no_plots:
-        print(f"[{vehicle_id}][{model_id}] Generando 8 suites a 300 DPI en {plots_dir}...")
+        print(f"[{vehicle_id}][{model_id}] Generating 8 suites at 300 DPI in {plots_dir}...", flush=True)
         suite_01_global_dynamics.generate(plots_dir / "01_dinamica_global", runs, payload)
         suite_02_lateral_yaw.generate(plots_dir / "02_lateral_y_guiniada", runs, payload)
         suite_03_longitudinal_power.generate(plots_dir / "03_longitudinal_y_ruedas", runs, payload)
@@ -225,11 +348,23 @@ def evaluate_vehicle_model(vehicle_id: str, prep: Dict[str, Any], model_id: str,
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Laboratorio de correlación multi-vehículo y multi-modelo Tecnun eRacing")
+    parser = argparse.ArgumentParser(description="Tecnun eRacing multi-vehicle and multi-model correlation lab")
     parser.add_argument("--vehicle", type=str, default=None, help="ter26_rwd | ter27_4wd | all")
-    parser.add_argument("--model", type=str, default="all", help="full_14dof | fast_3dof | all")
-    parser.add_argument("--compare", nargs="+", default=None, help="Lista de vehículos a comparar (ej. ter26_rwd ter27_4wd)")
-    parser.add_argument("--no-plots", action="store_true", help="Omitir generación de gráficas 300 DPI")
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="all",
+        help="full_14dof | fast_3dof | differentiable_casadi_14dof | all",
+    )
+    parser.add_argument(
+        "--suspension",
+        type=str,
+        default="3d_double_wishbone_lut",
+        choices=AVAILABLE_SUSPENSION_MODES,
+        help="Orthogonal suspension mode",
+    )
+    parser.add_argument("--compare", nargs="+", default=None, help="Vehicles to compare (e.g. ter26_rwd ter27_4wd)")
+    parser.add_argument("--no-plots", action="store_true", help="Skip 300 DPI plot generation")
     args = parser.parse_args()
 
     style.apply_style()
@@ -243,33 +378,40 @@ def main() -> None:
     else:
         target_vehicles = [args.vehicle]
 
-    target_models = AVAILABLE_MODELS if args.model == "all" else [args.model]
+    target_models = AVAILABLE_MODELS if args.model == "all" else [normalize_model_id(args.model)]
 
     by_model: Dict[str, Dict[str, Dict[str, Any]]] = {m: {} for m in target_models}
     for vid in target_vehicles:
         prep = _prepare_vehicle_logs(vid, dbc)
         by_vehicle_models: Dict[str, Dict[str, Any]] = {}
         for mid in target_models:
-            res = evaluate_vehicle_model(vid, prep, mid, no_plots=args.no_plots)
+            res = evaluate_vehicle_model(
+                vid,
+                prep,
+                mid,
+                suspension_mode=args.suspension,
+                no_plots=args.no_plots,
+            )
             by_vehicle_models[mid] = res
             by_model[mid][vid] = res
             p = res["payload"]
             ph, po = p["pooled_horizon"], p["pooled_open"]
             print(
-                f"[{vid}][{mid}] COMPLETADO ({p['elapsed_s']:.1f}s) | "
+                f"[{vid}][{mid}][{args.suspension}] COMPLETED ({p['elapsed_s']:.1f}s) | "
                 f"Horiz 10s r(vx={ph['vx_ms']['r']:.3f}, ay={ph['ay_ms2']['r']:.3f}, wz={ph['wz_rads']['r']:.3f}) | "
-                f"Lazo Abierto r(vx={po['vx_ms']['r']:.3f}, ay={po['ay_ms2']['r']:.3f}, wz={po['wz_rads']['r']:.3f})"
+                f"Open-Loop r(vx={po['vx_ms']['r']:.3f}, ay={po['ay_ms2']['r']:.3f}, wz={po['wz_rads']['r']:.3f})",
+                flush=True,
             )
 
         if "full_14dof" in by_vehicle_models and "fast_3dof" in by_vehicle_models:
             cm_dir = LAB_DIR / "results" / "cross_model" / vid
-            print(f"[CROSS-MODEL][{vid}] Generando comparativa 14-DOF vs 3-DOF en {cm_dir}...")
+            print(f"[CROSS-MODEL][{vid}] Generating cross-model comparison in {cm_dir}...", flush=True)
             suite_10_cross_model.generate_cross_model(cm_dir, vid, prep["calib"].get("display_name", vid), by_vehicle_models)
 
     for mid, vdict in by_model.items():
         if len(vdict) >= 2:
             cv_dir = LAB_DIR / "results" / "cross_vehicle" / mid
-            print(f"[CROSS-VEHICLE][{mid}] Generando comparativa entre coches en {cv_dir}...")
+            print(f"[CROSS-VEHICLE][{mid}] Generating cross-vehicle comparison in {cv_dir}...", flush=True)
             suite_09_cross_vehicle.generate_cross_vehicle(cv_dir, vdict)
 
 

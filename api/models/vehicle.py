@@ -3,7 +3,23 @@
 from __future__ import annotations
 
 from typing import Dict, List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+
+class VehicleModelSpec(BaseModel):
+    id: str
+    name: str
+    dof: int
+    recommended_hz: int
+    differentiable: bool
+    supports_codegen: bool
+    description: str
+
+
+class SuspensionModeSpec(BaseModel):
+    id: str
+    name: str
+    description: str
 
 
 class GripProfileSpec(BaseModel):
@@ -103,3 +119,42 @@ class VehicleOverviewResponse(BaseModel):
     grip_profiles: List[GripProfileSpec]
     setup_bounds: Dict[str, List[float]]
     validation_status: ValidationStatusSummary
+    available_vehicle_models: List[VehicleModelSpec] = Field(default_factory=list)
+    available_suspension_modes: List[SuspensionModeSpec] = Field(default_factory=list)
+    active_vehicle_model: str = "full_14dof"
+    active_suspension_mode: str = "3d_double_wishbone_lut"
+
+
+class ModelSuspensionCombination(BaseModel):
+    combination_id: str
+    vehicle_model_id: str
+    vehicle_model_name: str
+    suspension_mode_id: str
+    suspension_mode_name: str
+    dof: int
+    recommended_hz: int
+    differentiable: bool
+    supports_codegen: bool
+
+
+class ModelsCatalogConstraints(BaseModel):
+    p_dc_min_kw: float = -25.0
+    p_dc_max_kw: float = 80.0
+    bspd_ev23_max_kw: float = 5.0
+    min_clear_m: float = 0.150
+    yaw_stability_dmz_dbeta_max: float = 0.0
+    cold_test_oct_lambda_muy: float = 0.47
+    fsg_rubbered_lambda_muy: float = 0.57
+    ter27_nominal_mass_kg: float = 280.0
+
+
+class ModelsCatalogResponse(BaseModel):
+    vehicle_id: str = "ter27_4wd"
+    total_combinations: int
+    vehicle_models: List[VehicleModelSpec]
+    suspension_modes: List[SuspensionModeSpec]
+    combinations: List[ModelSuspensionCombination]
+    parameters: VehiclePhysicalParams
+    constraints: ModelsCatalogConstraints
+    setup_bounds: Dict[str, List[float]]
+    grip_profiles: List[GripProfileSpec]

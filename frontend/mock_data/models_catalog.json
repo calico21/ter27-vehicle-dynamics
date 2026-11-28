@@ -1,0 +1,295 @@
+{
+  "vehicle_id": "ter27_4wd",
+  "total_combinations": 12,
+  "vehicle_models": [
+    {
+      "id": "full_14dof",
+      "name": "Full 14-DOF",
+      "dof": 14,
+      "recommended_hz": 1000,
+      "differentiable": false,
+      "supports_codegen": false,
+      "description": "Full 6-DOF chassis + 4 unsprung suspensions + 4 wheels with dynamic load transfer."
+    },
+    {
+      "id": "fast_3dof",
+      "name": "Fast 3-DOF",
+      "dof": 7,
+      "recommended_hz": 200,
+      "differentiable": false,
+      "supports_codegen": false,
+      "description": "Planar 3-DOF chassis + 4 wheels with quasi-static 35 ms LLTD filter for Driverless."
+    },
+    {
+      "id": "differentiable_casadi_14dof",
+      "name": "Differentiable CasADi 14-DOF",
+      "dof": 14,
+      "recommended_hz": 200,
+      "differentiable": true,
+      "supports_codegen": true,
+      "description": "C2-smooth 14-DOF CasADi SX model with MF6.2+PINN tires, carcass relaxation, exact AD Jacobians, and C-Codegen."
+    }
+  ],
+  "suspension_modes": [
+    {
+      "id": "analytic_1d_lut",
+      "name": "Analytic 1D LUT",
+      "description": "1D camber/toe LUTs from suspension.json with constant motion ratio, digressive dampers, bumpstops, and ARB."
+    },
+    {
+      "id": "3d_double_wishbone_lut",
+      "name": "3D Double Wishbone LUT",
+      "description": "3D double-wishbone spatial kinematics with progressive motion ratio, roll center, bump-steer, and SVSA anti-pitch."
+    },
+    {
+      "id": "decoupled_heave_roll",
+      "name": "Decoupled Heave-Roll",
+      "description": "Decoupled 3rd-element heave spring/damper plus independent roll stiffness and roll damping."
+    },
+    {
+      "id": "standard_pushrod",
+      "name": "Standard Pushrod",
+      "description": "Classic corner-coilover pushrod suspension with linear asymmetric dampers and U-bar ARB."
+    }
+  ],
+  "combinations": [
+    {
+      "combination_id": "full_14dof__analytic_1d_lut",
+      "vehicle_model_id": "full_14dof",
+      "vehicle_model_name": "Full 14-DOF",
+      "suspension_mode_id": "analytic_1d_lut",
+      "suspension_mode_name": "Analytic 1D LUT",
+      "dof": 14,
+      "recommended_hz": 1000,
+      "differentiable": false,
+      "supports_codegen": false
+    },
+    {
+      "combination_id": "full_14dof__3d_double_wishbone_lut",
+      "vehicle_model_id": "full_14dof",
+      "vehicle_model_name": "Full 14-DOF",
+      "suspension_mode_id": "3d_double_wishbone_lut",
+      "suspension_mode_name": "3D Double Wishbone LUT",
+      "dof": 14,
+      "recommended_hz": 1000,
+      "differentiable": false,
+      "supports_codegen": false
+    },
+    {
+      "combination_id": "full_14dof__decoupled_heave_roll",
+      "vehicle_model_id": "full_14dof",
+      "vehicle_model_name": "Full 14-DOF",
+      "suspension_mode_id": "decoupled_heave_roll",
+      "suspension_mode_name": "Decoupled Heave-Roll",
+      "dof": 14,
+      "recommended_hz": 1000,
+      "differentiable": false,
+      "supports_codegen": false
+    },
+    {
+      "combination_id": "full_14dof__standard_pushrod",
+      "vehicle_model_id": "full_14dof",
+      "vehicle_model_name": "Full 14-DOF",
+      "suspension_mode_id": "standard_pushrod",
+      "suspension_mode_name": "Standard Pushrod",
+      "dof": 14,
+      "recommended_hz": 1000,
+      "differentiable": false,
+      "supports_codegen": false
+    },
+    {
+      "combination_id": "fast_3dof__analytic_1d_lut",
+      "vehicle_model_id": "fast_3dof",
+      "vehicle_model_name": "Fast 3-DOF",
+      "suspension_mode_id": "analytic_1d_lut",
+      "suspension_mode_name": "Analytic 1D LUT",
+      "dof": 7,
+      "recommended_hz": 200,
+      "differentiable": false,
+      "supports_codegen": false
+    },
+    {
+      "combination_id": "fast_3dof__3d_double_wishbone_lut",
+      "vehicle_model_id": "fast_3dof",
+      "vehicle_model_name": "Fast 3-DOF",
+      "suspension_mode_id": "3d_double_wishbone_lut",
+      "suspension_mode_name": "3D Double Wishbone LUT",
+      "dof": 7,
+      "recommended_hz": 200,
+      "differentiable": false,
+      "supports_codegen": false
+    },
+    {
+      "combination_id": "fast_3dof__decoupled_heave_roll",
+      "vehicle_model_id": "fast_3dof",
+      "vehicle_model_name": "Fast 3-DOF",
+      "suspension_mode_id": "decoupled_heave_roll",
+      "suspension_mode_name": "Decoupled Heave-Roll",
+      "dof": 7,
+      "recommended_hz": 200,
+      "differentiable": false,
+      "supports_codegen": false
+    },
+    {
+      "combination_id": "fast_3dof__standard_pushrod",
+      "vehicle_model_id": "fast_3dof",
+      "vehicle_model_name": "Fast 3-DOF",
+      "suspension_mode_id": "standard_pushrod",
+      "suspension_mode_name": "Standard Pushrod",
+      "dof": 7,
+      "recommended_hz": 200,
+      "differentiable": false,
+      "supports_codegen": false
+    },
+    {
+      "combination_id": "differentiable_casadi_14dof__analytic_1d_lut",
+      "vehicle_model_id": "differentiable_casadi_14dof",
+      "vehicle_model_name": "Differentiable CasADi 14-DOF",
+      "suspension_mode_id": "analytic_1d_lut",
+      "suspension_mode_name": "Analytic 1D LUT",
+      "dof": 14,
+      "recommended_hz": 200,
+      "differentiable": true,
+      "supports_codegen": true
+    },
+    {
+      "combination_id": "differentiable_casadi_14dof__3d_double_wishbone_lut",
+      "vehicle_model_id": "differentiable_casadi_14dof",
+      "vehicle_model_name": "Differentiable CasADi 14-DOF",
+      "suspension_mode_id": "3d_double_wishbone_lut",
+      "suspension_mode_name": "3D Double Wishbone LUT",
+      "dof": 14,
+      "recommended_hz": 200,
+      "differentiable": true,
+      "supports_codegen": true
+    },
+    {
+      "combination_id": "differentiable_casadi_14dof__decoupled_heave_roll",
+      "vehicle_model_id": "differentiable_casadi_14dof",
+      "vehicle_model_name": "Differentiable CasADi 14-DOF",
+      "suspension_mode_id": "decoupled_heave_roll",
+      "suspension_mode_name": "Decoupled Heave-Roll",
+      "dof": 14,
+      "recommended_hz": 200,
+      "differentiable": true,
+      "supports_codegen": true
+    },
+    {
+      "combination_id": "differentiable_casadi_14dof__standard_pushrod",
+      "vehicle_model_id": "differentiable_casadi_14dof",
+      "vehicle_model_name": "Differentiable CasADi 14-DOF",
+      "suspension_mode_id": "standard_pushrod",
+      "suspension_mode_name": "Standard Pushrod",
+      "dof": 14,
+      "recommended_hz": 200,
+      "differentiable": true,
+      "supports_codegen": true
+    }
+  ],
+  "parameters": {
+    "mass_kg": 280.0,
+    "sprung_mass_kg": 226.0,
+    "unsprung_mass_total_kg": 54.0,
+    "wheelbase_m": 1.54,
+    "track_front_m": 1.23,
+    "track_rear_m": 1.23,
+    "cg_height_m": 0.29,
+    "front_weight_dist": 0.45,
+    "ixx_kgm2": 14.75,
+    "iyy_kgm2": 80.63,
+    "izz_total_kgm2": 133.6209,
+    "cl_a_m2": 6.0,
+    "cd_a_m2": 1.5,
+    "aero_balance_front": 0.48,
+    "wheel_radius_m": 0.2032,
+    "tire_compound": "R20",
+    "p_dc_max_kw": 80.0,
+    "p_dc_regen_max_kw": 25.0,
+    "motor_peak_torque_nm": 25.0,
+    "gear_ratio": 12.5,
+    "battery_capacity_kwh": 7.2,
+    "battery_nominal_v": 540.0
+  },
+  "constraints": {
+    "p_dc_min_kw": -25.0,
+    "p_dc_max_kw": 80.0,
+    "bspd_ev23_max_kw": 5.0,
+    "min_clear_m": 0.15,
+    "yaw_stability_dmz_dbeta_max": 0.0,
+    "cold_test_oct_lambda_muy": 0.47,
+    "fsg_rubbered_lambda_muy": 0.57,
+    "ter27_nominal_mass_kg": 280.0
+  },
+  "setup_bounds": {
+    "lltd": [
+      0.35,
+      0.62
+    ],
+    "camber_f_deg": [
+      -2.5,
+      -0.2
+    ],
+    "camber_r_deg": [
+      -2.2,
+      -0.2
+    ],
+    "toe_f_deg": [
+      -0.5,
+      0.5
+    ],
+    "toe_r_deg": [
+      0.0,
+      0.6
+    ],
+    "brake_bias": [
+      0.55,
+      0.78
+    ],
+    "rake_mm": [
+      -8.0,
+      8.0
+    ]
+  },
+  "grip_profiles": [
+    {
+      "name": "TTC_LAB_PEAK",
+      "env_mu_scale": 1.0,
+      "env_aero_cl_scale": 1.0,
+      "lambda_muy_target": null,
+      "track_temp_c": null,
+      "tire_temp_c": null
+    },
+    {
+      "name": "FSG_REAL_TRACK",
+      "env_mu_scale": 0.86,
+      "env_aero_cl_scale": 0.64,
+      "lambda_muy_target": null,
+      "track_temp_c": null,
+      "tire_temp_c": null
+    },
+    {
+      "name": "COLD_TEST_OCT",
+      "env_mu_scale": 1.0,
+      "env_aero_cl_scale": 0.78,
+      "lambda_muy_target": 0.47,
+      "track_temp_c": 18.0,
+      "tire_temp_c": 35.0
+    },
+    {
+      "name": "FSG_RUBBERED",
+      "env_mu_scale": 1.212766,
+      "env_aero_cl_scale": 0.78,
+      "lambda_muy_target": 0.57,
+      "track_temp_c": 45.0,
+      "tire_temp_c": 75.0
+    },
+    {
+      "name": "COLD_LOW_GRIP",
+      "env_mu_scale": 0.72,
+      "env_aero_cl_scale": 0.64,
+      "lambda_muy_target": null,
+      "track_temp_c": 18.0,
+      "tire_temp_c": 22.0
+    }
+  ]
+}

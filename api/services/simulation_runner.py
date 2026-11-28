@@ -130,6 +130,8 @@ class SimulationRunner:
             "event": req.event,
             "grip_profile": req.grip_profile,
             "compound": req.compound,
+            "vehicle_model": req.vehicle_model,
+            "suspension_mode": req.suspension_mode,
             "optimize_setup": req.optimize_setup,
             "status": "queued",
             "progress_pct": 0.0,
@@ -148,9 +150,13 @@ class SimulationRunner:
             job_record["started_at_utc"] = now
             job_record["finished_at_utc"] = now
             job_record["progress_pct"] = 100.0
-            job_record["result"] = self._load_cached_event_result(req.event)
+            res = self._load_cached_event_result(req.event)
+            res["vehicle_model"] = req.vehicle_model
+            res["suspension_mode"] = req.suspension_mode
+            job_record["result"] = res
             job_record["log_tail"] = [
-                f"dry_run=True: returning validated CasADi reference metrics for {req.event}"
+                f"dry_run=True: returning validated CasADi reference metrics for {req.event} "
+                f"(model={req.vehicle_model}, suspension={req.suspension_mode})"
             ]
         else:
             asyncio.create_task(self._run_job_subprocess(job_id, cmd, req.event))

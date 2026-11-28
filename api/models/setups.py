@@ -62,6 +62,14 @@ class ApplySetupRequest(BaseModel):
     preset: Optional[str] = Field(None, description="Preset name, e.g. optimal_skidpad")
     setup: Optional[Dict[str, Any]] = Field(None, description="Optional full setup dictionary override")
     sensor_profile: Optional[SensorProfileName] = Field(None, description="Optional sensor profile switch")
+    vehicle_model: Optional[str] = Field(
+        None,
+        description="Optional vehicle model switch (full_14dof, fast_3dof, differentiable_casadi_14dof)",
+    )
+    suspension_mode: Optional[str] = Field(
+        None,
+        description="Optional orthogonal suspension mode (analytic_1d_lut, 3d_double_wishbone_lut, decoupled_heave_roll, standard_pushrod)",
+    )
 
 
 class ApplySetupResponse(BaseModel):

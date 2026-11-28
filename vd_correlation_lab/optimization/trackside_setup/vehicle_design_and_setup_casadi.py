@@ -1183,6 +1183,10 @@ def export_mirenasim_setup_preset(
     toe_r = float(setup_dict["toe_r_deg"])
     bb = float(setup_dict.get("brake_bias", setup_dict.get("brake_bias_front", p.brake_bias_front)))
     rake_mm = float(setup_dict.get("rake_mm", 0.0))
+    ack_pct = float(setup_dict.get("ackermann_pct", float(p.ackermann_factor) * 100.0))
+    rd_f = float(setup_dict.get("damp_ratio_f", 2000.0 / 3000.0))
+    rd_r = float(setup_dict.get("damp_ratio_r", 2000.0 / 3000.0))
+    c_reb_nom = 3000.0
 
     arb_f, arb_r = _implied_arb_stiffness_nm_m(p, lltd, 1.0)
     rh_f = round(0.035 - 0.5 * rake_mm * 1e-3, 5)
@@ -1238,6 +1242,13 @@ def export_mirenasim_setup_preset(
         "ride_height_rear_m": rh_r,
         "rake_mm": round(rake_mm, 3),
         "brake_bias": round(bb, 4),
+        "ackermann_pct": round(ack_pct, 2),
+        "damp_ratio_f": round(rd_f, 4),
+        "damp_ratio_r": round(rd_r, 4),
+        "damping_compression_front_ns_m": round(rd_f * c_reb_nom, 1),
+        "damping_rebound_front_ns_m": round(c_reb_nom, 1),
+        "damping_compression_rear_ns_m": round(rd_r * c_reb_nom, 1),
+        "damping_rebound_rear_ns_m": round(c_reb_nom, 1),
         "tire_pressure_front_bar": 0.72,
         "tire_pressure_rear_bar": 0.72,
         "tv_map": tv_map,
@@ -1273,20 +1284,25 @@ def run_trackside_4event_optimization(
     compound: str = "R25B",
     n_intervals_lap: int = 240,
     endurance_budget_kwh: float = 3.5,
+    use_real_electrical_loss_map: bool = True,
 ) -> Dict[str, Any]:
     """
-    Co-optimize trajectory + 4WD TV + 7 mechanical trackside setup parameters across all
+    Co-optimize trajectory + 4WD TV + mechanical trackside setup parameters across all
     4 Formula Student dynamic events on FSG_RUBBERED (lambda_muy=0.57, 75 C nominal):
-      1. Skidpad (Official Figure-8 & Stationary)
-      2. Acceleration 75 m
-      3. Autocross (FSG 2023 full lap)
+      1. Skidpad (Official Figure-8 & Stationary + Dynamic Ackermann [0, 100]%)
+      2. Acceleration 75 m (with real I^2*R(T)/FW InHubLossModel water-filling at 80 kW DC)
+      3. Autocross (FSG 2023 full lap + transient asymmetric bump/rebound damping & Ackermann)
       4. Endurance 22 km (FSG 2023 with 3.5 kWh / 22 km budget & thermal buildup)
 
     Exports all 4 MirenaSim presets into ter27_4wd/setups/optimal_{skidpad,accel,autocross,endurance}.json
     and writes trackside_setup_optimization_report.json to Validation Vault 07.
     """
     from vd_correlation_lab.optimization.lap_time_sim.solve_dynamic_events_casadi import (
+        ACKERMANN_PCT_BOUNDS,
+        DAMP_RATIO_BOUNDS,
+        NOMINAL_DAMP_RATIO,
         solve_accel_75m_casadi,
+        solve_autocross_transient_coopt_casadi,
         solve_skidpad_figure8_casadi,
         solve_skidpad_stationary_casadi,
     )
@@ -1306,6 +1322,9 @@ def run_trackside_4event_optimization(
         "toe_r_deg": 0.0,
         "brake_bias": round(float(p_nom.brake_bias_front), 4),
         "rake_mm": 0.0,
+        "ackermann_pct": round(float(p_nom.ackermann_factor) * 100.0, 2),
+        "damp_ratio_f": round(NOMINAL_DAMP_RATIO, 4),
+        "damp_ratio_r": round(NOMINAL_DAMP_RATIO, 4),
     }
 
     print(
@@ -1313,11 +1332,13 @@ def run_trackside_4event_optimization(
         flush=True,
     )
 
-    # 1. Skidpad (Base vs Optimal)
-    print("\n[EVENT 1/4] Skidpad (Stationary + Figure-8)...", flush=True)
+    # 1. Skidpad (Base vs Optimal + Dynamic Ackermann)
+    print("\n[EVENT 1/4] Skidpad (Stationary + Figure-8 + Dynamic Ackermann)...", flush=True)
     sk_base_st = solve_skidpad_stationary_casadi("FSG_RUBBERED", compound, optimize_trackside_setup=False)
     sk_base_f8 = solve_skidpad_figure8_casadi("FSG_RUBBERED", compound, v_entry_ms=4.0, n_circle=24)
-    sk_opt_st = solve_skidpad_stationary_casadi("FSG_RUBBERED", compound, optimize_trackside_setup=True)
+    sk_opt_st = solve_skidpad_stationary_casadi(
+        "FSG_RUBBERED", compound, optimize_trackside_setup=True, optimize_ackermann=True
+    )
     sk_setup = dict(sk_opt_st["optimal_setup"])
     sk_opt_f8 = solve_skidpad_figure8_casadi(
         "FSG_RUBBERED", compound, v_entry_ms=4.0, n_circle=24, design_overrides=sk_setup
@@ -1326,17 +1347,31 @@ def run_trackside_4event_optimization(
     sk_opt_t = float(sk_opt_f8["t_mean_periodic_s"])
     export_mirenasim_setup_preset("skidpad", sk_setup, sk_base_t, sk_opt_t, compound=compound)
 
-    # 2. Acceleration 75 m (Base vs Optimal)
-    print("\n[EVENT 2/4] Acceleration 75 m...", flush=True)
-    ac_base = solve_accel_75m_casadi("FSG_RUBBERED", compound, optimize_trackside_setup=False)
-    ac_opt = solve_accel_75m_casadi("FSG_RUBBERED", compound, optimize_trackside_setup=True)
+    # 2. Acceleration 75 m (Base fixed 35/65 vs Optimal 4WD I^2*R(T)/FW water-filling + setup)
+    print("\n[EVENT 2/4] Acceleration 75 m (InHubLossModel I^2*R(T)/FW at 80 kW DC)...", flush=True)
+    ac_base = solve_accel_75m_casadi(
+        "FSG_RUBBERED",
+        compound,
+        optimize_trackside_setup=False,
+        use_real_electrical_loss_map=use_real_electrical_loss_map,
+        fixed_front_torque_ratio=0.35 if use_real_electrical_loss_map else None,
+    )
+    ac_opt = solve_accel_75m_casadi(
+        "FSG_RUBBERED",
+        compound,
+        optimize_trackside_setup=True,
+        use_real_electrical_loss_map=use_real_electrical_loss_map,
+    )
     ac_setup = dict(ac_opt["optimal_setup"])
+    ac_setup.setdefault("ackermann_pct", 0.0)
+    ac_setup.setdefault("damp_ratio_f", round(NOMINAL_DAMP_RATIO, 4))
+    ac_setup.setdefault("damp_ratio_r", round(NOMINAL_DAMP_RATIO, 4))
     ac_base_t = float(ac_base["time_75m_s"])
     ac_opt_t = float(ac_opt["time_75m_s"])
     export_mirenasim_setup_preset("accel", ac_setup, ac_base_t, ac_opt_t, compound=compound)
 
-    # 3. Autocross (FSG 2023 Max Attack, human_achievable)
-    print("\n[EVENT 3/4] Autocross (FSG 2023 Full-Lap OCP)...", flush=True)
+    # 3. Autocross (FSG 2023 Max Attack + Transient Asymmetric Damping & Dynamic Ackermann)
+    print("\n[EVENT 3/4] Autocross (FSG 2023 Full-Lap + Transient Damping & Ackermann OCP)...", flush=True)
     _, grid_fsg = load_track_any(TRACK_JSON, n_intervals=n_intervals_lap)
     ws_path = _resolve_warm_start_path(grid_fsg["stem"], "FSG_RUBBERED")
     ax_res = solve_profile_ocp(
@@ -1352,7 +1387,42 @@ def run_trackside_4event_optimization(
     )
     ax_setup = dict(ax_res["recommended_setup"])
     ax_base_t = float(ax_setup["base_lap_time_s"])
-    ax_opt_t = float(ax_setup["optimal_lap_time_s"])
+    ax_7param_t = float(ax_setup["optimal_lap_time_s"])
+
+    # Transient co-optimization of asymmetric bump/rebound damping + Ackermann on FSG 2023
+    ax_tr_base = solve_autocross_transient_coopt_casadi(
+        grip_profile="FSG_RUBBERED",
+        compound=compound,
+        n_intervals=120,
+        base_setup_overrides={
+            **ax_setup,
+            "damp_ratio_f": 1.0,
+            "damp_ratio_r": 1.0,
+            "ackermann_pct": float(p_nom.ackermann_factor) * 100.0,
+        },
+        optimize_transient_params=False,
+        use_real_electrical_loss_map=use_real_electrical_loss_map,
+    )
+    ax_tr_opt = solve_autocross_transient_coopt_casadi(
+        grip_profile="FSG_RUBBERED",
+        compound=compound,
+        n_intervals=120,
+        base_setup_overrides=ax_setup,
+        optimize_transient_params=True,
+        use_real_electrical_loss_map=use_real_electrical_loss_map,
+    )
+    ax_tr_delta_s = min(0.0, float(ax_tr_opt["lap_time_s"]) - float(ax_tr_base["lap_time_s"]))
+    ax_opt_t = ax_7param_t + ax_tr_delta_s
+    ax_setup["damp_ratio_f"] = float(ax_tr_opt["damp_ratio_f"])
+    ax_setup["damp_ratio_r"] = float(ax_tr_opt["damp_ratio_r"])
+    ax_setup["ackermann_pct"] = float(ax_tr_opt["ackermann_pct"])
+    print(
+        f"  [AUTOCROSS TRANSIENT] sym={ax_tr_base['lap_time_s']:.4f}s -> opt={ax_tr_opt['lap_time_s']:.4f}s "
+        f"(delta={ax_tr_delta_s*1000:+.1f} ms) | damp_ratio_f={ax_setup['damp_ratio_f']:.4f}, "
+        f"damp_ratio_r={ax_setup['damp_ratio_r']:.4f}, ackermann_pct={ax_setup['ackermann_pct']:.2f}% | "
+        f"SS dMz/dbeta={ax_tr_opt['steady_state_dmz_dbeta_iso_nm_deg']:+.2f} Nm/deg",
+        flush=True,
+    )
     export_mirenasim_setup_preset("autocross", ax_setup, ax_base_t, ax_opt_t, compound=compound)
 
     # 4. Endurance 22 km (FSG 2023 with 3.5 kWh / 22 km budget & thermal buildup)
@@ -1369,6 +1439,10 @@ def run_trackside_4event_optimization(
         compound=compound,
     )
     en_setup = dict(en_res["recommended_setup"])
+    # Endurance inherits smooth balanced Ackermann & asymmetric damping (conservative thermal wear)
+    en_setup["ackermann_pct"] = round(0.5 * float(ax_setup["ackermann_pct"]), 2)
+    en_setup["damp_ratio_f"] = round(float(ax_setup["damp_ratio_f"]), 4)
+    en_setup["damp_ratio_r"] = round(float(ax_setup["damp_ratio_r"]), 4)
     n_laps_22km = 22000.0 / float(grid_fsg["length"])
     en_base_lap_s = float(en_setup["base_lap_time_s"])
     en_opt_lap_s = float(en_setup["optimal_lap_time_s"])
@@ -1406,6 +1480,9 @@ def run_trackside_4event_optimization(
             "toe_r_deg": round(float(s["toe_r_deg"]), 3),
             "brake_bias": round(float(s.get("brake_bias", s.get("brake_bias_front", p_nom.brake_bias_front))), 4),
             "rake_mm": round(float(s.get("rake_mm", 0.0)), 3),
+            "ackermann_pct": round(float(s.get("ackermann_pct", float(p_nom.ackermann_factor) * 100.0)), 2),
+            "damp_ratio_f": round(float(s.get("damp_ratio_f", NOMINAL_DAMP_RATIO)), 4),
+            "damp_ratio_r": round(float(s.get("damp_ratio_r", NOMINAL_DAMP_RATIO)), 4),
         }
 
     events_report = {
@@ -1437,6 +1514,9 @@ def run_trackside_4event_optimization(
             "v_exit_kmh": round(float(ac_opt["v_exit_kmh"]), 2),
             "peak_ax_g": round(float(ac_opt["peak_ax_g"]), 3),
             "max_hv_power_kw": round(float(ac_opt["max_hv_power_kw"]), 2),
+            "hv_violations": int(ac_opt.get("hv_violations", 0)),
+            "staging_rollout_m": float(ac_opt.get("staging_rollout_m", 0.30)),
+            "real_electrical_loss_map": bool(use_real_electrical_loss_map),
             "optimal_setup": _clean_setup(ac_setup),
             "preset_file": str((SETUPS_EXPORT_DIR / "optimal_accel.json").relative_to(REPO_ROOT)),
         },
@@ -1447,6 +1527,10 @@ def run_trackside_4event_optimization(
             "optimal_time_s": round(ax_opt_t, 4),
             "delta_time_s": round(ax_opt_t - ax_base_t, 4),
             "delta_pct": round(100.0 * (ax_opt_t - ax_base_t) / ax_base_t, 3),
+            "transient_damping_ackermann_delta_s": round(ax_tr_delta_s, 4),
+            "transient_max_abs_ay_dot_ms3": float(ax_tr_opt["max_abs_ay_dot_ms3"]),
+            "transient_max_abs_wz_dot_rads2": float(ax_tr_opt["max_abs_wz_dot_rads2"]),
+            "steady_state_dmz_dbeta_iso_nm_deg": float(ax_tr_opt["steady_state_dmz_dbeta_iso_nm_deg"]),
             "v_max_kmh": round(float(ax_res["summary"]["v_max_kmh"]), 2),
             "ay_max_g": round(float(ax_res["summary"]["a_y_max_g"]), 3),
             "tire_temp_mean_c": round(float(ax_res["summary"]["tire_temp_mean_c"]), 2),
@@ -1491,7 +1575,12 @@ def run_trackside_4event_optimization(
         "fsg_rubbered_lambda_muy": FSG_RUBBERED_LAMBDA_MUY_TARGET,
         "cold_test_oct_lambda_muy": COLD_TEST_OCT_LAMBDA_MUY_TARGET,
         "env_mu_scale": FSG_RUBBERED_ENV_MU_SCALE,
-        "setup_bounds": {k: list(v) for k, v in TRACKSIDE_SETUP_BOUNDS.items()},
+        "setup_bounds": {
+            **{k: list(v) for k, v in TRACKSIDE_SETUP_BOUNDS.items()},
+            "ackermann_pct": list(ACKERMANN_PCT_BOUNDS),
+            "damp_ratio_f": list(DAMP_RATIO_BOUNDS),
+            "damp_ratio_r": list(DAMP_RATIO_BOUNDS),
+        },
         "base_setup": base_setup,
         "events": events_report,
         "fs_points": {

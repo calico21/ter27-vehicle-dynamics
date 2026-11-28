@@ -34,6 +34,7 @@ EXPECTED_VAULT_FOLDERS: List[str] = [
     "08_codegen_sil_and_godot_parity",
     "09_ter27_skidpad_deep_dive",
     "10_ter27_dil_and_sensor_realism",
+    "11_differentiable_casadi_and_tubes",
 ]
 
 
@@ -95,6 +96,8 @@ def test_sil_c99_accuracy_and_latency() -> None:
     assert float(lat_torque["p99_us"]) < 150.0
     assert float(lat_kappa["mean_us"]) < 50.0
     assert float(lat_kappa["p99_us"]) < 50.0
+    stm32_cpu = float(sil["stm32f405_168mhz_model"]["fpu_f32"]["cpu_load_pct"])
+    assert stm32_cpu < 8.0, f"STM32F405 FPU CPU load {stm32_cpu:.2f}% >= 8.0% gate"
     assert data["overall_pass"] is True
 
 
@@ -176,6 +179,7 @@ def test_pure_ascii_zero_emojis_in_curated_files() -> None:
         LAB_DIR / "analysis" / "benchmarks" / "run_ter26_extended_correlation.py",
         LAB_DIR / "analysis" / "visualization" / "plot_style.py",
         LAB_DIR / "analysis" / "validation_vault" / "build_validation_vault_index.py",
+        LAB_DIR / "analysis" / "validation_vault" / "generate_suite_11_differentiable.py",
         LAB_DIR / "tests" / "integration" / "test_validation_vault_and_physics.py",
         LAB_DIR / "tests" / "unit" / "test_skidpad_sub5_tv.py",
         LAB_DIR / "tests" / "unit" / "test_dil_sensor_realism.py",

@@ -1,4 +1,4 @@
-"""Pydantic v2 models for the Validation Vault catalog (suites 01..10)."""
+"""Pydantic v2 models for the Validation Vault catalog (suites 01..11)."""
 
 from __future__ import annotations
 

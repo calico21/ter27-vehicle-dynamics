@@ -97,6 +97,8 @@ def test_vault_10_metrics_and_four_300dpi_plots() -> None:
     assert abs(float(data["can_accel_latency_ms"]) - 125.0) <= 10.0
     assert data["skidpad"]["track_realism"]["hv_violations"] == 0
     assert data["trail_braking_slalom"]["track_realism"]["hv_violations"] == 0
+    assert float(data["trail_braking_slalom"]["track_realism"]["beta_rms_deg"]) < 1.0
+    assert float(data["trail_braking_slalom"]["track_realism"]["beta_max_deg"]) < 3.0
     assert float(data["braking_ramp_3d"]["peak_elevation_m"]) > 0.25
     assert int(data["braking_ramp_3d"]["nan_count"]) == 0
 

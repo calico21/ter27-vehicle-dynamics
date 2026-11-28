@@ -89,6 +89,12 @@ SUITE_META: Dict[str, Dict[str, str]] = {
         "subtitle": "SENSOR_IDEAL vs SENSOR_TRACK_REALISM (125 ms CAN accel latency, IMU noise/bias, EKF beta/Fz) across Skidpad, Autocross, and Trail-Braking/Slalom, plus CasADi sector deltas and 3D braking ramp elevation.",
         "tag": "DIL & SENSOR REALISM",
     },
+    "11_differentiable_casadi_and_tubes": {
+        "code": "11",
+        "title": "Differentiable CasADi 14-DOF, Adjoint Optimization & Stochastic Tube-MPC",
+        "subtitle": "C2-smooth 14-DOF CasADi C-Codegen model, empirical TeR26 track correlation (wz R=0.9872), exact reverse-mode adjoint gradients (< 1e-6) & 24-param co-optimization, 99.99% Stochastic Tube-MPC in grip drop (0 cones), and STM32F405 RT certification.",
+        "tag": "DIFFERENTIABLE & TUBES",
+    },
 }
 
 
@@ -128,6 +134,10 @@ def _human_title_from_filename(filename: str) -> str:
         "ekf": "EKF",
         "imu": "IMU",
         "lts": "LTS",
+        "diff14": "Diff14",
+        "sysid": "SysID",
+        "coopt": "Co-Opt",
+        "stm32": "STM32",
     }
     words = stem.split("_")
     out = [replacements.get(w.lower(), w.capitalize()) for w in words]
@@ -136,6 +146,7 @@ def _human_title_from_filename(filename: str) -> str:
 
 def _find_primary_metrics_json(folder: Path) -> Path | None:
     preferred = [
+        "differentiable_casadi_and_tubes_metrics.json",
         "dil_sensor_realism_metrics.json",
         "skidpad_deep_dive_metrics.json",
         "metrics.json",
@@ -267,6 +278,17 @@ def _extract_kpis(folder_name: str, data: Dict[str, Any]) -> List[Dict[str, str]
                 {"label": "Autocross Sector Delta", "value": f"{ax.get('total_delta_t_s', 0.0):+.3f} s", "status": "pass"},
                 {"label": "Slalom Beta RMS (Real)", "value": f"{sl.get('track_realism', {}).get('beta_rms_deg', 0.0):.2f} deg", "status": "pass"},
                 {"label": "3D Brake Ramp Peak +Y", "value": f"{rmp.get('peak_elevation_m', 0.0):.3f} m", "status": "pass"},
+            ]
+        elif folder_name == "11_differentiable_casadi_and_tubes":
+            t26 = data.get("ter26_empirical_correlation", {})
+            adj = data.get("ter27_adjoint_optimization", {})
+            tub = data.get("stochastic_tube_mpc", {})
+            kpis = [
+                {"label": "TeR26 Diff14 wz R", "value": f"{t26.get('wz_pearson_r', 0.0):.4f}", "status": "pass"},
+                {"label": "Adjoint vs FD Max Err", "value": f"{adj.get('worst_fd_rel_err', 0.0):.2e}", "status": "pass"},
+                {"label": "TeR27 Co-Opt Gain", "value": f"{adj.get('total_gain_ms', 0.0):+.2f} ms", "status": "pass"},
+                {"label": "Grip-Drop Tube Cones", "value": f"{tub.get('grip_drop_tube_cones', 0)} (min {tub.get('grip_drop_tube_min_clear_m', 0.0):.3f} m)", "status": "pass"},
+                {"label": "STM32F405 CPU Load", "value": f"{tub.get('stm32f405_cpu_load_pct', 0.0):.2f}% @ 200Hz", "status": "pass"},
             ]
     except Exception as exc:
         kpis.append({"label": "KPI Parse Note", "value": str(exc)[:60], "status": "warn"})
@@ -986,7 +1008,7 @@ td.num {{
   </section>
 
   <section class="summary-panel">
-    <h3>EXECUTIVE KPI MATRIX (SUITES 01 - 08)</h3>
+    <h3>EXECUTIVE KPI MATRIX (SUITES 01 - {s['n_suites']:02d})</h3>
     <table>
       <thead>
         <tr>
@@ -1079,7 +1101,7 @@ document.getElementById("filterInput").addEventListener("input", function(ev) {{
 
 
 def main() -> None:
-    print("[VaultIndex] Scanning outputs/validation_vault/01..08 ...", flush=True)
+    print("[VaultIndex] Scanning outputs/validation_vault/01..11 ...", flush=True)
     catalog = scan_vault()
 
     catalog_path = VAULT_ROOT / "master_metrics_catalog.json"

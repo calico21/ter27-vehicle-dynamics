@@ -48,6 +48,27 @@
         }
       }
     },
+    "/api/models/catalog": {
+      "get": {
+        "tags": [
+          "models"
+        ],
+        "summary": "Get Models Catalog",
+        "operationId": "get_models_catalog_api_models_catalog_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelsCatalogResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/sessions": {
       "get": {
         "tags": [
@@ -317,6 +338,88 @@
           }
         }
       }
+    },
+    "/api/trackside/analyze": {
+      "post": {
+        "tags": [
+          "trackside"
+        ],
+        "summary": "Post Trackside Analyze",
+        "operationId": "post_trackside_analyze_api_trackside_analyze_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TracksideAnalyzeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TracksideAnalyzeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/whatif/simulate": {
+      "post": {
+        "tags": [
+          "whatif"
+        ],
+        "summary": "Post Whatif Simulate",
+        "operationId": "post_whatif_simulate_api_whatif_simulate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WhatIfSimulateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhatIfSimulateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -363,6 +466,30 @@
             ],
             "title": "Sensor Profile",
             "description": "Optional sensor profile switch"
+          },
+          "vehicle_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vehicle Model",
+            "description": "Optional vehicle model switch (full_14dof, fast_3dof, differentiable_casadi_14dof)"
+          },
+          "suspension_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suspension Mode",
+            "description": "Optional orthogonal suspension mode (analytic_1d_lut, 3d_double_wishbone_lut, decoupled_heave_roll, standard_pushrod)"
           }
         },
         "type": "object",
@@ -782,6 +909,242 @@
         ],
         "title": "HealthResponse"
       },
+      "ModelSuspensionCombination": {
+        "properties": {
+          "combination_id": {
+            "type": "string",
+            "title": "Combination Id"
+          },
+          "vehicle_model_id": {
+            "type": "string",
+            "title": "Vehicle Model Id"
+          },
+          "vehicle_model_name": {
+            "type": "string",
+            "title": "Vehicle Model Name"
+          },
+          "suspension_mode_id": {
+            "type": "string",
+            "title": "Suspension Mode Id"
+          },
+          "suspension_mode_name": {
+            "type": "string",
+            "title": "Suspension Mode Name"
+          },
+          "dof": {
+            "type": "integer",
+            "title": "Dof"
+          },
+          "recommended_hz": {
+            "type": "integer",
+            "title": "Recommended Hz"
+          },
+          "differentiable": {
+            "type": "boolean",
+            "title": "Differentiable"
+          },
+          "supports_codegen": {
+            "type": "boolean",
+            "title": "Supports Codegen"
+          }
+        },
+        "type": "object",
+        "required": [
+          "combination_id",
+          "vehicle_model_id",
+          "vehicle_model_name",
+          "suspension_mode_id",
+          "suspension_mode_name",
+          "dof",
+          "recommended_hz",
+          "differentiable",
+          "supports_codegen"
+        ],
+        "title": "ModelSuspensionCombination"
+      },
+      "ModelsCatalogConstraints": {
+        "properties": {
+          "p_dc_min_kw": {
+            "type": "number",
+            "title": "P Dc Min Kw",
+            "default": -25.0
+          },
+          "p_dc_max_kw": {
+            "type": "number",
+            "title": "P Dc Max Kw",
+            "default": 80.0
+          },
+          "bspd_ev23_max_kw": {
+            "type": "number",
+            "title": "Bspd Ev23 Max Kw",
+            "default": 5.0
+          },
+          "min_clear_m": {
+            "type": "number",
+            "title": "Min Clear M",
+            "default": 0.15
+          },
+          "yaw_stability_dmz_dbeta_max": {
+            "type": "number",
+            "title": "Yaw Stability Dmz Dbeta Max",
+            "default": 0.0
+          },
+          "cold_test_oct_lambda_muy": {
+            "type": "number",
+            "title": "Cold Test Oct Lambda Muy",
+            "default": 0.47
+          },
+          "fsg_rubbered_lambda_muy": {
+            "type": "number",
+            "title": "Fsg Rubbered Lambda Muy",
+            "default": 0.57
+          },
+          "ter27_nominal_mass_kg": {
+            "type": "number",
+            "title": "Ter27 Nominal Mass Kg",
+            "default": 280.0
+          }
+        },
+        "type": "object",
+        "title": "ModelsCatalogConstraints"
+      },
+      "ModelsCatalogResponse": {
+        "properties": {
+          "vehicle_id": {
+            "type": "string",
+            "title": "Vehicle Id",
+            "default": "ter27_4wd"
+          },
+          "total_combinations": {
+            "type": "integer",
+            "title": "Total Combinations"
+          },
+          "vehicle_models": {
+            "items": {
+              "$ref": "#/components/schemas/VehicleModelSpec"
+            },
+            "type": "array",
+            "title": "Vehicle Models"
+          },
+          "suspension_modes": {
+            "items": {
+              "$ref": "#/components/schemas/SuspensionModeSpec"
+            },
+            "type": "array",
+            "title": "Suspension Modes"
+          },
+          "combinations": {
+            "items": {
+              "$ref": "#/components/schemas/ModelSuspensionCombination"
+            },
+            "type": "array",
+            "title": "Combinations"
+          },
+          "parameters": {
+            "$ref": "#/components/schemas/VehiclePhysicalParams"
+          },
+          "constraints": {
+            "$ref": "#/components/schemas/ModelsCatalogConstraints"
+          },
+          "setup_bounds": {
+            "additionalProperties": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Setup Bounds"
+          },
+          "grip_profiles": {
+            "items": {
+              "$ref": "#/components/schemas/GripProfileSpec"
+            },
+            "type": "array",
+            "title": "Grip Profiles"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total_combinations",
+          "vehicle_models",
+          "suspension_modes",
+          "combinations",
+          "parameters",
+          "constraints",
+          "setup_bounds",
+          "grip_profiles"
+        ],
+        "title": "ModelsCatalogResponse"
+      },
+      "PitBoxAdjustmentSchema": {
+        "properties": {
+          "rank": {
+            "type": "integer",
+            "title": "Rank"
+          },
+          "lever_id": {
+            "type": "string",
+            "title": "Lever Id"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "action_label": {
+            "type": "string",
+            "title": "Action Label"
+          },
+          "delta_steps": {
+            "type": "number",
+            "title": "Delta Steps"
+          },
+          "step_unit": {
+            "type": "string",
+            "title": "Step Unit"
+          },
+          "delta_value_si": {
+            "type": "number",
+            "title": "Delta Value Si"
+          },
+          "theta_param": {
+            "type": "string",
+            "title": "Theta Param"
+          },
+          "predicted_delta_ms": {
+            "type": "number",
+            "title": "Predicted Delta Ms"
+          },
+          "time_to_adjust_min": {
+            "type": "number",
+            "title": "Time To Adjust Min"
+          },
+          "is_pit_box_legal": {
+            "type": "boolean",
+            "title": "Is Pit Box Legal",
+            "default": true
+          },
+          "rationale": {
+            "type": "string",
+            "title": "Rationale",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "rank",
+          "lever_id",
+          "category",
+          "action_label",
+          "delta_steps",
+          "step_unit",
+          "delta_value_si",
+          "theta_param",
+          "predicted_delta_ms",
+          "time_to_adjust_min"
+        ],
+        "title": "PitBoxAdjustmentSchema"
+      },
       "SessionABComparisonResponse": {
         "properties": {
           "session": {
@@ -1103,6 +1466,27 @@
             "type": "string",
             "title": "Compound"
           },
+          "vehicle_model": {
+            "type": "string",
+            "enum": [
+              "full_14dof",
+              "fast_3dof",
+              "differentiable_casadi_14dof"
+            ],
+            "title": "Vehicle Model",
+            "default": "differentiable_casadi_14dof"
+          },
+          "suspension_mode": {
+            "type": "string",
+            "enum": [
+              "analytic_1d_lut",
+              "3d_double_wishbone_lut",
+              "decoupled_heave_roll",
+              "standard_pushrod"
+            ],
+            "title": "Suspension Mode",
+            "default": "3d_double_wishbone_lut"
+          },
           "optimize_setup": {
             "type": "boolean",
             "title": "Optimize Setup"
@@ -1237,6 +1621,29 @@
             "description": "Tire compound",
             "default": "R25B"
           },
+          "vehicle_model": {
+            "type": "string",
+            "enum": [
+              "full_14dof",
+              "fast_3dof",
+              "differentiable_casadi_14dof"
+            ],
+            "title": "Vehicle Model",
+            "description": "Selectable vehicle dynamics model",
+            "default": "differentiable_casadi_14dof"
+          },
+          "suspension_mode": {
+            "type": "string",
+            "enum": [
+              "analytic_1d_lut",
+              "3d_double_wishbone_lut",
+              "decoupled_heave_roll",
+              "standard_pushrod"
+            ],
+            "title": "Suspension Mode",
+            "description": "Orthogonal suspension kinematics architecture",
+            "default": "3d_double_wishbone_lut"
+          },
           "optimize_setup": {
             "type": "boolean",
             "title": "Optimize Setup",
@@ -1278,6 +1685,29 @@
         },
         "type": "object",
         "title": "SimulationRunRequest"
+      },
+      "SuspensionModeSpec": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description"
+        ],
+        "title": "SuspensionModeSpec"
       },
       "SuspensionOverview": {
         "properties": {
@@ -1369,6 +1799,143 @@
           "rear_left_hardpoints"
         ],
         "title": "SuspensionOverview"
+      },
+      "SysIdSummarySchema": {
+        "properties": {
+          "vehicle_id": {
+            "type": "string",
+            "title": "Vehicle Id"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "wall_time_s": {
+            "type": "number",
+            "title": "Wall Time S"
+          },
+          "within_30s_budget": {
+            "type": "boolean",
+            "title": "Within 30S Budget"
+          },
+          "n_iterations": {
+            "type": "integer",
+            "title": "N Iterations"
+          },
+          "n_windows": {
+            "type": "integer",
+            "title": "N Windows"
+          },
+          "n_total_steps": {
+            "type": "integer",
+            "title": "N Total Steps"
+          },
+          "dt_sysid_s": {
+            "type": "number",
+            "title": "Dt Sysid S"
+          },
+          "lambda_mu_hat": {
+            "type": "number",
+            "title": "Lambda Mu Hat"
+          },
+          "sigma_lambda_mu": {
+            "type": "number",
+            "title": "Sigma Lambda Mu"
+          },
+          "cl_a_hat": {
+            "type": "number",
+            "title": "Cl A Hat"
+          },
+          "cd_a_hat": {
+            "type": "number",
+            "title": "Cd A Hat"
+          },
+          "cl_over_cd": {
+            "type": "number",
+            "title": "Cl Over Cd"
+          },
+          "k_arb_f_hat": {
+            "type": "number",
+            "title": "K Arb F Hat"
+          },
+          "k_arb_r_hat": {
+            "type": "number",
+            "title": "K Arb R Hat"
+          },
+          "k_arb_ratio": {
+            "type": "number",
+            "title": "K Arb Ratio"
+          },
+          "k_spring_f_hat": {
+            "type": "number",
+            "title": "K Spring F Hat"
+          },
+          "k_spring_r_hat": {
+            "type": "number",
+            "title": "K Spring R Hat"
+          },
+          "k_spring_ratio": {
+            "type": "number",
+            "title": "K Spring Ratio"
+          },
+          "loss_initial": {
+            "type": "number",
+            "title": "Loss Initial"
+          },
+          "loss_final": {
+            "type": "number",
+            "title": "Loss Final"
+          },
+          "loss_reduction_pct": {
+            "type": "number",
+            "title": "Loss Reduction Pct"
+          },
+          "fit_metrics": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Fit Metrics"
+          },
+          "param_uncertainties": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Param Uncertainties"
+          },
+          "dT_dtheta": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Dt Dtheta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "vehicle_id",
+          "run_id",
+          "wall_time_s",
+          "within_30s_budget",
+          "n_iterations",
+          "n_windows",
+          "n_total_steps",
+          "dt_sysid_s",
+          "lambda_mu_hat",
+          "sigma_lambda_mu",
+          "cl_a_hat",
+          "cd_a_hat",
+          "cl_over_cd",
+          "k_arb_f_hat",
+          "k_arb_r_hat",
+          "k_arb_ratio",
+          "k_spring_f_hat",
+          "k_spring_r_hat",
+          "k_spring_ratio",
+          "loss_initial",
+          "loss_final",
+          "loss_reduction_pct"
+        ],
+        "title": "SysIdSummarySchema"
       },
       "TireCurvePoint": {
         "properties": {
@@ -1572,6 +2139,160 @@
           "friction_ellipse"
         ],
         "title": "TireEvaluateResponse"
+      },
+      "TracksideAnalyzeRequest": {
+        "properties": {
+          "log_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Log Path",
+            "description": "Path to CAN/CSV/ASC/BLF/Parquet telemetry log file (relative to repo root or absolute)."
+          },
+          "trace": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace",
+            "description": "Inline telemetry trace dictionary (vx_ms, ax_ms2, ay_ms2, wz_rads, steer_deg, throttle, brake)."
+          },
+          "vehicle_id": {
+            "type": "string",
+            "enum": [
+              "ter27_4wd",
+              "ter26_rwd"
+            ],
+            "title": "Vehicle Id",
+            "default": "ter27_4wd"
+          },
+          "event": {
+            "type": "string",
+            "enum": [
+              "skidpad",
+              "accel",
+              "autocross",
+              "endurance"
+            ],
+            "title": "Event",
+            "default": "autocross"
+          },
+          "fs_hz": {
+            "type": "number",
+            "title": "Fs Hz",
+            "default": 100.0
+          },
+          "apply_tire_temp_remap": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apply Tire Temp Remap"
+          },
+          "max_iters": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Max Iters",
+            "default": 6
+          }
+        },
+        "type": "object",
+        "title": "TracksideAnalyzeRequest"
+      },
+      "TracksideAnalyzeResponse": {
+        "properties": {
+          "vehicle_id": {
+            "type": "string",
+            "title": "Vehicle Id"
+          },
+          "event": {
+            "type": "string",
+            "title": "Event"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "total_pipeline_time_s": {
+            "type": "number",
+            "title": "Total Pipeline Time S"
+          },
+          "within_30s_budget": {
+            "type": "boolean",
+            "title": "Within 30S Budget"
+          },
+          "within_15min_budget": {
+            "type": "boolean",
+            "title": "Within 15Min Budget"
+          },
+          "total_pit_time_min": {
+            "type": "number",
+            "title": "Total Pit Time Min"
+          },
+          "combined_delta_ms": {
+            "type": "number",
+            "title": "Combined Delta Ms"
+          },
+          "ingested_summary": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Ingested Summary"
+          },
+          "sysid": {
+            "$ref": "#/components/schemas/SysIdSummarySchema"
+          },
+          "top_3_adjustments": {
+            "items": {
+              "$ref": "#/components/schemas/PitBoxAdjustmentSchema"
+            },
+            "type": "array",
+            "title": "Top 3 Adjustments"
+          },
+          "fsae_ev_invariants": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Fsae Ev Invariants"
+          },
+          "excluded_hardware_swaps": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Excluded Hardware Swaps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "vehicle_id",
+          "event",
+          "run_id",
+          "total_pipeline_time_s",
+          "within_30s_budget",
+          "within_15min_budget",
+          "total_pit_time_min",
+          "combined_delta_ms",
+          "ingested_summary",
+          "sysid",
+          "top_3_adjustments",
+          "fsae_ev_invariants"
+        ],
+        "title": "TracksideAnalyzeResponse"
       },
       "TrajectorySample": {
         "properties": {
@@ -1935,6 +2656,49 @@
         ],
         "title": "VaultSuite"
       },
+      "VehicleModelSpec": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "dof": {
+            "type": "integer",
+            "title": "Dof"
+          },
+          "recommended_hz": {
+            "type": "integer",
+            "title": "Recommended Hz"
+          },
+          "differentiable": {
+            "type": "boolean",
+            "title": "Differentiable"
+          },
+          "supports_codegen": {
+            "type": "boolean",
+            "title": "Supports Codegen"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "dof",
+          "recommended_hz",
+          "differentiable",
+          "supports_codegen",
+          "description"
+        ],
+        "title": "VehicleModelSpec"
+      },
       "VehicleOverviewResponse": {
         "properties": {
           "vehicle_id": {
@@ -1974,6 +2738,30 @@
           },
           "validation_status": {
             "$ref": "#/components/schemas/ValidationStatusSummary"
+          },
+          "available_vehicle_models": {
+            "items": {
+              "$ref": "#/components/schemas/VehicleModelSpec"
+            },
+            "type": "array",
+            "title": "Available Vehicle Models"
+          },
+          "available_suspension_modes": {
+            "items": {
+              "$ref": "#/components/schemas/SuspensionModeSpec"
+            },
+            "type": "array",
+            "title": "Available Suspension Modes"
+          },
+          "active_vehicle_model": {
+            "type": "string",
+            "title": "Active Vehicle Model",
+            "default": "full_14dof"
+          },
+          "active_suspension_mode": {
+            "type": "string",
+            "title": "Active Suspension Mode",
+            "default": "3d_double_wishbone_lut"
           }
         },
         "type": "object",
@@ -2106,6 +2894,206 @@
           "battery_nominal_v"
         ],
         "title": "VehiclePhysicalParams"
+      },
+      "WhatIfSimulateRequest": {
+        "properties": {
+          "event": {
+            "type": "string",
+            "enum": [
+              "skidpad",
+              "accel",
+              "autocross",
+              "endurance"
+            ],
+            "title": "Event",
+            "default": "autocross"
+          },
+          "mass_kg": {
+            "type": "number",
+            "maximum": 340.0,
+            "minimum": 250.0,
+            "title": "Mass Kg",
+            "default": 280.0
+          },
+          "grip_lambda_mu": {
+            "type": "number",
+            "maximum": 1.2,
+            "minimum": 0.3,
+            "title": "Grip Lambda Mu",
+            "default": 0.57
+          },
+          "tire_temp_c": {
+            "type": "number",
+            "maximum": 120.0,
+            "minimum": 15.0,
+            "title": "Tire Temp C",
+            "default": 75.0
+          },
+          "aero_cla_m2": {
+            "type": "number",
+            "maximum": 7.0,
+            "minimum": 0.0,
+            "title": "Aero Cla M2",
+            "default": 4.68
+          },
+          "suspension_mode": {
+            "type": "string",
+            "enum": [
+              "analytic_1d_lut",
+              "3d_double_wishbone_lut",
+              "decoupled_heave_roll",
+              "standard_pushrod"
+            ],
+            "title": "Suspension Mode",
+            "default": "3d_double_wishbone_lut"
+          },
+          "model_id": {
+            "type": "string",
+            "enum": [
+              "full_14dof",
+              "fast_3dof",
+              "differentiable_casadi_14dof"
+            ],
+            "title": "Model Id",
+            "default": "differentiable_casadi_14dof"
+          },
+          "tube_mpc_enabled": {
+            "type": "boolean",
+            "title": "Tube Mpc Enabled",
+            "default": true
+          },
+          "fault_mode": {
+            "type": "string",
+            "enum": [
+              "nominal",
+              "sensor_delay_noise",
+              "grip_drop",
+              "3wd_limp_braking",
+              "3wd_limp_slalom"
+            ],
+            "title": "Fault Mode",
+            "default": "nominal"
+          },
+          "use_cached_matrix": {
+            "type": "boolean",
+            "title": "Use Cached Matrix",
+            "default": true
+          }
+        },
+        "type": "object",
+        "title": "WhatIfSimulateRequest"
+      },
+      "WhatIfSimulateResponse": {
+        "properties": {
+          "vehicle_id": {
+            "type": "string",
+            "title": "Vehicle Id",
+            "default": "ter27_4wd"
+          },
+          "event": {
+            "type": "string",
+            "title": "Event"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "cached_matrix",
+              "casadi_14dof_adjoint_eval"
+            ],
+            "title": "Source"
+          },
+          "request_params": {
+            "$ref": "#/components/schemas/WhatIfSimulateRequest"
+          },
+          "predicted_time_s": {
+            "type": "number",
+            "title": "Predicted Time S"
+          },
+          "baseline_280kg_time_s": {
+            "type": "number",
+            "title": "Baseline 280Kg Time S"
+          },
+          "delta_vs_baseline_ms": {
+            "type": "number",
+            "title": "Delta Vs Baseline Ms"
+          },
+          "max_ay_g": {
+            "type": "number",
+            "title": "Max Ay G"
+          },
+          "max_ax_g": {
+            "type": "number",
+            "title": "Max Ax G"
+          },
+          "max_vx_mps": {
+            "type": "number",
+            "title": "Max Vx Mps"
+          },
+          "p_dc_min_kw": {
+            "type": "number",
+            "title": "P Dc Min Kw"
+          },
+          "p_dc_max_kw": {
+            "type": "number",
+            "title": "P Dc Max Kw"
+          },
+          "min_clear_m": {
+            "type": "number",
+            "title": "Min Clear M"
+          },
+          "cones_hit": {
+            "type": "integer",
+            "title": "Cones Hit"
+          },
+          "bspd_violations": {
+            "type": "integer",
+            "title": "Bspd Violations"
+          },
+          "dmz_dbeta_nm_rad": {
+            "type": "number",
+            "title": "Dmz Dbeta Nm Rad"
+          },
+          "yaw_stable": {
+            "type": "boolean",
+            "title": "Yaw Stable"
+          },
+          "invariants_passed": {
+            "type": "boolean",
+            "title": "Invariants Passed"
+          },
+          "matched_scenario_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matched Scenario Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event",
+          "source",
+          "request_params",
+          "predicted_time_s",
+          "baseline_280kg_time_s",
+          "delta_vs_baseline_ms",
+          "max_ay_g",
+          "max_ax_g",
+          "max_vx_mps",
+          "p_dc_min_kw",
+          "p_dc_max_kw",
+          "min_clear_m",
+          "cones_hit",
+          "bspd_violations",
+          "dmz_dbeta_nm_rad",
+          "yaw_stable",
+          "invariants_passed"
+        ],
+        "title": "WhatIfSimulateResponse"
       }
     }
   }

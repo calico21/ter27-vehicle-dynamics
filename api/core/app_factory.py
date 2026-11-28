@@ -10,13 +10,16 @@ from api.core.config import settings
 from api.core.lifecycle import lifespan
 from api.routers import (
     health,
+    models_catalog,
     sessions,
     setups,
     simulation,
     telemetry_ws,
     tires,
+    trackside,
     vault,
     vehicle,
+    whatif,
 )
 
 
@@ -39,10 +42,13 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(telemetry_ws.router)
     app.include_router(vehicle.router)
+    app.include_router(models_catalog.router)
     app.include_router(sessions.router)
     app.include_router(tires.router)
     app.include_router(setups.router)
     app.include_router(simulation.router)
     app.include_router(vault.router)
+    app.include_router(trackside.router)
+    app.include_router(whatif.router)
 
     return app

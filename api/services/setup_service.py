@@ -26,12 +26,23 @@ from api.models.setups import (
 from api.models.vehicle import (
     CornerHardpoints3D,
     GripProfileSpec,
+    ModelSuspensionCombination,
+    ModelsCatalogConstraints,
+    ModelsCatalogResponse,
+    SuspensionModeSpec,
     SuspensionOverview,
     ValidationStatusSummary,
+    VehicleModelSpec,
     VehicleOverviewResponse,
     VehiclePhysicalParams,
 )
 from api.services.udp_bridge import telemetry_bridge
+from vd_correlation_lab.models.registry import (
+    list_suspension_modes,
+    list_vehicle_models,
+    normalize_model_id,
+    normalize_suspension_mode,
+)
 from vd_correlation_lab.models.vehicle_14dof.ter27_physics import (
     COLD_TEST_OCT_LAMBDA_MUY_TARGET,
     FSG_RUBBERED_LAMBDA_MUY_TARGET,
@@ -168,6 +179,18 @@ def build_vehicle_overview() -> VehicleOverviewResponse:
         grip_profiles=grip_specs,
         setup_bounds=bounds_out,
         validation_status=val_status,
+        available_vehicle_models=[
+            VehicleModelSpec.model_validate(m) for m in list_vehicle_models()
+        ],
+        available_suspension_modes=[
+            SuspensionModeSpec.model_validate(s) for s in list_suspension_modes()
+        ],
+        active_vehicle_model="full_14dof",
+        active_suspension_mode=(
+            "3d_double_wishbone_lut"
+            if bool(dwk.get("use_3d_kinematics", True))
+            else "analytic_1d_lut"
+        ),
     )
 
 
@@ -265,6 +288,10 @@ def apply_trackside_setup(req: ApplySetupRequest) -> ApplySetupResponse:
         cmd_payload["preset"] = req.preset
     if req.setup:
         cmd_payload["setup"] = req.setup
+    if req.vehicle_model:
+        cmd_payload["vehicle_model"] = normalize_model_id(req.vehicle_model)
+    if req.suspension_mode:
+        cmd_payload["suspension_mode"] = normalize_suspension_mode(req.suspension_mode)
     if not req.preset and not req.setup:
         cmd_payload["preset"] = "default"
 
@@ -286,4 +313,36 @@ def apply_trackside_setup(req: ApplySetupRequest) -> ApplySetupResponse:
         target_port=UDP_COMMAND_PORT,
         command_payload=cmd_payload,
         message=msg,
+    )
+
+
+def build_models_catalog() -> ModelsCatalogResponse:
+    """Return full catalog of 3 vehicle models x 4 suspension modes, parameters, and constraints."""
+    overview = build_vehicle_overview()
+    combinations: List[ModelSuspensionCombination] = []
+    for vm in overview.available_vehicle_models:
+        for sm in overview.available_suspension_modes:
+            combinations.append(
+                ModelSuspensionCombination(
+                    combination_id=f"{vm.id}__{sm.id}",
+                    vehicle_model_id=vm.id,
+                    vehicle_model_name=vm.name,
+                    suspension_mode_id=sm.id,
+                    suspension_mode_name=sm.name,
+                    dof=vm.dof,
+                    recommended_hz=vm.recommended_hz,
+                    differentiable=vm.differentiable,
+                    supports_codegen=vm.supports_codegen,
+                )
+            )
+    return ModelsCatalogResponse(
+        vehicle_id=overview.vehicle_id,
+        total_combinations=len(combinations),
+        vehicle_models=overview.available_vehicle_models,
+        suspension_modes=overview.available_suspension_modes,
+        combinations=combinations,
+        parameters=overview.params,
+        constraints=ModelsCatalogConstraints(),
+        setup_bounds=overview.setup_bounds,
+        grip_profiles=overview.grip_profiles,
     )

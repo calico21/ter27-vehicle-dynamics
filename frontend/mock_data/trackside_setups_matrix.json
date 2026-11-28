@@ -30,16 +30,16 @@
         "description": "CasADi-IPOPT co-optimized Skidpad setup on FSG_RUBBERED (lambda_muy=0.57)",
         "spring_rate_front_n_m": 35000.0,
         "spring_rate_rear_n_m": 48000.0,
-        "arb_front_nm_rad": 7469.9,
-        "arb_rear_nm_rad": 2294.6,
-        "lltd": 0.5007,
-        "camber_front_deg": -0.816,
+        "arb_front_nm_rad": 7423.3,
+        "arb_rear_nm_rad": 2341.2,
+        "lltd": 0.4999,
+        "camber_front_deg": -0.823,
         "camber_rear_deg": -1.316,
         "toe_front_deg": 0.5,
         "toe_rear_deg": 0.6,
         "ride_height_front_m": 0.03136,
         "ride_height_rear_m": 0.03864,
-        "rake_mm": 7.282,
+        "rake_mm": 7.276,
         "brake_bias": 0.6159,
         "tire_pressure_front_bar": 0.72,
         "tire_pressure_rear_bar": 0.72,
@@ -50,16 +50,16 @@
       "deltas_vs_base": {
         "spring_rate_front_n_m": 0.0,
         "spring_rate_rear_n_m": 0.0,
-        "arb_front_nm_rad": 2969.9,
-        "arb_rear_nm_rad": -3205.4,
-        "lltd": 0.0533,
-        "camber_front_deg": 1.184,
+        "arb_front_nm_rad": 2923.3,
+        "arb_rear_nm_rad": -3158.8,
+        "lltd": 0.0525,
+        "camber_front_deg": 1.177,
         "camber_rear_deg": 0.184,
         "toe_front_deg": 0.5,
         "toe_rear_deg": 0.6,
         "ride_height_front_m": -0.00364,
         "ride_height_rear_m": 0.00364,
-        "rake_mm": 7.282,
+        "rake_mm": 7.276,
         "brake_bias": 0.0359,
         "power_limit_kw": 0.0
       },
@@ -69,7 +69,7 @@
         "lambda_muy": 0.57,
         "base_time_s": 4.6241,
         "optimal_time_s": 4.6072,
-        "delta_time_s": -0.017
+        "delta_time_s": -0.0169
       }
     },
     {
@@ -86,9 +86,9 @@
         "camber_rear_deg": -0.201,
         "toe_front_deg": 0.01,
         "toe_rear_deg": 0.021,
-        "ride_height_front_m": 0.03464,
-        "ride_height_rear_m": 0.03536,
-        "rake_mm": 0.719,
+        "ride_height_front_m": 0.03473,
+        "ride_height_rear_m": 0.03527,
+        "rake_mm": 0.539,
         "brake_bias": 0.5893,
         "tire_pressure_front_bar": 0.72,
         "tire_pressure_rear_bar": 0.72,
@@ -106,9 +106,9 @@
         "camber_rear_deg": 1.299,
         "toe_front_deg": 0.01,
         "toe_rear_deg": 0.021,
-        "ride_height_front_m": -0.00036,
-        "ride_height_rear_m": 0.00036,
-        "rake_mm": 0.719,
+        "ride_height_front_m": -0.00027,
+        "ride_height_rear_m": 0.00027,
+        "rake_mm": 0.539,
         "brake_bias": 0.0093,
         "power_limit_kw": 0.0
       },
@@ -116,9 +116,9 @@
         "grip_profile": "FSG_RUBBERED",
         "compound": "R25B",
         "lambda_muy": 0.57,
-        "base_time_s": 3.5223,
-        "optimal_time_s": 3.5216,
-        "delta_time_s": -0.0007
+        "base_time_s": 3.5695,
+        "optimal_time_s": 3.4545,
+        "delta_time_s": -0.115
       }
     },
     {
@@ -128,16 +128,16 @@
         "description": "CasADi-IPOPT co-optimized Autocross setup on FSG_RUBBERED (lambda_muy=0.57)",
         "spring_rate_front_n_m": 35000.0,
         "spring_rate_rear_n_m": 48000.0,
-        "arb_front_nm_rad": 4238.8,
-        "arb_rear_nm_rad": 5807.1,
-        "lltd": 0.4425,
-        "camber_front_deg": -0.645,
-        "camber_rear_deg": -1.093,
+        "arb_front_nm_rad": 4270.8,
+        "arb_rear_nm_rad": 5769.3,
+        "lltd": 0.4431,
+        "camber_front_deg": -0.646,
+        "camber_rear_deg": -1.094,
         "toe_front_deg": 0.5,
         "toe_rear_deg": 0.6,
         "ride_height_front_m": 0.03189,
         "ride_height_rear_m": 0.03811,
-        "rake_mm": 6.223,
+        "rake_mm": 6.213,
         "brake_bias": 0.78,
         "tire_pressure_front_bar": 0.72,
         "tire_pressure_rear_bar": 0.72,
@@ -148,16 +148,16 @@
       "deltas_vs_base": {
         "spring_rate_front_n_m": 0.0,
         "spring_rate_rear_n_m": 0.0,
-        "arb_front_nm_rad": -261.2,
-        "arb_rear_nm_rad": 307.1,
-        "lltd": -0.0049,
-        "camber_front_deg": 1.355,
-        "camber_rear_deg": 0.407,
+        "arb_front_nm_rad": -229.2,
+        "arb_rear_nm_rad": 269.3,
+        "lltd": -0.0043,
+        "camber_front_deg": 1.354,
+        "camber_rear_deg": 0.406,
         "toe_front_deg": 0.5,
         "toe_rear_deg": 0.6,
         "ride_height_front_m": -0.00311,
         "ride_height_rear_m": 0.00311,
-        "rake_mm": 6.223,
+        "rake_mm": 6.213,
         "brake_bias": 0.2,
         "power_limit_kw": 0.0
       },
@@ -166,8 +166,8 @@
         "compound": "R25B",
         "lambda_muy": 0.57,
         "base_time_s": 67.5635,
-        "optimal_time_s": 67.1057,
-        "delta_time_s": -0.4578
+        "optimal_time_s": 67.0503,
+        "delta_time_s": -0.5132
       }
     },
     {
@@ -227,18 +227,18 @@
       "metric_label": "Periodic Circle Time (s)",
       "base_time_s": 4.6241,
       "optimal_time_s": 4.6072,
-      "delta_time_s": -0.017,
-      "delta_pct": -0.367,
+      "delta_time_s": -0.0169,
+      "delta_pct": -0.365,
       "preset_file": "src/mirena_sim/Scenes/Vehicle/Config/vehicles/ter27_4wd/setups/optimal_skidpad.json"
     },
     {
       "event": "accel",
       "event_name": "Acceleration 75 m",
       "metric_label": "0-75 m Time (s)",
-      "base_time_s": 3.5223,
-      "optimal_time_s": 3.5216,
-      "delta_time_s": -0.0007,
-      "delta_pct": -0.019,
+      "base_time_s": 3.5695,
+      "optimal_time_s": 3.4545,
+      "delta_time_s": -0.115,
+      "delta_pct": -3.221,
       "preset_file": "src/mirena_sim/Scenes/Vehicle/Config/vehicles/ter27_4wd/setups/optimal_accel.json"
     },
     {
@@ -246,9 +246,9 @@
       "event_name": "Autocross",
       "metric_label": "FSG 2023 Lap Time (s)",
       "base_time_s": 67.5635,
-      "optimal_time_s": 67.1057,
-      "delta_time_s": -0.4578,
-      "delta_pct": -0.678,
+      "optimal_time_s": 67.0503,
+      "delta_time_s": -0.5132,
+      "delta_pct": -0.76,
       "preset_file": "src/mirena_sim/Scenes/Vehicle/Config/vehicles/ter27_4wd/setups/optimal_autocross.json"
     },
     {
@@ -264,17 +264,17 @@
   ],
   "fs_points_base": {
     "skidpad": 75.0,
-    "accel": 58.42,
+    "accel": 55.8,
     "autocross": 18.28,
     "endurance": 110.95,
-    "total_dynamic_pts": 262.65
+    "total_dynamic_pts": 260.03
   },
   "fs_points_optimal": {
     "skidpad": 75.0,
-    "accel": 58.46,
-    "autocross": 20.98,
+    "accel": 62.3,
+    "autocross": 21.31,
     "endurance": 111.49,
-    "total_dynamic_pts": 265.93
+    "total_dynamic_pts": 270.1
   },
-  "delta_total_pts": 3.28
+  "delta_total_pts": 10.07
 }

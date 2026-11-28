@@ -1,11 +1,11 @@
 {
-  "generated_utc": "2026-11-27T14:32:53Z",
+  "generated_utc": "2026-11-28T10:42:06Z",
   "standard": "ISO 8855 (+X fwd, +Y left, +Z up) | MoTeC i2 Dark Engineering | 300 DPI",
   "vault_root": "outputs/validation_vault",
-  "n_suites": 10,
-  "total_pngs": 67,
-  "total_jsons": 15,
-  "total_png_size_mb": 42.81,
+  "n_suites": 11,
+  "total_pngs": 72,
+  "total_jsons": 16,
+  "total_png_size_mb": 46.66,
   "suites": [
     {
       "code": "01",
@@ -685,7 +685,7 @@
           "filename": "trackside_setup_event_comparison.png",
           "rel_path": "07_design_tradeoffs_and_fs_points/trackside_setup_event_comparison.png",
           "title": "Trackside Setup Event Comparison",
-          "size_kb": 561.4,
+          "size_kb": 535.9,
           "width_px": 5059,
           "height_px": 3058
         },
@@ -719,12 +719,12 @@
         },
         {
           "label": "Host C99 Latency (p50)",
-          "value": "3.63 us",
+          "value": "1.97 us",
           "status": "pass"
         },
         {
           "label": "STM32F405 CPU Load",
-          "value": "6.12% @ 200Hz",
+          "value": "6.82% @ 200Hz",
           "status": "pass"
         },
         {
@@ -751,7 +751,7 @@
           "filename": "sil_c99_accuracy_and_latency.png",
           "rel_path": "08_codegen_sil_and_godot_parity/sil_c99_accuracy_and_latency.png",
           "title": "SIL C99 Accuracy And Latency",
-          "size_kb": 596.8,
+          "size_kb": 608.4,
           "width_px": 4981,
           "height_px": 1658
         }
@@ -778,22 +778,22 @@
         },
         {
           "label": "FSG R20 MAX_ATK V2",
-          "value": "4.703 s",
+          "value": "4.723 s",
           "status": "pass"
         },
         {
           "label": "FSG R25B MAX_ATK V2",
-          "value": "4.683 s",
+          "value": "4.671 s",
           "status": "pass"
         },
         {
           "label": "COLD_18C Min Clear",
-          "value": "0.393 m",
+          "value": "0.396 m",
           "status": "pass"
         },
         {
           "label": "Godot vs Py Circle Err",
-          "value": "12.48%",
+          "value": "12.01%",
           "status": "pass"
         }
       ],
@@ -802,7 +802,7 @@
           "filename": "01_skidpad_time_waterfall_and_benchmark.png",
           "rel_path": "09_ter27_skidpad_deep_dive/01_skidpad_time_waterfall_and_benchmark.png",
           "title": "01 Skidpad Time Waterfall And Benchmark",
-          "size_kb": 414.1,
+          "size_kb": 410.9,
           "width_px": 4764,
           "height_px": 2650
         },
@@ -810,7 +810,7 @@
           "filename": "02_skidpad_trajectory_and_cone_clearance.png",
           "rel_path": "09_ter27_skidpad_deep_dive/02_skidpad_trajectory_and_cone_clearance.png",
           "title": "02 Skidpad Trajectory And Cone Clearance",
-          "size_kb": 1070.3,
+          "size_kb": 1089.7,
           "width_px": 4822,
           "height_px": 2883
         },
@@ -818,7 +818,7 @@
           "filename": "03_vehicle_kinematics_beta_yaw_lataccel.png",
           "rel_path": "09_ter27_skidpad_deep_dive/03_vehicle_kinematics_beta_yaw_lataccel.png",
           "title": "03 Vehicle Kinematics Beta Yaw Lataccel",
-          "size_kb": 587.0,
+          "size_kb": 637.7,
           "width_px": 4617,
           "height_px": 3174
         },
@@ -826,7 +826,7 @@
           "filename": "04_4wheel_friction_circles_and_utilization.png",
           "rel_path": "09_ter27_skidpad_deep_dive/04_4wheel_friction_circles_and_utilization.png",
           "title": "04 4wheel Friction Circles And Utilization",
-          "size_kb": 657.5,
+          "size_kb": 659.9,
           "width_px": 4764,
           "height_px": 2883
         },
@@ -834,7 +834,7 @@
           "filename": "05_4wheel_slip_angles_and_long_slip.png",
           "rel_path": "09_ter27_skidpad_deep_dive/05_4wheel_slip_angles_and_long_slip.png",
           "title": "05 4wheel Slip Angles And Long Slip",
-          "size_kb": 512.6,
+          "size_kb": 568.9,
           "width_px": 4705,
           "height_px": 2766
         },
@@ -842,7 +842,7 @@
           "filename": "06_4wheel_vertical_loads_and_weight_transfer.png",
           "rel_path": "09_ter27_skidpad_deep_dive/06_4wheel_vertical_loads_and_weight_transfer.png",
           "title": "06 4wheel Vertical Loads And Weight Transfer",
-          "size_kb": 514.7,
+          "size_kb": 544.4,
           "width_px": 4617,
           "height_px": 2941
         },
@@ -850,7 +850,7 @@
           "filename": "07_suspension_3d_camber_toe_ackermann.png",
           "rel_path": "09_ter27_skidpad_deep_dive/07_suspension_3d_camber_toe_ackermann.png",
           "title": "07 Suspension 3D Camber Toe Ackermann",
-          "size_kb": 567.9,
+          "size_kb": 599.5,
           "width_px": 4705,
           "height_px": 2825
         },
@@ -858,7 +858,7 @@
           "filename": "08_controller_mz_decomposition_and_tracking.png",
           "rel_path": "09_ter27_skidpad_deep_dive/08_controller_mz_decomposition_and_tracking.png",
           "title": "08 Controller Mz Decomposition And Tracking",
-          "size_kb": 527.5,
+          "size_kb": 544.8,
           "width_px": 4617,
           "height_px": 2941
         },
@@ -866,7 +866,7 @@
           "filename": "09_4wheel_torques_power_and_torque_fight.png",
           "rel_path": "09_ter27_skidpad_deep_dive/09_4wheel_torques_power_and_torque_fight.png",
           "title": "09 4wheel Torques Power And Torque Fight",
-          "size_kb": 623.8,
+          "size_kb": 651.5,
           "width_px": 4764,
           "height_px": 2883
         },
@@ -874,7 +874,7 @@
           "filename": "10_figure8_crossover_micro_analysis.png",
           "rel_path": "09_ter27_skidpad_deep_dive/10_figure8_crossover_micro_analysis.png",
           "title": "10 Figure8 Crossover Micro Analysis",
-          "size_kb": 713.5,
+          "size_kb": 704.0,
           "width_px": 4617,
           "height_px": 3174
         },
@@ -882,7 +882,7 @@
           "filename": "11_skidpad_sensitivity_setup_and_grip_sweep.png",
           "rel_path": "09_ter27_skidpad_deep_dive/11_skidpad_sensitivity_setup_and_grip_sweep.png",
           "title": "11 Skidpad Sensitivity Setup And Grip Sweep",
-          "size_kb": 680.4,
+          "size_kb": 680.6,
           "width_px": 4823,
           "height_px": 2008
         },
@@ -890,7 +890,7 @@
           "filename": "12_python_vs_godot_skidpad_parity.png",
           "rel_path": "09_ter27_skidpad_deep_dive/12_python_vs_godot_skidpad_parity.png",
           "title": "12 Python Vs Godot Skidpad Parity",
-          "size_kb": 750.6,
+          "size_kb": 803.5,
           "width_px": 4705,
           "height_px": 2825
         }
@@ -916,7 +916,7 @@
         },
         {
           "label": "Skidpad Real vs Ideal",
-          "value": "-0.068 s",
+          "value": "-0.163 s",
           "status": "pass"
         },
         {
@@ -926,7 +926,7 @@
         },
         {
           "label": "Slalom Beta RMS (Real)",
-          "value": "1.01 deg",
+          "value": "0.90 deg",
           "status": "pass"
         },
         {
@@ -948,7 +948,7 @@
           "filename": "fig02_skidpad_and_slalom_sensor_stress.png",
           "rel_path": "10_ter27_dil_and_sensor_realism/fig02_skidpad_and_slalom_sensor_stress.png",
           "title": "Fig02 Skidpad And Slalom Sensor Stress",
-          "size_kb": 846.4,
+          "size_kb": 882.4,
           "width_px": 4051,
           "height_px": 2475
         },
@@ -967,6 +967,88 @@
           "size_kb": 576.7,
           "width_px": 4051,
           "height_px": 1658
+        }
+      ]
+    },
+    {
+      "code": "11",
+      "folder": "11_differentiable_casadi_and_tubes",
+      "title": "Differentiable CasADi 14-DOF, Adjoint Optimization & Stochastic Tube-MPC",
+      "subtitle": "C2-smooth 14-DOF CasADi C-Codegen model, empirical TeR26 track correlation (wz R=0.9872), exact reverse-mode adjoint gradients (< 1e-6) & 24-param co-optimization, 99.99% Stochastic Tube-MPC in grip drop (0 cones), and STM32F405 RT certification.",
+      "tag": "DIFFERENTIABLE & TUBES",
+      "primary_metrics_json": "11_differentiable_casadi_and_tubes/differentiable_casadi_and_tubes_metrics.json",
+      "json_files": [
+        "11_differentiable_casadi_and_tubes/differentiable_casadi_and_tubes_metrics.json"
+      ],
+      "csv_files": [],
+      "n_figures": 5,
+      "kpis": [
+        {
+          "label": "TeR26 Diff14 wz R",
+          "value": "0.9872",
+          "status": "pass"
+        },
+        {
+          "label": "Adjoint vs FD Max Err",
+          "value": "1.02e-07",
+          "status": "pass"
+        },
+        {
+          "label": "TeR27 Co-Opt Gain",
+          "value": "+182.50 ms",
+          "status": "pass"
+        },
+        {
+          "label": "Grip-Drop Tube Cones",
+          "value": "0 (min 0.499 m)",
+          "status": "pass"
+        },
+        {
+          "label": "STM32F405 CPU Load",
+          "value": "6.97% @ 200Hz",
+          "status": "pass"
+        }
+      ],
+      "figures": [
+        {
+          "filename": "fig01_ter26_diff14_vs_telemetry.png",
+          "rel_path": "11_differentiable_casadi_and_tubes/fig01_ter26_diff14_vs_telemetry.png",
+          "title": "Fig01 TeR26 Diff14 Vs Telemetry",
+          "size_kb": 1428.7,
+          "width_px": 4617,
+          "height_px": 3145
+        },
+        {
+          "filename": "fig02_adjoint_gradient_verification_and_sysid.png",
+          "rel_path": "11_differentiable_casadi_and_tubes/fig02_adjoint_gradient_verification_and_sysid.png",
+          "title": "Fig02 Adjoint Gradient Verification And SysID",
+          "size_kb": 464.5,
+          "width_px": 4941,
+          "height_px": 1716
+        },
+        {
+          "filename": "fig03_ter27_adjoint_sensitivity_and_coopt.png",
+          "rel_path": "11_differentiable_casadi_and_tubes/fig03_ter27_adjoint_sensitivity_and_coopt.png",
+          "title": "Fig03 TeR27 Adjoint Sensitivity And Co-Opt",
+          "size_kb": 513.9,
+          "width_px": 4764,
+          "height_px": 1950
+        },
+        {
+          "filename": "fig04_stochastic_tube_grip_drop_and_risk.png",
+          "rel_path": "11_differentiable_casadi_and_tubes/fig04_stochastic_tube_grip_drop_and_risk.png",
+          "title": "Fig04 Stochastic Tube Grip Drop And Risk",
+          "size_kb": 757.5,
+          "width_px": 4617,
+          "height_px": 2766
+        },
+        {
+          "filename": "fig05_three_model_comparison_matrix.png",
+          "rel_path": "11_differentiable_casadi_and_tubes/fig05_three_model_comparison_matrix.png",
+          "title": "Fig05 Three Model Comparison Matrix",
+          "size_kb": 485.0,
+          "width_px": 4910,
+          "height_px": 1775
         }
       ]
     }
